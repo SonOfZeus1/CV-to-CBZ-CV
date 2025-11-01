@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>CV de {{ name }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1, h2 {
+            color: #2c3e50;
+            border-bottom: 2px solid #2c3e50;
+            padding-bottom: 5px;
+        }
+        .contact-info {
+            margin-bottom: 20px;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        ul {
+            padding-left: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>{{ data.name or 'Nom non trouvé' }}</h1>
+            <div class="contact-info">
+                {% if data.email %}
+                    <p><strong>Email:</strong> {{ data.email }}</p>
+                {% endif %}
+                {% if data.mobile_number %}
+                    <p><strong>Téléphone:</strong> {{ data.mobile_number }}</p>
+                {% endif %}
+            </div>
+        </header>
+
+        <div class="section">
+            <h2>Compétences</h2>
+            {% if data.skills %}
+                <ul>
+                    {% for skill in data.skills %}
+                        <li>{{ skill }}</li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p>Non spécifiées.</p>
+            {% endif %}
+        </div>
+
+        <div class="section">
+            <h2>Expérience Professionnelle</h2>
+            {% if data.experience %}
+                <ul>
+                    {% for exp in data.experience %}
+                        <li>{{ exp }}</li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p>Non spécifiée.</p>
+            {% endif %}
+        </div>
+        
+        <div class="section">
+            <h2>Éducation</h2>
+            {% if data.degree %}
+                 <ul>
+                    {% for deg in data.degree %}
+                        <li>{{ deg }}</li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p>Non spécifiée.</p>
+            {% endif %}
+        </div>
+
+    </div>
+</body>
+</html>

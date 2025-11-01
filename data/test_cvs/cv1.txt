@@ -1,0 +1,16 @@
+Alice Dubois
+alice.dubois@email.com
++33 6 12 34 56 78
+
+Compétences:
+- Python, Java, SQL
+- Gestion de projet
+- Analyse de données
+
+Expérience:
+Développeuse Python - TechCorp (2020 - Présent)
+- Développement d'applications web avec Django.
+- Maintenance de bases de données PostgreSQL.
+
+Éducation:
+Master en Informatique - Université de Paris (2020)

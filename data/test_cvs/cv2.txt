@@ -1,0 +1,14 @@
+Bob Martin
+bob.martin@email.org
+0698765432
+
+SKILLS
+JavaScript, React, Node.js, HTML, CSS
+
+EXPERIENCE
+Frontend Developer - WebSolutions (2019-2022)
+- Built responsive user interfaces with React.
+- Collaborated with designers and backend developers.
+
+EDUCATION
+Licence en Design Web - École du Web (2019)
