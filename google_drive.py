@@ -18,12 +18,20 @@ def download_files_from_folder(service, folder_id, download_path):
         os.makedirs(download_path)
 
     query = f"'{folder_id}' in parents and (mimeType='application/pdf' or mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document')"
+    
+    print(f"--- LOG DE DÉBOGAGE GOOGLE DRIVE ---")
+    print(f"Requête API envoyée : q={query}")
+    
     results = service.files().list(
         q=query,
         fields="nextPageToken, files(id, name)",
         supportsAllDrives=True,
         includeItemsFromAllDrives=True
     ).execute()
+
+    print(f"Réponse BRUTE de l'API : {results}")
+    print(f"--- FIN DU LOG DE DÉBOGAGE ---")
+
     items = results.get('files', [])
 
     downloaded_files = []
