@@ -77,6 +77,8 @@ def parse_cv(file_path):
         data = parser.get_extracted_data()
     except Exception as e:
         print(f"Erreur lors de l'analyse du CV {os.path.basename(file_path)} avec PyResparser: {e}")
+        # En cas d'échec de PyResparser, on initialise un dictionnaire vide
+        # pour y mettre au moins le texte brut.
         data = {}
     finally:
         if os.path.exists(temp_text_file):
