@@ -36,15 +36,20 @@ Pour que ce projet fonctionne, vous devez configurer **Workload Identity Federat
 Ensuite, vous devez configurer les secrets suivants dans votre dépôt GitHub (`Settings > Secrets and variables > Actions > New repository secret`).
 
 1.  **`GCP_WORKLOAD_IDENTITY_PROVIDER`** :
-    - C'est le nom de ressource complet de votre fournisseur d'identité de charge de travail que vous avez créé dans Google Cloud IAM.
+    - C'est le nom de ressource complet de votre fournisseur d'identité de charge de travail.
     - Il ressemble à : `projects/1234567890/locations/global/workloadIdentityPools/YOUR_POOL_NAME/providers/YOUR_PROVIDER_NAME`.
 
 2.  **`GCP_SERVICE_ACCOUNT`** :
     - C'est l'adresse e-mail complète de votre compte de service Google Cloud.
     - Il ressemble à : `files-to-json@filestojson.iam.gserviceaccount.com`.
-    - **Important** : Assurez-vous que ce compte de service a les permissions nécessaires (ex: "Éditeur") sur les dossiers Google Drive (source et destination) que vous souhaitez utiliser.
+    - **Important** : Assurez-vous que ce compte de service a les permissions nécessaires sur les dossiers Google Drive.
 
-3.  **`SOURCE_FOLDER_ID`** :
+3.  **`GCP_AUDIENCE`** :
+    - C'est la valeur exacte utilisée pour le champ "Audience" dans la configuration de votre fournisseur d'identité sur Google Cloud.
+    - Elle est composée du préfixe `//iam.googleapis.com/` suivi du nom de ressource complet de votre fournisseur d'identité (la même valeur que `GCP_WORKLOAD_IDENTITY_PROVIDER`).
+    - La valeur complète doit ressembler à : `//iam.googleapis.com/projects/1234567890/locations/global/workloadIdentityPools/YOUR_POOL_NAME/providers/YOUR_PROVIDER_NAME`.
+
+4.  **`SOURCE_FOLDER_ID`** :
     - Naviguez vers votre dossier Google Drive contenant les CVs à traiter.
     - L'ID du dossier se trouve dans l'URL (`https://drive.google.com/drive/folders/THIS_IS_THE_ID`).
     - Créez un secret avec cet ID.

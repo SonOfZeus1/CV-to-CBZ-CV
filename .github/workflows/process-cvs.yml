@@ -22,6 +22,7 @@ jobs:
       with:
         workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
         service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        audience: ${{ secrets.GCP_AUDIENCE }}
 
     - name: Set up Python
       uses: actions/setup-python@v4

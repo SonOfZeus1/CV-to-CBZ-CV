@@ -30,8 +30,11 @@ def main():
         print(f"Erreur lors de l'authentification à Google Drive : {e}")
         return
 
+    # Log du dossier source
+    print(f"ID du dossier source Google Drive : {source_folder_id}")
+
     # Téléchargement des CV
-    print(f"Téléchargement des fichiers depuis le dossier source : {source_folder_id}")
+    print(f"Téléchargement des fichiers depuis le dossier source...")
     downloaded_files = download_files_from_folder(drive_service, source_folder_id, DOWNLOADS_DIR)
 
     if not downloaded_files:
@@ -39,8 +42,10 @@ def main():
         return
 
     # Création ou récupération du dossier de destination sur Google Drive
-    print(f"Vérification du dossier de destination : {destination_folder_name}")
+    print(f"Vérification du dossier de destination : '{destination_folder_name}'")
     dest_folder_id = get_or_create_folder(drive_service, destination_folder_name)
+    # Log du dossier de destination
+    print(f"ID du dossier de destination Google Drive : {dest_folder_id}")
 
     # Création du dossier de sortie local
     os.makedirs(OUTPUTS_DIR, exist_ok=True)
