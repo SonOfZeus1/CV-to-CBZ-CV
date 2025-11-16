@@ -18,7 +18,6 @@ def main():
 
     # Récupération des variables d'environnement
     source_folder_id = os.environ.get('SOURCE_FOLDER_ID')
-    destination_folder_name = os.environ.get('DESTINATION_FOLDER_NAME', 'CV-Processed')
 
     if not source_folder_id:
         print("Erreur : La variable d'environnement SOURCE_FOLDER_ID n'est pas définie.")
@@ -32,7 +31,7 @@ def main():
         return
 
     # Log du dossier source
-    print(f"ID du dossier source Google Drive : {source_folder_id}")
+    print(f"ID du dossier source et de destination Google Drive : {source_folder_id}")
 
     # Téléchargement des CV
     print(f"Téléchargement des fichiers depuis le dossier source...")
@@ -41,16 +40,6 @@ def main():
     if not downloaded_files:
         print("Aucun fichier à traiter. Fin du script.")
         return
-
-    # Création ou récupération du dossier de destination racine sur Google Drive
-    print(f"Vérification du dossier de destination racine : '{destination_folder_name}'")
-    dest_folder_id = get_or_create_folder(drive_service, destination_folder_name)
-    print(f"ID du dossier de destination racine Google Drive : {dest_folder_id}")
-
-    # Création d'un sous-dossier horodaté pour cette exécution
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    sub_folder_id = get_or_create_folder(drive_service, timestamp, parent_id=dest_folder_id)
-    print(f"ID du sous-dossier de sortie pour cette exécution : {sub_folder_id}")
 
     # Création du dossier de sortie local
     os.makedirs(OUTPUTS_DIR, exist_ok=True)
@@ -79,10 +68,10 @@ def main():
             pdf_output_path = os.path.join(OUTPUTS_DIR, f"{base_name}_processed.pdf")
             generate_pdf_from_data(parsed_data, TEMPLATE_PATH, pdf_output_path)
             
-            # 3. Uploader les fichiers générés sur Google Drive
-            print("Upload des résultats sur Google Drive...")
-            upload_file_to_folder(drive_service, json_output_path, sub_folder_id)
-            upload_file_to_folder(drive_service, pdf_output_path, sub_folder_id)
+            # 3. Uploader les fichiers générés sur Google Drive (dans le dossier source)
+            print(f"Upload des résultats dans le dossier source (ID: {source_folder_id})...")
+            upload_file_to_folder(drive_service, json_output_path, source_folder_id)
+            upload_file_to_folder(drive_service, pdf_output_path, source_folder_id)
         else:
             print(f"Impossible d'analyser le CV : {filename}. Fichier ignoré.")
 

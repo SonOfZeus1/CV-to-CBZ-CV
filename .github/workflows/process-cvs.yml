@@ -48,5 +48,4 @@ jobs:
     - name: Run CV processing script
       env:
         SOURCE_FOLDER_ID: ${{ secrets.SOURCE_FOLDER_ID }}
-        DESTINATION_FOLDER_NAME: 'CV-Processed'
       run: python main.py
