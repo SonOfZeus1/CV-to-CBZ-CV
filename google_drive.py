@@ -1,16 +1,15 @@
 import io
 import json
 import os
-from google.oauth2 import service_account
+import google.auth
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
 def get_drive_service():
-    """Authenticates with Google Drive API and returns a service object."""
-    gcp_json_credentials_dict = json.loads(os.environ['GOOGLE_SERVICE_ACCOUNT_JSON'])
-    creds = service_account.Credentials.from_service_account_info(gcp_json_credentials_dict, scopes=SCOPES)
+    """Authenticates with Google Drive API using Application Default Credentials (ADC) and returns a service object."""
+    creds, _ = google.auth.default(scopes=SCOPES)
     return build('drive', 'v3', credentials=creds)
 
 def download_files_from_folder(service, folder_id, download_path):

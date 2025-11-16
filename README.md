@@ -1,6 +1,6 @@
 # Projet d'Automatisation de Traitement de CV
 
-Ce projet automatise le traitement de CVs (.pdf, .docx) stockés dans un dossier Google Drive en utilisant une GitHub Action.
+Ce projet automatise le traitement de CVs (.pdf, .docx) stockés dans un dossier Google Drive en utilisant une GitHub Action et une authentification sécurisée sans clé via Workload Identity Federation.
 
 ## Fonctionnalités
 
@@ -31,17 +31,20 @@ Ce projet automatise le traitement de CVs (.pdf, .docx) stockés dans un dossier
 
 ## Configuration Requise
 
-Pour que ce projet fonctionne, vous devez configurer les secrets suivants dans votre dépôt GitHub (`Settings > Secrets and variables > Actions > New repository secret`).
+Pour que ce projet fonctionne, vous devez configurer **Workload Identity Federation (WIF)** entre votre projet Google Cloud et votre dépôt GitHub. Cette méthode est plus sécurisée car elle n'utilise pas de clés JSON à longue durée de vie.
 
-1.  **`GOOGLE_SERVICE_ACCOUNT_JSON`** :
-    - Créez un projet sur la [Google Cloud Console](https://console.cloud.google.com/).
-    - Activez l'API Google Drive.
-    - Créez un compte de service (Service Account).
-    - Générez une clé JSON pour ce compte de service et téléchargez-la.
-    - Partagez vos dossiers Google Drive (source et destination) avec l'adresse email du compte de service.
-    - Copiez le contenu complet du fichier JSON et collez-le comme valeur pour ce secret.
+Ensuite, vous devez configurer les secrets suivants dans votre dépôt GitHub (`Settings > Secrets and variables > Actions > New repository secret`).
 
-2.  **`SOURCE_FOLDER_ID`** :
+1.  **`GCP_WORKLOAD_IDENTITY_PROVIDER`** :
+    - C'est le nom de ressource complet de votre fournisseur d'identité de charge de travail que vous avez créé dans Google Cloud IAM.
+    - Il ressemble à : `projects/1234567890/locations/global/workloadIdentityPools/YOUR_POOL_NAME/providers/YOUR_PROVIDER_NAME`.
+
+2.  **`GCP_SERVICE_ACCOUNT`** :
+    - C'est l'adresse e-mail complète de votre compte de service Google Cloud.
+    - Il ressemble à : `files-to-json@filestojson.iam.gserviceaccount.com`.
+    - **Important** : Assurez-vous que ce compte de service a les permissions nécessaires (ex: "Éditeur") sur les dossiers Google Drive (source et destination) que vous souhaitez utiliser.
+
+3.  **`SOURCE_FOLDER_ID`** :
     - Naviguez vers votre dossier Google Drive contenant les CVs à traiter.
     - L'ID du dossier se trouve dans l'URL (`https://drive.google.com/drive/folders/THIS_IS_THE_ID`).
     - Créez un secret avec cet ID.
