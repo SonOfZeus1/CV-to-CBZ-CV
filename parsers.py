@@ -4,23 +4,11 @@ import pytesseract
 from PIL import Image
 import io
 import os
-import nltk
 import spacy
 from pyresparser import ResumeParser
 
-# Téléchargement des ressources NLTK et Spacy nécessaires pour pyresparser
-# Ceci est généralement fait une seule fois. Dans le contexte de GitHub Actions,
-# il est préférable de le faire dans le script pour s'assurer qu'elles sont disponibles.
-try:
-    nltk.data.find('tokenizers/punkt')
-except nltk.downloader.DownloadError:
-    nltk.download('punkt')
-try:
-    nltk.data.find('corpora/stopwords')
-except nltk.downloader.DownloadError:
-    nltk.download('stopwords')
-
 # Charger le modèle spacy. En cas d'échec, le télécharger.
+# Le téléchargement des données NLTK est maintenant géré dans le workflow GitHub Actions.
 try:
     spacy.load('en_core_web_sm')
 except OSError:
