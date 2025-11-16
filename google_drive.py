@@ -18,7 +18,12 @@ def download_files_from_folder(service, folder_id, download_path):
         os.makedirs(download_path)
 
     query = f"'{folder_id}' in parents and (mimeType='application/pdf' or mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document')"
-    results = service.files().list(q=query, fields="nextPageToken, files(id, name)").execute()
+    results = service.files().list(
+        q=query,
+        fields="nextPageToken, files(id, name)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True
+    ).execute()
     items = results.get('files', [])
 
     downloaded_files = []
@@ -53,7 +58,12 @@ def upload_file_to_folder(service, file_path, folder_id):
         'parents': [folder_id]
     }
     
-    file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+    file = service.files().create(
+        body=file_metadata,
+        media_body=media,
+        fields='id',
+        supportsAllDrives=True
+    ).execute()
     print(f"Uploaded '{file_name}' with ID: {file.get('id')}")
     return file.get('id')
 
@@ -63,7 +73,12 @@ def get_or_create_folder(service, folder_name, parent_id=None):
     if parent_id:
         query += f" and '{parent_id}' in parents"
     
-    results = service.files().list(q=query, fields="files(id)").execute()
+    results = service.files().list(
+        q=query,
+        fields="files(id)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True
+    ).execute()
     items = results.get('files', [])
 
     if items:
@@ -76,5 +91,5 @@ def get_or_create_folder(service, folder_name, parent_id=None):
         if parent_id:
             file_metadata['parents'] = [parent_id]
         
-        folder = service.files().create(body=file_metadata, fields='id').execute()
+        folder = service.files().create(body=file_metadata, fields='id', supportsAllDrives=True).execute()
         return folder.get('id')
