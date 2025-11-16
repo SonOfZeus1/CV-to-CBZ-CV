@@ -1,5 +1,6 @@
 import os
 import json
+from datetime import datetime
 from google_drive import get_drive_service, download_files_from_folder, get_or_create_folder, upload_file_to_folder
 from parsers import parse_cv
 from formatters import generate_pdf_from_data
@@ -41,11 +42,15 @@ def main():
         print("Aucun fichier à traiter. Fin du script.")
         return
 
-    # Création ou récupération du dossier de destination sur Google Drive
-    print(f"Vérification du dossier de destination : '{destination_folder_name}'")
+    # Création ou récupération du dossier de destination racine sur Google Drive
+    print(f"Vérification du dossier de destination racine : '{destination_folder_name}'")
     dest_folder_id = get_or_create_folder(drive_service, destination_folder_name)
-    # Log du dossier de destination
-    print(f"ID du dossier de destination Google Drive : {dest_folder_id}")
+    print(f"ID du dossier de destination racine Google Drive : {dest_folder_id}")
+
+    # Création d'un sous-dossier horodaté pour cette exécution
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    sub_folder_id = get_or_create_folder(drive_service, timestamp, parent_id=dest_folder_id)
+    print(f"ID du sous-dossier de sortie pour cette exécution : {sub_folder_id}")
 
     # Création du dossier de sortie local
     os.makedirs(OUTPUTS_DIR, exist_ok=True)
@@ -76,8 +81,8 @@ def main():
             
             # 3. Uploader les fichiers générés sur Google Drive
             print("Upload des résultats sur Google Drive...")
-            upload_file_to_folder(drive_service, json_output_path, dest_folder_id)
-            upload_file_to_folder(drive_service, pdf_output_path, dest_folder_id)
+            upload_file_to_folder(drive_service, json_output_path, sub_folder_id)
+            upload_file_to_folder(drive_service, pdf_output_path, sub_folder_id)
         else:
             print(f"Impossible d'analyser le CV : {filename}. Fichier ignoré.")
 
