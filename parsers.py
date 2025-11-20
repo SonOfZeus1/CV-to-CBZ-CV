@@ -9,15 +9,23 @@ import spacy
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Optional, Any
 
-# --- SCHÉMA DE DONNÉES (V3 - Structuré) ---
+# --- SCHÉMA DE DONNÉES (V4 - Riche) ---
 
 @dataclass
 class ExperienceEntry:
     title: str = ""
     company: str = ""
+    role: str = ""
+    location: str = ""
     date_start: str = ""
     date_end: str = ""
-    description: List[str] = field(default_factory=list)
+    duration: str = ""
+    
+    # Segmentation du corps de l'expérience
+    context: str = ""
+    responsibilities: List[str] = field(default_factory=list)
+    achievements: List[str] = field(default_factory=list)
+    description: List[str] = field(default_factory=list) # Fallback legacy
 
 @dataclass
 class EducationEntry:
@@ -93,7 +101,6 @@ def extract_text_from_pdf(file_path: str) -> tuple[str, bool]:
                     img_bytes = pix.tobytes("png")
                     image = Image.open(io.BytesIO(img_bytes))
                     text += pytesseract.image_to_string(image) + "\n"
-                    # Nettoyage temp
                     del pix
                     del image
     except Exception as e:
@@ -107,7 +114,6 @@ class AdvancedResumeParser:
     def __init__(self, text: str):
         self.text = text
         self.nlp = load_spacy_model()
-        # Limite taille texte pour Spacy pour éviter OOM sur très gros CV
         self.doc = self.nlp(text[:100000])
         
     def extract_regex_fields(self) -> Dict[str, Any]:
@@ -116,7 +122,6 @@ class AdvancedResumeParser:
         link_regex = r'(https?://\S+|www\.\S+|linkedin\.com/in/\S+|github\.com/\S+)'
         
         emails = list(set(re.findall(email_regex, self.text)))
-        # Filtre téléphones : au moins 10 chars pour éviter faux positifs comme dates "2019-2020"
         phones_iter = re.finditer(phone_regex, self.text)
         phones = [m.group(0).strip() for m in phones_iter if len(re.sub(r'\D', '', m.group(0))) >= 9]
         links = list(set(re.findall(link_regex, self.text, re.IGNORECASE)))
@@ -124,71 +129,184 @@ class AdvancedResumeParser:
         return {"email": emails[0] if emails else "", "phone": phones[0] if phones else "", "links": links}
 
     def extract_name(self) -> str:
-        # On cherche une entité PERSON au tout début du document
-        for ent in self.doc.ents[:20]:
+        """Détection robuste du nom (priorité aux lignes d'en-tête en majuscules)."""
+        lines = self.text.split('\n')[:30] # On regarde les 30 premières lignes
+        
+        # Mots à exclure
+        blacklist = {"curriculum", "vitae", "resume", "cv", "email", "téléphone", "phone", "adresse", "page", "profil", "summary"}
+        
+        potential_names = []
+        
+        for line in lines:
+            line_clean = line.strip()
+            if not line_clean: continue
+            
+            words = line_clean.split()
+            # Un nom fait généralement 2 ou 3 mots
+            if 2 <= len(words) <= 3:
+                # Filtrage mots clés
+                if any(w.lower() in blacklist for w in words):
+                    continue
+                # Filtrage caractères bizarres (dates, chiffres)
+                if any(c.isdigit() or c in "@+/" for c in line_clean):
+                    continue
+                
+                # Priorité 1 : TOUT EN MAJUSCULES (ex: RICHARD BOURBEAU)
+                if line_clean.isupper():
+                    return line_clean.title() # On retourne formaté
+                
+                # Priorité 2 : Title Case (ex: Richard Bourbeau)
+                if line_clean.istitle():
+                    potential_names.append(line_clean)
+
+        # Si on n'a pas trouvé de MAJUSCULES, on prend le premier Title Case
+        if potential_names:
+            return potential_names[0]
+            
+        # Fallback Spacy (moins fiable)
+        for ent in self.doc.ents[:10]:
             if ent.label_ == "PERSON" and len(ent.text.split()) >= 2 and "\n" not in ent.text:
                 return ent.text.strip()
-        return ""
+                
+        return "Inconnu"
 
     def extract_skills(self) -> Dict[str, List[str]]:
-        # Liste extensible
-        tech_keywords = {"python", "java", "c++", "sql", "javascript", "react", "docker", "aws", "linux", "git", "html", "css", "kubernetes", "azure"}
-        soft_keywords = {"management", "communication", "leadership", "agile", "scrum", "anglais", "français", "spanish"}
+        tech_keywords = {"python", "java", "c++", "sql", "javascript", "react", "docker", "aws", "linux", "git", "html", "css", "kubernetes", "azure", "vba", "oracle", "visio", "jira", "confluence", "power bi", "tableau", "sap"}
+        soft_keywords = {"management", "communication", "leadership", "agile", "scrum", "anglais", "français", "espagnol", "analyste", "stratégique", "coordination"}
         
         tech_found = set()
         soft_found = set()
         
+        # Analyse simple sur tokens
         tokens = [t.text.lower() for t in self.doc if not t.is_stop]
         for t in tokens:
             if t in tech_keywords:
                 tech_found.add(t.capitalize())
             if t in soft_keywords:
                 soft_found.add(t.capitalize())
-                
+        
         return {"tech": list(tech_found), "soft": list(soft_found)}
 
-    def parse_experience_block(self, text_block: List[str]) -> List[ExperienceEntry]:
-        """Tente de structurer un bloc de texte d'expérience."""
+    def parse_mandat_style_experience(self, text_block: List[str]) -> List[ExperienceEntry]:
+        """
+        Parser spécialisé pour les CV structurés par 'MANDAT X'.
+        Découpe le texte en blocs Mandat et extrait finement les infos.
+        """
+        full_text = "\n".join(text_block)
+        # Regex pour splitter sur "MANDAT X" (case insensitive)
+        mandat_split = re.split(r'(?i)\n\s*(MANDAT\s*\d+.*)\n', full_text)
+        
+        entries = []
+        
+        # Le split renvoie [intro, titre_mandat1, corps_mandat1, titre_mandat2, corps_mandat2...]
+        # On ignore l'intro souvent vide ou titre de section
+        for i in range(1, len(mandat_split), 2):
+            mandat_title_line = mandat_split[i].strip()
+            mandat_body = mandat_split[i+1] if i+1 < len(mandat_split) else ""
+            
+            entry = ExperienceEntry()
+            entry.title = mandat_title_line # Par défaut le titre est "MANDAT X..."
+            
+            lines = mandat_body.split('\n')
+            lines = [l.strip() for l in lines if l.strip()]
+            
+            # Analyse des premières lignes pour extraire Client / Rôle / Dates
+            # On s'attend à ce format :
+            # 1. Titre/Sous-titre (optionnel)
+            # 2. Client (ex: SQI)
+            # 3. Rôle
+            # 4. Dates
+            
+            header_lines_count = 0
+            max_header_lines = 6
+            
+            for j, line in enumerate(lines[:max_header_lines]):
+                # Détection Dates (Format robuste)
+                # Ex: "Avril 2023 à aujourd’hui (2 ans et 2 mois) – 1 000 jp"
+                # Regex améliorée pour capturer start, end, duration, jp
+                date_match = re.search(
+                    r'([A-Za-zûé]+\s\d{4}|\d{2}/\d{4})\s*[à-]\s*([A-Za-zûé]+\s\d{4}|aujourd’hui|présent|maintenant)(?:\s*\(([^)]+)\))?(?:.*[–-]\s*(.*))?',
+                    line, re.IGNORECASE
+                )
+                
+                if date_match:
+                    entry.date_start = date_match.group(1).strip()
+                    entry.date_end = date_match.group(2).strip()
+                    if date_match.group(3):
+                        entry.duration = date_match.group(3).strip()
+                    
+                    # Si on a trouvé la date, on suppose que les lignes d'avant sont Client/Rôle
+                    # Heuristique simple : Ligne juste avant = Rôle, Ligne d'avant = Client
+                    if j > 0:
+                        entry.role = lines[j-1]
+                    if j > 1:
+                        entry.company = lines[j-2]
+                    
+                    header_lines_count = j + 1
+                    break
+            
+            # Si on n'a pas trouvé de date, on essaie une heuristique de position pure
+            if not entry.date_start and len(lines) >= 3:
+                entry.company = lines[0]
+                entry.role = lines[1]
+                # On laisse date vide ou on cherche plus loin
+            
+            # Segmentation du corps (Contexte vs Responsabilités vs Valeur Ajoutée)
+            body_lines = lines[header_lines_count:]
+            current_sub = "context"
+            buffer_context = []
+            
+            for line in body_lines:
+                # Détection de puces pour responsabilités
+                if re.match(r'^[-•o*]\s', line):
+                    clean_line = re.sub(r'^[-•o*]\s?', '', line).strip()
+                    entry.responsibilities.append(clean_line)
+                    current_sub = "responsibilities"
+                # Détection de sous-titres (Valeur ajoutée, Résultats)
+                elif "valeur ajoutée" in line.lower() or "résultats" in line.lower() or "bénéfices" in line.lower():
+                     current_sub = "achievements"
+                elif current_sub == "achievements":
+                     clean_line = re.sub(r'^[-•o*]\s?', '', line).strip()
+                     entry.achievements.append(clean_line)
+                elif current_sub == "context":
+                    buffer_context.append(line)
+            
+            entry.context = " ".join(buffer_context)
+            entries.append(entry)
+            
+        return entries
+
+    def parse_standard_experience(self, text_block: List[str]) -> List[ExperienceEntry]:
+        """Fallback : Parsing standard ligne par ligne."""
         entries = []
         current_entry = None
         
-        # Regex date : "Jan 2020 - Present", "2019-2021", "01/2020"
         date_pattern = r'((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s?\d{4}|\d{2}/\d{4}|\d{4})\s*[-–toà]\s*((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s?\d{4}|\d{2}/\d{4}|\d{4}|present|aujourd\'hui|now)'
         
         for line in text_block:
             line = line.strip()
             if not line: continue
             
-            # Detection ligne d'en-tête (Date + potentiellement Titre/Company)
             date_match = re.search(date_pattern, line, re.IGNORECASE)
             
             if date_match:
-                # Sauvegarde entrée précédente
                 if current_entry:
                     entries.append(current_entry)
                 
-                # Nouvelle entrée
                 current_entry = ExperienceEntry(
                     date_start=date_match.group(1),
                     date_end=date_match.group(2),
                     description=[]
                 )
                 
-                # On essaie de deviner le titre/compagnie sur la même ligne ou autour
                 clean_line = re.sub(date_pattern, '', line, flags=re.IGNORECASE).strip()
-                # Heuristique : si la ligne restante est courte, c'est titre/entreprise
                 if len(clean_line) > 3:
-                     # Analyse NER rapide sur cette ligne pour trouver ORG
-                    line_doc = self.nlp(clean_line)
-                    orgs = [ent.text for ent in line_doc.ents if ent.label_ == "ORG"]
-                    current_entry.company = orgs[0] if orgs else ""
-                    current_entry.title = clean_line # Par défaut on met tout
+                    current_entry.title = clean_line
             
             elif current_entry:
-                # C'est une ligne de description
-                # On nettoie les puces
                 clean_desc = re.sub(r'^[-•*]\s?', '', line).strip()
                 current_entry.description.append(clean_desc)
+                current_entry.responsibilities.append(clean_desc) # Dual populating
         
         if current_entry:
             entries.append(current_entry)
@@ -201,34 +319,36 @@ class AdvancedResumeParser:
         current_section = None
         
         keywords = {
-            "experience": ["experience", "employment", "work history", "expérience", "parcours"],
+            "experience": ["experience", "employment", "work history", "expérience", "parcours", "mandats"],
             "education": ["education", "formation", "diplômes", "academic"],
             "summary": ["summary", "profile", "profil", "objectif", "about me"],
             "languages": ["languages", "langues"]
         }
         
-        buffer = [] # Lignes accumulées pour la section courante
+        buffer = [] 
         
         for line in lines:
             line_clean = line.strip().lower()
             
-            # Détection Header
             is_header = False
             new_section = None
             if len(line_clean) < 50:
                 for key, words in keywords.items():
-                    if any(w in line_clean for w in words):
+                    if any(w in line_clean for w in words) and not "mandat" in line_clean: # Eviter de trigger header sur "Mandat 1"
                         new_section = key
                         is_header = True
                         break
             
             if is_header:
-                # On traite le buffer de la section précédente
                 if current_section == "experience":
-                    sections["experience"] = self.parse_experience_block(buffer)
+                    # Choix de la stratégie : Mandat vs Standard
+                    full_buffer = "\n".join(buffer)
+                    if "MANDAT" in full_buffer.upper():
+                        sections["experience"] = self.parse_mandat_style_experience(buffer)
+                    else:
+                        sections["experience"] = self.parse_standard_experience(buffer)
+                        
                 elif current_section == "education":
-                    # Simplification pour education : on garde les lignes brutes pour l'instant
-                    # ou on applique une logique similaire (TODO)
                     sections["education"] = [EducationEntry(degree=l) for l in buffer if l.strip()]
                 elif current_section == "summary":
                     sections["summary"] = " ".join(buffer)
@@ -243,7 +363,11 @@ class AdvancedResumeParser:
         
         # Traiter le dernier buffer
         if current_section == "experience":
-            sections["experience"] = self.parse_experience_block(buffer)
+            full_buffer = "\n".join(buffer)
+            if "MANDAT" in full_buffer.upper():
+                sections["experience"] = self.parse_mandat_style_experience(buffer)
+            else:
+                sections["experience"] = self.parse_standard_experience(buffer)
         elif current_section == "summary":
              sections["summary"] = " ".join(buffer)
             

@@ -5,24 +5,55 @@ import os
 def format_experience_entry(entry):
     """Formate une entrée d'expérience structurée en chaîne HTML lisible."""
     if isinstance(entry, str): return entry
-    # entry est un dict (car on a fait to_dict() sur la dataclass)
+    # entry est un dict (via to_dict())
+    
     title = entry.get('title', 'Poste inconnu')
     company = entry.get('company', '')
+    role = entry.get('role', '')
     dates = f"{entry.get('date_start', '')} - {entry.get('date_end', '')}"
+    if entry.get('duration'):
+        dates += f" ({entry.get('duration')})"
     
-    header = f"<strong>{title}</strong>"
-    if company: header += f" chez <em>{company}</em>"
-    header += f" ({dates})"
+    # En-tête : Titre + Entreprise
+    header = f"<div style='margin-bottom: 5px;'><strong>{title}</strong>"
+    if company: 
+        header += f" | <span style='color:#2c3e50; font-weight:600;'>{company}</span>"
+    header += "</div>"
     
-    desc = ""
-    if entry.get('description'):
-        desc = "<ul>" + "".join([f"<li>{d}</li>" for d in entry['description']]) + "</ul>"
-        
-    return f"<div>{header}{desc}</div>"
+    # Sous-en-tête : Rôle + Dates
+    sub_header = f"<div style='font-size: 0.9em; color: #666; margin-bottom: 8px;'>"
+    if role:
+        sub_header += f"<em>{role}</em> &bull; "
+    sub_header += f"{dates}</div>"
+    
+    # Corps
+    body = ""
+    
+    # 1. Contexte
+    if entry.get('context'):
+        body += f"<div style='font-style: italic; margin-bottom: 5px; color: #444;'>{entry['context']}</div>"
+    
+    # 2. Responsabilités
+    if entry.get('responsibilities'):
+        body += "<div><strong>Responsabilités :</strong><ul>"
+        body += "".join([f"<li>{d}</li>" for d in entry['responsibilities']])
+        body += "</ul></div>"
+
+    # 3. Réalisations / Valeur ajoutée
+    if entry.get('achievements'):
+        body += "<div style='margin-top:5px;'><strong>Réalisations clés :</strong><ul>"
+        body += "".join([f"<li>{d}</li>" for d in entry['achievements']])
+        body += "</ul></div>"
+
+    # Fallback (description simple legacy)
+    if not body and entry.get('description'):
+         body = "<ul>" + "".join([f"<li>{d}</li>" for d in entry['description']]) + "</ul>"
+
+    return f"<div style='margin-bottom: 20px; border-left: 3px solid #eee; padding-left: 15px;'>{header}{sub_header}{body}</div>"
 
 def normalize_data_for_template(data):
     """
-    Adapte la structure de données du nouveau parser (v3) pour le template HTML.
+    Adapte la structure de données du nouveau parser (v4) pour le template HTML.
     """
     if "basics" not in data: return data
 
@@ -56,12 +87,6 @@ def generate_pdf_from_data(data, template_path, output_path):
 
     env = Environment(loader=FileSystemLoader(template_dir))
     template = env.get_template(template_name)
-
-    # Note: on passe les données normalisées.
-    # Attention: comme on a mis du HTML dans 'experience', il faudrait dire à Jinja que c'est safe.
-    # Mais le template utilise {{ exp }}, qui escape par défaut.
-    # On va faire simple : le template affichera les balises <strong> etc.
-    # Pour faire propre, il faudrait modifier le template pour utiliser 'safe'.
     
     html_out = template.render(data=template_data)
 
