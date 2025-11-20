@@ -173,9 +173,8 @@ class UniversalParser:
         
         bounds = []
         for i, line in enumerate(raw_lines):
-            # On considère qu'une ligne < 60 chars qui matche une date est un header
+            # On considère qu'une ligne < 80 chars qui matche une date est un header
             if len(line) < 80 and re.search(date_regex, line):
-                # Avoid duplicating start of blocks too close
                 if not bounds or (i - bounds[-1] > 2):
                     bounds.append(i)
         
@@ -206,111 +205,96 @@ class UniversalParser:
             for line in block_lines:
                 if tech_marker in line.lower():
                     found_tech = True
-                    # La ligne contient peut-être déjà des technos
                     parts = re.split(r'(?i)environnement technologique\s*[:\.]?', line)
                     if len(parts) > 1:
-                        # Partie avant marqueur -> body (si non vide)
                         if parts[0].strip(): body_lines.append(parts[0].strip())
-                        # Partie après -> footer/tech
                         footer_lines.append(parts[1].strip())
                     else:
                         footer_lines.append(line)
                 elif found_tech:
                     footer_lines.append(line)
                 else:
-                    # On ignore la ligne de date si elle est déjà parsée
                     if not (entry.date_start and entry.date_start in line):
                         body_lines.append(line)
 
             # A. Parsing Body (Tâches)
             full_body = " ".join(body_lines)
-            # Injection de sauts de ligne devant les verbes d'action majuscules
-            # Ex: "Conception... Développement..." -> "Conception...\nDéveloppement..."
-            action_verbs = r'(Conception|Développement|Implémentation|Mise en œuvre|Processus|Gestion|Analyse|Rédaction|Planification|Coordination|Support|Maintenance)'
             
-            # On met un saut de ligne avant ces mots s'ils sont précédés d'une minuscule ou espace
-            split_body = re.sub(r'(?<!^)\s+(?=' + action_verbs + r'\b)', '\n', full_body)
-            
-            for task in split_body.split('\n'):
-                clean_task = task.strip()
-                if len(clean_task) > 3:
-                    entry.responsibilities.append(clean_task)
+            # On utilise les puces "•" si présentes, sinon les verbes d'action
+            if "•" in full_body:
+                 tasks = full_body.split("•")
+                 for task in tasks:
+                     clean_task = task.strip()
+                     if len(clean_task) > 3:
+                         entry.responsibilities.append(clean_task)
+            else:
+                # Fallback Verbes d'action
+                action_verbs = r'(Conception|Développement|Implémentation|Mise en œuvre|Processus|Gestion|Analyse|Rédaction|Planification|Coordination|Support|Maintenance)'
+                split_body = re.sub(r'(?<!^)\s+(?=' + action_verbs + r'\b)', '\n', full_body)
+                for task in split_body.split('\n'):
+                    clean_task = task.strip()
+                    if len(clean_task) > 3:
+                        entry.responsibilities.append(clean_task)
 
             # B. Parsing Footer (Tech Stack + Identity)
             full_footer = " ".join(footer_lines)
-            
-            # On extrait la stack technique (séparée par virgules)
-            # Heuristique: tout ce qui ressemble à une liste de mots est la stack
-            # L'identité est souvent à la toute fin
-            
-            # On splitte par virgules
             footer_parts = [p.strip() for p in full_footer.split(',')]
             
-            # On parcourt et on accumule dans tech_stack tant que ça ressemble à des outils
-            # Dès qu'on tombe sur une longue phrase ou un motif "Titre Entreprise", on arrête ?
-            # Non, l'exemple montre "Angular, Java ... Développeur Hilo..."
-            # Le dernier élément "Jenkins Développeur Hilo..." contient la rupture.
-            
             if footer_parts:
-                last_part = footer_parts[-1] # Ex: "Jenkins Développeur Hilo Énergie" (+ Lieu dans next part si split virgule a coupé Montréal)
+                last_part = footer_parts[-1]
                 
-                # On assume que tout sauf le dernier "bout" est de la tech
-                entry.tech_stack = footer_parts[:-1]
-                
-                # Analyse du dernier morceau pour séparer Tech et Identité
-                # "Jenkins Développeur Hilo..."
-                # On cherche le premier mot qui ressemble à un titre de poste (Développeur, Analyste...)
+                # Extraction identité finale
                 title_regex = r'\b(Développeur|Analyste|Architecte|Consultant|Ingénieur|Tech Lead|Product Owner)\b'
-                split_match = re.search(title_regex, last_part)
                 
-                if split_match:
-                    # Ce qui est avant est la dernière techno
-                    tech_remainder = last_part[:split_match.start()].strip()
-                    if tech_remainder: entry.tech_stack.append(tech_remainder)
+                # Recherche du titre dans tout le footer pour couper avant
+                match_title_full = re.search(title_regex, full_footer)
+                
+                if match_title_full:
+                    # Stack = tout avant le titre
+                    stack_str = full_footer[:match_title_full.start()]
+                    # Nettoyage stack
+                    entry.tech_stack = [t.strip() for t in re.split(r'[,/]', stack_str) if len(t.strip()) > 1]
                     
-                    # Ce qui reste est l'identité
-                    identity_raw = last_part[split_match.start():].strip()
+                    # Identité = tout après
+                    identity_str = full_footer[match_title_full.start():]
+                    # Ex: "Développeur Hilo Énergie, Montréal, CANADA"
                     
-                    # Si le split virgule a coupé le lieu "Montréal, CANADA", il faut le recréer ?
-                    # Dans notre cas, full_footer a été split par virgule.
-                    # Donc "Montréal" et "CANADA" sont peut-être perdus ou dans d'autres parts ?
-                    # On reprend full_footer pour l'identité.
+                    # On splitte pour séparer Titre/Co du Lieu
+                    # Heuristique: Lieu est souvent séparé par une virgule à la fin
+                    id_parts = identity_str.rsplit(',', 2) # On essaie de chopper Ville, Pays
                     
-                    # Approche plus simple :
-                    # On cherche le titre dans tout le footer
-                    match_title_full = re.search(title_regex, full_footer)
-                    if match_title_full:
-                        # Stack = tout avant
-                        stack_str = full_footer[:match_title_full.start()]
-                        entry.tech_stack = [t.strip() for t in re.split(r'[,/]', stack_str) if t.strip()]
-                        
-                        # Identité = tout après
-                        identity_str = full_footer[match_title_full.start():]
-                        
-                        # "Développeur Hilo Énergie, Montréal, CANADA"
-                        # On splitte par virgule pour le lieu
-                        id_parts = identity_str.split(',')
-                        if len(id_parts) > 1:
-                            entry.location = ",".join(id_parts[1:]).strip() # Montréal, CANADA
-                            title_company = id_parts[0].strip() # Développeur Hilo Énergie
-                        else:
-                            title_company = identity_str
-                            
-                        # Séparer Titre / Entreprise
-                        # "Développeur Hilo Énergie" -> Titre = Développeur, Co = Hilo
-                        # Heuristique: le titre est le premier mot ou groupe de mots connu
-                        # On prend le match regex comme titre, le reste comme company
-                        title_word = split_match.group(0) # "Développeur"
-                        # On essaie de prendre un peu plus si "Java" suit
-                        entry.title = title_company # Par défaut tout
-                        
-                        # Raffinement titre
-                        # Si commence par "Développeur Java", on garde.
-                        # On coupe avant le premier mot majuscule qui n'est pas dans le titre ? (Hilo)
-                        
+                    if len(id_parts) >= 2 and "CANADA" in id_parts[-1].upper():
+                         entry.location = ", ".join(id_parts[-2:]).strip()
+                         title_co_part = ", ".join(id_parts[:-2]).strip()
+                    elif len(id_parts) >= 2:
+                         entry.location = id_parts[-1].strip()
+                         title_co_part = ", ".join(id_parts[:-1]).strip()
+                    else:
+                         title_co_part = identity_str
+                    
+                    # Séparation Titre - Entreprise
+                    # On cherche le premier mot Majuscule qui n'est pas dans le titre
+                    # "Développeur Hilo" -> Titre=Développeur, Co=Hilo
+                    
+                    # On prend le premier mot du titre détecté
+                    title_start = re.match(title_regex, title_co_part)
+                    if title_start:
+                         # On coupe arbitrairement après le titre + 1 mot (ex: Développeur Java) ou on cherche une majuscule ?
+                         # Simple : Titre = tout jusqu'à la première majuscule qui n'est pas un mot clé ? Trop dur.
+                         # On va prendre : Titre = le match regex + mot suivant
+                         # Puis Entreprise = le reste
+                         words = title_co_part.split()
+                         if len(words) > 2:
+                             entry.title = " ".join(words[:2]) # Développeur Java
+                             entry.company = " ".join(words[2:]) # Hilo Énergie
+                         else:
+                             entry.title = title_co_part
+                    else:
+                         entry.title = title_co_part
+
                 else:
-                    # Pas de titre trouvé, on met tout dans tech_stack ou context
-                    entry.tech_stack.append(last_part)
+                    # Pas de titre trouvé -> tout est stack
+                    entry.tech_stack = footer_parts
 
             entries.append(entry)
         return entries
