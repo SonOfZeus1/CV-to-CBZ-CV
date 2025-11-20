@@ -1,20 +1,60 @@
 import os
 import json
-from datetime import datetime
-from google_drive import get_drive_service, download_files_from_folder, get_or_create_folder, upload_file_to_folder
-from parsers import parse_cv
+from concurrent.futures import ThreadPoolExecutor
+from google_drive import get_drive_service, download_files_from_folder, upload_file_to_folder
+from parsers import parse_cv, load_spacy_model
 from formatters import generate_pdf_from_data
 
 # Configuration
 DOWNLOADS_DIR = "downloaded_cvs"
 OUTPUTS_DIR = "processed_cvs"
 TEMPLATE_PATH = "templates/template.html"
+MAX_WORKERS = 4  # Nombre de threads parallèles (ajuster selon les ressources du runner)
+
+def process_single_file(file_path, drive_service, source_folder_id):
+    """
+    Traite un fichier unique : Parsing -> JSON -> PDF -> Upload.
+    Cette fonction est exécutée par les threads.
+    """
+    filename = os.path.basename(file_path)
+    base_name = os.path.splitext(filename)[0]
+    print(f"--- Début traitement : {filename} ---")
+
+    try:
+        # 1. Analyse du CV
+        parsed_data = parse_cv(file_path)
+
+        if parsed_data:
+            # 2. Enregistrer le JSON
+            json_output_path = os.path.join(OUTPUTS_DIR, f"{base_name}_processed.json")
+            
+            with open(json_output_path, 'w', encoding='utf-8') as f:
+                json.dump(parsed_data, f, ensure_ascii=False, indent=4)
+            
+            # 3. Générer le PDF formaté
+            pdf_output_path = os.path.join(OUTPUTS_DIR, f"{base_name}_processed.pdf")
+            generate_pdf_from_data(parsed_data, TEMPLATE_PATH, pdf_output_path)
+            
+            # 4. Uploader les fichiers générés sur Google Drive
+            print(f"Upload des résultats pour {filename}...")
+            upload_file_to_folder(drive_service, json_output_path, source_folder_id)
+            upload_file_to_folder(drive_service, pdf_output_path, source_folder_id)
+            
+            print(f"--- Succès traitement : {filename} ---")
+            return True
+        else:
+            print(f"--- Échec parsing : {filename} ---")
+            return False
+
+    except Exception as e:
+        print(f"!!! ERREUR CRITIQUE sur {filename} : {e}")
+        return False
 
 def main():
     """
     Script principal pour le traitement des CV depuis Google Drive.
     """
-    print("--- Début du traitement des CV ---")
+    print("--- Début du pipeline ETL CV ---")
 
     # Récupération des variables d'environnement
     source_folder_id = os.environ.get('SOURCE_FOLDER_ID')
@@ -30,8 +70,9 @@ def main():
         print(f"Erreur lors de l'authentification à Google Drive : {e}")
         return
 
-    # Log du dossier source
-    print(f"ID du dossier source et de destination Google Drive : {source_folder_id}")
+    # Préchauffage du modèle NLP (une seule fois pour tous les threads)
+    print("Chargement du modèle NLP...")
+    load_spacy_model()
 
     # Téléchargement des CV
     print(f"Téléchargement des fichiers depuis le dossier source...")
@@ -44,39 +85,23 @@ def main():
     # Création du dossier de sortie local
     os.makedirs(OUTPUTS_DIR, exist_ok=True)
 
-    # Traitement de chaque fichier
-    for file_path in downloaded_files:
-        filename = os.path.basename(file_path)
-        base_name = os.path.splitext(filename)[0]
-        print(f"\n--- Traitement de : {filename} ---")
+    # Traitement parallèle
+    print(f"Lancement du traitement parallèle avec {MAX_WORKERS} workers...")
+    
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        # On passe le service et l'ID dossier à chaque tâche
+        # Note: Le client Google API est thread-safe pour la plupart des opérations,
+        # ou gère ses propres connexions poolées.
+        futures = [
+            executor.submit(process_single_file, file_path, drive_service, source_folder_id)
+            for file_path in downloaded_files
+        ]
+        
+        # Attente de la fin de toutes les tâches
+        for future in futures:
+            future.result()
 
-        # Analyse du CV
-        parsed_data = parse_cv(file_path)
-
-        if parsed_data:
-            # 1. Enregistrer le JSON
-            json_output_path = os.path.join(OUTPUTS_DIR, f"{base_name}_processed.json")
-            # Convertir les types de données non sérialisables (ex: numpy.int64) en int
-            if 'no_of_pages' in parsed_data:
-                parsed_data['no_of_pages'] = int(parsed_data['no_of_pages'])
-            
-            with open(json_output_path, 'w', encoding='utf-8') as f:
-                json.dump(parsed_data, f, ensure_ascii=False, indent=4)
-            print(f"Données extraites enregistrées dans : {json_output_path}")
-
-            # 2. Générer le PDF formaté
-            pdf_output_path = os.path.join(OUTPUTS_DIR, f"{base_name}_processed.pdf")
-            generate_pdf_from_data(parsed_data, TEMPLATE_PATH, pdf_output_path)
-            
-            # 3. Uploader les fichiers générés sur Google Drive (dans le dossier source)
-            print(f"Upload des résultats dans le dossier source (ID: {source_folder_id})...")
-            upload_file_to_folder(drive_service, json_output_path, source_folder_id)
-            upload_file_to_folder(drive_service, pdf_output_path, source_folder_id)
-        else:
-            print(f"Impossible d'analyser le CV : {filename}. Fichier ignoré.")
-
-    print("\n--- Traitement terminé pour tous les fichiers. ---")
-
+    print("\n--- Pipeline terminé. ---")
 
 if __name__ == "__main__":
     main()

@@ -2,14 +2,16 @@
 
 Ce projet automatise le traitement de CVs (.pdf, .docx) stockés dans un dossier Google Drive en utilisant une GitHub Action et une authentification sécurisée sans clé via Workload Identity Federation.
 
-## Fonctionnalités
+## Fonctionnalités (Mise à jour v2)
 
-- **Téléchargement depuis Google Drive** : Récupère les fichiers .pdf et .docx d'un dossier spécifié.
-- **Extraction de Texte** : Extrait le contenu textuel des fichiers. Gère les PDFs basés sur des images grâce à l'OCR (Tesseract).
-- **Analyse de CV** : Utilise `pyresparser` pour extraire des informations structurées (nom, email, compétences, etc.).
-- **Génération de Fichiers** : Crée un fichier `.json` avec les données brutes et extraites, et un `.pdf` formaté à partir d'un template HTML.
-- **Upload vers Google Drive** : Envoie les fichiers `.json` et `.pdf` générés dans un dossier de destination.
-- **Automatisation via GitHub Actions** : L'ensemble du processus est exécuté automatiquement via une GitHub Action, sans aucune exécution locale requise.
+- **Téléchargement depuis Google Drive** : Récupère les fichiers .pdf et .docx d'un dossier spécifié (supporte les Shared Drives).
+- **Extraction Hybride Robuste** : 
+    - OCR intelligent (via Tesseract) qui ne s'active que si la densité de texte est insuffisante.
+    - Extraction de texte via Regex (Emails, Téléphones, Liens) et NLP (Spacy) pour les noms et compétences.
+    - Segmentation automatique des sections (Expérience, Formation).
+- **Performance** : Traitement parallélisé des fichiers (multi-threading) pour réduire le temps d'exécution.
+- **Génération de Fichiers** : Crée un fichier `.json` structuré et un `.pdf` formaté.
+- **Upload vers Google Drive** : Renvoie les résultats directement dans le dossier source.
 
 ## Structure du Projet
 
@@ -17,15 +19,12 @@ Ce projet automatise le traitement de CVs (.pdf, .docx) stockés dans un dossier
 .
 ├── .github/workflows/
 │   └── process-cvs.yml   # Workflow GitHub Action
-├── data/test_cvs/
-│   ├── cv1.pdf           # Fichier CV de test (placeholder)
-│   └── cv2.pdf           # Fichier CV de test (placeholder)
 ├── templates/
 │   └── template.html     # Template Jinja2 pour le PDF final
-├── formatters.py         # Génération du PDF à partir du template
-├── google_drive.py       # Fonctions pour interagir avec l'API Google Drive
-├── main.py               # Script principal orchestrant le pipeline
-├── parsers.py            # Fonctions d'extraction et d'analyse de texte
+├── formatters.py         # Génération du PDF (mapping données -> template)
+├── google_drive.py       # Wrapper API Google Drive (Shared Drives support)
+├── main.py               # Orchestrateur parallélisé
+├── parsers.py            # Logique d'extraction (Regex + Spacy + OCR)
 └── requirements.txt      # Dépendances Python
 ```
 
@@ -61,4 +60,4 @@ Le workflow est configuré pour s'exécuter de deux manières :
 1.  **Manuellement** : Allez dans l'onglet "Actions" de votre dépôt GitHub, sélectionnez "Process CVs from Google Drive" et cliquez sur "Run workflow".
 2.  **Planifié** : Le workflow s'exécute automatiquement tous les jours à 2h UTC (configurable dans `process-cvs.yml`).
 
-Les fichiers traités (`.json` et `.pdf`) seront automatiquement uploadés dans un dossier nommé `CV-Processed` à la racine de votre Google Drive.
+Les fichiers traités (`.json` et `.pdf`) seront automatiquement uploadés dans le même dossier que les fichiers sources sur Google Drive.
