@@ -42,6 +42,7 @@
             padding-bottom: 8px;
             margin-top: 30px;
             margin-bottom: 15px;
+            page-break-after: avoid;
         }
         ul {
             list-style-type: none;
@@ -52,7 +53,8 @@
             margin-bottom: 8px;
         }
         .exp-item {
-            margin-bottom: 15px;
+            margin-bottom: 25px;
+            page-break-inside: avoid; /* Évite de couper un mandat au milieu */
         }
         /* Style pour le HTML injecté par le formatters.py */
         .exp-item div strong {
@@ -71,6 +73,19 @@
             font-size: 14px;
             color: #444;
         }
+        .appendix {
+            margin-top: 50px;
+            border-top: 2px dashed #ccc;
+            padding-top: 20px;
+            color: #666;
+            font-size: 12px;
+        }
+        .appendix pre {
+            white-space: pre-wrap;
+            background: #f9f9f9;
+            padding: 10px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
@@ -87,38 +102,82 @@
             </div>
         </header>
 
-        {% if data.skills %}
+        <!-- RÉSUMÉ -->
+        {% if data.summary %}
         <div class="section">
-            <h2>Compétences</h2>
-            <ul>
-                {% for skill in data.skills %}
-                    <li style="display: inline-block; background: #f2f2f2; padding: 3px 8px; margin: 2px; border-radius: 3px; font-size: 13px;">{{ skill }}</li>
-                {% endfor %}
-            </ul>
+            <h2>Résumé Professionnel</h2>
+            <p style="white-space: pre-line;">{{ data.summary }}</p>
         </div>
         {% endif %}
 
+
+        <!-- EXPÉRIENCE -->
         {% if data.experience %}
         <div class="section">
             <h2>Expérience Professionnelle</h2>
             {% for exp in data.experience %}
-                <!-- Utilisation de 'safe' car exp contient du HTML généré (strong, ul, li) -->
                 <div class="exp-item">{{ exp | safe }}</div>
             {% endfor %}
         </div>
         {% endif %}
         
-        {% if data.degree %}
+        <!-- ÉDUCATION -->
+        {% if data.education %}
         <div class="section">
-            <h2>Éducation</h2>
+            <h2>Formation</h2>
              <ul>
-                {% for deg in data.degree %}
-                    <li>{{ deg }}</li>
+                {% for edu in data.education %}
+                    <li>{{ edu }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- COMPÉTENCES -->
+        {% if data.skills %}
+        <div class="section">
+            <h2>Compétences</h2>
+            <ul>
+                {% for skill in data.skills %}
+                    <li style="display: inline-block; background: #eef2f5; padding: 4px 8px; margin: 2px; border-radius: 4px; font-size: 13px; color: #2c3e50; border: 1px solid #dce4ec;">{{ skill }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- AUTRES RÉALISATIONS -->
+        {% if data.achievements_global %}
+        <div class="section">
+            <h2>Autres Réalisations</h2>
+            <ul>
+                {% for item in data.achievements_global %}
+                    <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- AUTRES INFOS -->
+        {% if data.extra_info %}
+        <div class="section">
+            <h2>Informations Complémentaires</h2>
+            <ul>
+                {% for item in data.extra_info %}
+                    <li>{{ item }}</li>
                 {% endfor %}
             </ul>
         </div>
         {% endif %}
         
+        <!-- ANNEXE : FILETS DE SÉCURITÉ -->
+        {% if data.unmapped %}
+        <div class="appendix">
+            <h3>Annexe : Contenu brut non classifié</h3>
+            <p><em>Les sections suivantes n'ont pas pu être attribuées automatiquement mais sont conservées pour intégrité.</em></p>
+            <pre>{{ data.unmapped | join('\n') }}</pre>
+        </div>
+        {% endif %}
+
         <div class="section" style="margin-top: 50px; font-size: 10px; color: #999; border-top: 1px solid #eee; padding-top: 10px;">
             <p>Document généré automatiquement le {{ date_generation }}</p>
         </div>
