@@ -26,6 +26,13 @@ def process_single_file(file_path, drive_service, source_folder_id):
     Traite un fichier unique : Parsing -> JSON -> PDF -> Upload.
     """
     filename = os.path.basename(file_path)
+    
+    # --- SÉCURITÉ ANTI-BOUCLE ---
+    # Si jamais le fichier a réussi à passer le filtre Drive, on le bloque ici.
+    if "_processed" in filename:
+        logger.warning(f"SKIP: Fichier déjà traité détecté (sécurité interne) : {filename}")
+        return False
+        
     base_name = os.path.splitext(filename)[0]
     logger.info(f"START Traitement : {filename}")
 
@@ -91,6 +98,7 @@ def main():
 
     # Téléchargement des CV
     logger.info(f"Téléchargement des fichiers depuis le dossier source...")
+    # Note: download_files_from_folder inclut maintenant un filtre "not name contains '_processed'"
     downloaded_files = download_files_from_folder(drive_service, source_folder_id, DOWNLOADS_DIR)
 
     if not downloaded_files:

@@ -17,7 +17,13 @@ def download_files_from_folder(service, folder_id, download_path):
     if not os.path.exists(download_path):
         os.makedirs(download_path)
 
-    query = f"'{folder_id}' in parents and (mimeType='application/pdf' or mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document')"
+    # Correction Bug : Exclusion explicite des fichiers générés (_processed)
+    # La clause "not name contains '_processed'" empêche la boucle infinie.
+    query = (
+        f"'{folder_id}' in parents "
+        f"and (mimeType='application/pdf' or mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document') "
+        f"and not name contains '_processed'"
+    )
     
     print(f"--- LOG DE DÉBOGAGE GOOGLE DRIVE ---")
     print(f"Requête API envoyée : q={query}")
