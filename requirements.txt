@@ -1,7 +1,9 @@
 numpy<2.0
-google-api-python-client
+google-api-python-client>=2.100.0
 google-auth-httplib2
 google-auth-oauthlib
+requests>=2.31.0
+urllib3>=2.2.0
 PyMuPDF
 python-docx
 pytesseract

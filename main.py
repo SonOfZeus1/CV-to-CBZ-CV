@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 DOWNLOADS_DIR = "downloaded_cvs"
 OUTPUTS_DIR = "processed_cvs"
 TEMPLATE_PATH = "templates/template.html"
-MAX_WORKERS = 4 
+# Réduction de la concurrence pour stabilité (évite SSL error & Segfault)
+MAX_WORKERS = 1 
 
 def process_single_file(file_path, drive_service, source_folder_id):
     """
@@ -30,6 +31,7 @@ def process_single_file(file_path, drive_service, source_folder_id):
 
     try:
         # 1. Analyse du CV
+        logger.info(f"Parsing du fichier {filename}...")
         parsed_data = parse_cv(file_path)
 
         if parsed_data:
@@ -45,6 +47,7 @@ def process_single_file(file_path, drive_service, source_folder_id):
             
             # 4. Uploader les fichiers générés sur Google Drive
             logger.info(f"Upload des résultats pour {filename}...")
+            # Note: drive_service est passé, attention au thread-safety si MAX_WORKERS > 1
             upload_file_to_folder(drive_service, json_output_path, source_folder_id)
             upload_file_to_folder(drive_service, pdf_output_path, source_folder_id)
             
@@ -80,7 +83,11 @@ def main():
 
     # Préchauffage du modèle NLP
     logger.info("Chargement du modèle NLP (Spacy)...")
-    load_spacy_model()
+    try:
+        load_spacy_model()
+    except Exception as e:
+        logger.error(f"Erreur chargement Spacy: {e}")
+        # On continue, le parser gérera peut-être sans Spacy ou avec un modèle par défaut
 
     # Téléchargement des CV
     logger.info(f"Téléchargement des fichiers depuis le dossier source...")
@@ -93,9 +100,10 @@ def main():
     # Création du dossier de sortie local
     os.makedirs(OUTPUTS_DIR, exist_ok=True)
 
-    # Traitement parallèle
-    logger.info(f"Lancement du traitement parallèle avec {MAX_WORKERS} workers...")
+    # Traitement parallèle (désactivé pour stabilité = 1)
+    logger.info(f"Lancement du traitement avec {MAX_WORKERS} workers...")
     
+    # Utilisation de ThreadPoolExecutor même avec 1 worker pour garder la structure
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = [
             executor.submit(process_single_file, file_path, drive_service, source_folder_id)
@@ -103,7 +111,11 @@ def main():
         ]
         
         for future in futures:
-            future.result()
+            # On attend le résultat pour propager les exceptions si besoin
+            try:
+                future.result()
+            except Exception as e:
+                logger.error(f"Erreur dans un thread : {e}")
 
     logger.info("--- Pipeline terminé. ---")
 
