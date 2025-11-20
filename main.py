@@ -1,24 +1,32 @@
 import os
 import json
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from google_drive import get_drive_service, download_files_from_folder, upload_file_to_folder
 from parsers import parse_cv, load_spacy_model
 from formatters import generate_pdf_from_data
 
+# --- Configuration Logging ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
 # Configuration
 DOWNLOADS_DIR = "downloaded_cvs"
 OUTPUTS_DIR = "processed_cvs"
 TEMPLATE_PATH = "templates/template.html"
-MAX_WORKERS = 4  # Nombre de threads parallèles (ajuster selon les ressources du runner)
+MAX_WORKERS = 4 
 
 def process_single_file(file_path, drive_service, source_folder_id):
     """
     Traite un fichier unique : Parsing -> JSON -> PDF -> Upload.
-    Cette fonction est exécutée par les threads.
     """
     filename = os.path.basename(file_path)
     base_name = os.path.splitext(filename)[0]
-    print(f"--- Début traitement : {filename} ---")
+    logger.info(f"START Traitement : {filename}")
 
     try:
         # 1. Analyse du CV
@@ -36,72 +44,68 @@ def process_single_file(file_path, drive_service, source_folder_id):
             generate_pdf_from_data(parsed_data, TEMPLATE_PATH, pdf_output_path)
             
             # 4. Uploader les fichiers générés sur Google Drive
-            print(f"Upload des résultats pour {filename}...")
+            logger.info(f"Upload des résultats pour {filename}...")
             upload_file_to_folder(drive_service, json_output_path, source_folder_id)
             upload_file_to_folder(drive_service, pdf_output_path, source_folder_id)
             
-            print(f"--- Succès traitement : {filename} ---")
+            logger.info(f"SUCCESS : {filename}")
             return True
         else:
-            print(f"--- Échec parsing : {filename} ---")
+            logger.warning(f"FAILURE Parsing (Données vides) : {filename}")
             return False
 
     except Exception as e:
-        print(f"!!! ERREUR CRITIQUE sur {filename} : {e}")
+        logger.error(f"CRITICAL ERROR sur {filename} : {e}", exc_info=True)
         return False
 
 def main():
     """
     Script principal pour le traitement des CV depuis Google Drive.
     """
-    print("--- Début du pipeline ETL CV ---")
+    logger.info("--- Début du pipeline ETL CV ---")
 
     # Récupération des variables d'environnement
     source_folder_id = os.environ.get('SOURCE_FOLDER_ID')
 
     if not source_folder_id:
-        print("Erreur : La variable d'environnement SOURCE_FOLDER_ID n'est pas définie.")
+        logger.error("La variable d'environnement SOURCE_FOLDER_ID n'est pas définie.")
         return
 
     # Authentification et service Drive
     try:
         drive_service = get_drive_service()
     except Exception as e:
-        print(f"Erreur lors de l'authentification à Google Drive : {e}")
+        logger.critical(f"Erreur authentification Google Drive : {e}")
         return
 
-    # Préchauffage du modèle NLP (une seule fois pour tous les threads)
-    print("Chargement du modèle NLP...")
+    # Préchauffage du modèle NLP
+    logger.info("Chargement du modèle NLP (Spacy)...")
     load_spacy_model()
 
     # Téléchargement des CV
-    print(f"Téléchargement des fichiers depuis le dossier source...")
+    logger.info(f"Téléchargement des fichiers depuis le dossier source...")
     downloaded_files = download_files_from_folder(drive_service, source_folder_id, DOWNLOADS_DIR)
 
     if not downloaded_files:
-        print("Aucun fichier à traiter. Fin du script.")
+        logger.info("Aucun fichier à traiter. Fin du script.")
         return
 
     # Création du dossier de sortie local
     os.makedirs(OUTPUTS_DIR, exist_ok=True)
 
     # Traitement parallèle
-    print(f"Lancement du traitement parallèle avec {MAX_WORKERS} workers...")
+    logger.info(f"Lancement du traitement parallèle avec {MAX_WORKERS} workers...")
     
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        # On passe le service et l'ID dossier à chaque tâche
-        # Note: Le client Google API est thread-safe pour la plupart des opérations,
-        # ou gère ses propres connexions poolées.
         futures = [
             executor.submit(process_single_file, file_path, drive_service, source_folder_id)
             for file_path in downloaded_files
         ]
         
-        # Attente de la fin de toutes les tâches
         for future in futures:
             future.result()
 
-    print("\n--- Pipeline terminé. ---")
+    logger.info("--- Pipeline terminé. ---")
 
 if __name__ == "__main__":
     main()
