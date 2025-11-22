@@ -350,23 +350,37 @@ class UniversalParser:
         map_keys = {
             "experience": ["expérience", "experience", "mandats", "parcours"],
             "education": ["formation", "education", "diplômes"],
-            "skills": ["compétences", "skills", "expertises"],
+            "skills": ["compétences", "skills", "expertises", "technologies", "technique"],
             "summary": ["résumé", "summary", "profil", "objectif"],
             "languages": ["langues"],
             "achievements": ["réalisations", "projets"],
             "extra": ["intérêts", "hobbies", "certifications"],
         }
         current = "unmapped"
-        for line in self.lines:
+        # Header detection improvement:
+        # We track if we are in a header section (e.g. name/contact info)
+        # Usually, the first few lines are basics.
+        
+        for i, line in enumerate(self.lines):
             line_lower = line.lower()
+            
+            # Heuristique simple : les 10 premières lignes sont souvent des basics si non mappées
+            if i < 10 and current == "unmapped":
+                 # On ne change rien, ça ira dans unmapped qui servira au basics extraction
+                 pass
+
             if len(line) < 60:
                 for key, aliases in map_keys.items():
-                    if any(val in line_lower for val in aliases) and (
-                        line.isupper() or len(line.split()) < 5
+                    # Check if line is a section header
+                    if any(val == line_lower or val in line_lower for val in aliases) and (
+                        line.isupper() or len(line.split()) < 5 or line.endswith(":")
                     ):
                         current = key
                         break
+            
+            # Check for recurring headers/footers to ignore (simple duplicate check could be added here)
             sections[current].append(line)
+            
         return sections
 
     def extract_experience_blocks(self, raw_lines: List[str]) -> List[Dict[str, Any]]:
@@ -457,10 +471,19 @@ def _rule_based_entry(block: Dict[str, Any]) -> ExperienceEntry:
 
     tasks: List[str] = []
     for raw in lines[1:]:
-        if re.match(r"^[\-\*•]", raw):
-            tasks.append(re.sub(r"^[\-\*•\s]+", "", raw).strip())
+        # Nettoyage des caractères invisibles
+        clean_line = raw.strip()
+        # Regex élargie pour détecter les puces : tiret, astérisque, bullet ronde, bullet carrée, flèche
+        if re.match(r"^[\-\*•▪‣➢\+]+", clean_line):
+             tasks.append(re.sub(r"^[\-\*•▪‣➢\+\s]+", "", clean_line).strip())
+        # Heuristique : si la ligne commence par un verbe d'action (liste non exhaustive) et pas de puce
+        elif re.match(r"^(Développer|Concevoir|Gérer|Analyser|Participer|Mettre en place|Assurer|Réaliser|Créer|Optimiser|Maintenir)\b", clean_line, re.IGNORECASE):
+             tasks.append(clean_line)
+             
     if not tasks:
-        tasks = [line for line in lines[1:4] if len(line) > 5]
+        # Fallback ultime : on prend toutes les lignes de longueur > 15 chars qui ne sont pas des headers/dates
+        # On exclut les lignes trop courtes (titres, lieux)
+        tasks = [line for line in lines[1:] if len(line) > 20 and not DATE_RANGE_REGEX.search(line)]
 
     dates = block.get("date_text", "")
     duration = compute_duration_label(dates)
@@ -502,6 +525,7 @@ def parse_cv(file_path: str) -> Optional[dict]:
             entry: Optional[ExperienceEntry] = None
 
             if USE_AI_EXPERIENCE and ai_parse_experience_block:
+                logger.info(f"Parsing AI expérience (bloc de {len(block['text'])} chars)...")
                 try:
                     ai_payload = ai_parse_experience_block(block["text"])
                 except Exception as exc:
@@ -513,8 +537,12 @@ def parse_cv(file_path: str) -> Optional[dict]:
                     except Exception as exc:  # pragma: no cover
                         logger.warning("AI payload invalide, fallback rule-based: %s", exc)
                         entry = None
-
+            else:
+                if USE_AI_EXPERIENCE:
+                    logger.warning("IA activée mais module non disponible. Fallback rule-based.")
+            
             if entry is None:
+                logger.info("Utilisation parser Rule-based pour ce bloc.")
                 entry = _rule_based_entry(block)
 
             structured_experiences.append(entry)
