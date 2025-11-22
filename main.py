@@ -3,7 +3,7 @@ import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from google_drive import get_drive_service, download_files_from_folder, upload_file_to_folder
-from parsers import parse_cv, load_spacy_model
+from parsers import parse_cv
 from formatters import generate_pdf_from_data
 
 # --- Configuration Logging ---
@@ -113,13 +113,12 @@ def main():
         logger.critical(f"Erreur authentification Google Drive : {e}")
         return
 
-    # Préchauffage du modèle NLP
-    logger.info("Chargement du modèle NLP (Spacy)...")
-    try:
-        load_spacy_model()
-    except Exception as e:
-        logger.error(f"Erreur chargement Spacy: {e}")
-        # On continue, le parser gérera peut-être sans Spacy ou avec un modèle par défaut
+    # Préchauffage du modèle NLP (Désactivé - remplacé par AI)
+    # logger.info("Chargement du modèle NLP (Spacy)...")
+    # try:
+    #     load_spacy_model()
+    # except Exception as e:
+    #     logger.error(f"Erreur chargement Spacy: {e}")
 
     # Téléchargement des CV
     logger.info(f"Téléchargement des fichiers depuis le dossier source...")
