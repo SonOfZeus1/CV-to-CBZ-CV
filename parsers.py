@@ -13,9 +13,19 @@ import spacy
 from PIL import Image
 from dateparser import parse as parse_date
 
-from ai_parsers import ai_parse_experience_block
-
 logger = logging.getLogger(__name__)
+
+# --- Feature flag pour activer/désactiver l'IA ---
+USE_AI_EXPERIENCE = os.getenv("USE_AI_EXPERIENCE", "false").lower() in {"1", "true", "yes"}
+if USE_AI_EXPERIENCE:
+    try:
+        from ai_parsers import ai_parse_experience_block  # type: ignore
+    except Exception as exc:  # pragma: no cover
+        logger.warning("Désactivation IA (import impossible) : %s", exc)
+        USE_AI_EXPERIENCE = False
+        ai_parse_experience_block = None  # type: ignore
+else:
+    ai_parse_experience_block = None  # type: ignore
 
 # --- SCHÉMA DE DONNÉES ---
 
@@ -489,11 +499,24 @@ def parse_cv(file_path: str) -> Optional[dict]:
         experience_blocks = parser.extract_experience_blocks(sections["experience"])
         structured_experiences: List[ExperienceEntry] = []
         for block in experience_blocks:
-            ai_payload = ai_parse_experience_block(block["text"])
-            if ai_payload:
-                entry = _build_entry_from_ai(block, ai_payload)
-            else:
+            entry: Optional[ExperienceEntry] = None
+
+            if USE_AI_EXPERIENCE and ai_parse_experience_block:
+                try:
+                    ai_payload = ai_parse_experience_block(block["text"])
+                except Exception as exc:
+                    logger.warning("AI parsing failure, fallback to rule-based: %s", exc)
+                    ai_payload = {}
+                if ai_payload:
+                    try:
+                        entry = _build_entry_from_ai(block, ai_payload)
+                    except Exception as exc:  # pragma: no cover
+                        logger.warning("AI payload invalide, fallback rule-based: %s", exc)
+                        entry = None
+
+            if entry is None:
                 entry = _rule_based_entry(block)
+
             structured_experiences.append(entry)
 
         clean_summary = parser.normalize_paragraph(sections["summary"])

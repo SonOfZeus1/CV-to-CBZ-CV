@@ -9,10 +9,11 @@ Ce projet automatise le traitement de CVs (.pdf, .docx) stockés dans un dossier
     - OCR intelligent (via Tesseract) qui ne s'active que si la densité de texte est insuffisante.
     - Extraction de texte via Regex (Emails, Téléphones, Liens) et NLP (Spacy) pour les noms et compétences.
     - Segmentation automatique des sections (Expérience, Formation).
-- **Structuration IA Groq** :
+- **Structuration IA Groq (optionnelle)** :
     - Chaque bloc d'expérience est restructuré par un modèle Groq (LLM) avec validation stricte.
     - Format imposé : `Titre – Entreprise, Localisation` + `Dates (Durée)` + Résumé + Tâches + Compétences.
     - Fallback déterministe regex si l'IA échoue ou n'est pas disponible.
+    - **Désactivée par défaut** (`USE_AI_EXPERIENCE=false`) pour garantir la stabilité; voir section configuration pour l’activer.
 - **Performance** : Traitement séquentiel (1 worker) pour la stabilité, prêt pour le multi-threading si nécessaire.
 - **Génération de Fichiers** : Crée un fichier `.json` structuré et un `.pdf` formaté.
 - **Upload vers Google Drive** : Renvoie les résultats directement dans le dossier source.
@@ -63,6 +64,10 @@ Ensuite, vous devez configurer les secrets suivants dans votre dépôt GitHub (`
 
 6. *(Optionnel)* **`GROQ_MODEL`** (Variables → Repository variables) :
     - Permet de surcharger le modèle Groq (ex: `llama-3.1-70b-versatile`). Par défaut, ce modèle est utilisé.
+
+7. *(Optionnel)* **`USE_AI_EXPERIENCE`** :
+    - Variable d’environnement (secret ou variable) permettant d’activer explicitement l’IA sur les expériences.
+    - Valeurs acceptées : `true/1/yes`. Par défaut elle vaut `false`, ce qui force le parser rule-based seul.
 
 ## Lancement
 

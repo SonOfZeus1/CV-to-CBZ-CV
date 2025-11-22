@@ -106,3 +106,7 @@ Le résumé et les sections sont masqués si vides, garantissant la structure vi
 - Ajout de tests unitaires sur `compute_duration_label` + `segment_experience_blocks`.
 - Ajout d'une file `ai_cache.json` si l'on souhaite mémoïser les réponses Groq sur un repo public (non requis aujourd'hui).
 
+## 7. Feature Flag IA
+- `USE_AI_EXPERIENCE=false` (par défaut) : seul le parser rule-based est utilisé, aucune dépendance à Groq pendant l’exécution GitHub Action.
+- `USE_AI_EXPERIENCE=true` : `ai_parsers.py` est chargé, chaque bloc d’expérience passe par Groq puis validation. Tout échec retombe automatiquement sur `_rule_based_entry`.
+
