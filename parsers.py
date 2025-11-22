@@ -470,20 +470,31 @@ def _rule_based_entry(block: Dict[str, Any]) -> ExperienceEntry:
         company = ",".join(company_parts[:-1]).strip()
 
     tasks: List[str] = []
-    for raw in lines[1:]:
+    # On commence après la première ligne (header)
+    # et on s'arrête avant la ligne "environnement technologique" si elle existe
+    lines_to_scan = []
+    stop_scan = False
+    for line in lines[1:]:
+         if "environnement technologique" in line.lower():
+             stop_scan = True
+             continue # On ne prend pas la ligne de footer tech
+         if not stop_scan:
+             lines_to_scan.append(line)
+
+    for raw in lines_to_scan:
         # Nettoyage des caractères invisibles
         clean_line = raw.strip()
         # Regex élargie pour détecter les puces : tiret, astérisque, bullet ronde, bullet carrée, flèche
         if re.match(r"^[\-\*•▪‣➢\+]+", clean_line):
              tasks.append(re.sub(r"^[\-\*•▪‣➢\+\s]+", "", clean_line).strip())
         # Heuristique : si la ligne commence par un verbe d'action (liste non exhaustive) et pas de puce
-        elif re.match(r"^(Développer|Concevoir|Gérer|Analyser|Participer|Mettre en place|Assurer|Réaliser|Créer|Optimiser|Maintenir)\b", clean_line, re.IGNORECASE):
+        elif re.match(r"^(Développer|Concevoir|Gérer|Analyser|Participer|Mettre en place|Assurer|Réaliser|Créer|Optimiser|Maintenir|Support|Rédaction|Configuration|Migration|Refonte)\b", clean_line, re.IGNORECASE):
              tasks.append(clean_line)
              
     if not tasks:
         # Fallback ultime : on prend toutes les lignes de longueur > 15 chars qui ne sont pas des headers/dates
         # On exclut les lignes trop courtes (titres, lieux)
-        tasks = [line for line in lines[1:] if len(line) > 20 and not DATE_RANGE_REGEX.search(line)]
+        tasks = [line for line in lines_to_scan if len(line) > 15 and not DATE_RANGE_REGEX.search(line)]
 
     dates = block.get("date_text", "")
     duration = compute_duration_label(dates)

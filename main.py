@@ -54,9 +54,34 @@ def process_single_file(file_path, drive_service, source_folder_id):
             
             # 4. Uploader les fichiers générés sur Google Drive
             logger.info(f"Upload des résultats pour {filename}...")
-            # Note: drive_service est passé, attention au thread-safety si MAX_WORKERS > 1
-            upload_file_to_folder(drive_service, json_output_path, source_folder_id)
-            upload_file_to_folder(drive_service, pdf_output_path, source_folder_id)
+            
+            # Vérification anti-doublon avant upload
+            # On liste les fichiers existants avec le même nom dans le dossier cible
+            existing_files = []
+            try:
+                 q = f"'{source_folder_id}' in parents and name = '{os.path.basename(json_output_path)}' and trashed = false"
+                 res = drive_service.files().list(q=q, fields="files(id)").execute()
+                 existing_files = res.get('files', [])
+            except Exception:
+                 pass
+
+            if not existing_files:
+                upload_file_to_folder(drive_service, json_output_path, source_folder_id)
+            else:
+                logger.info(f"Fichier JSON déjà présent sur Drive, skip upload : {json_output_path}")
+
+            existing_pdfs = []
+            try:
+                 q = f"'{source_folder_id}' in parents and name = '{os.path.basename(pdf_output_path)}' and trashed = false"
+                 res = drive_service.files().list(q=q, fields="files(id)").execute()
+                 existing_pdfs = res.get('files', [])
+            except Exception:
+                 pass
+
+            if not existing_pdfs:
+                upload_file_to_folder(drive_service, pdf_output_path, source_folder_id)
+            else:
+                logger.info(f"Fichier PDF déjà présent sur Drive, skip upload : {pdf_output_path}")
             
             logger.info(f"SUCCESS : {filename}")
             return True
