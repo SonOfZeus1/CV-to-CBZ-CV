@@ -1,72 +1,108 @@
-# ANALYSE TECHNIQUE (Architecture V3 - Robust Hybrid Parsing)
+# ANALYSE TECHNIQUE (Architecture V4 - AI Stable Experiences)
 
-Ce document décrit l'architecture refondue du pipeline de traitement de CV. Cette version (v3) a été conçue pour pallier les manques de fiabilité des librairies obsolètes (`pyresparser`) et pour offrir une structure de données riche et exploitable.
+Ce document décrit la nouvelle architecture orientée "AI-first mais robuste" du pipeline de traitement de CV.
 
 ## 1. Architecture Globale
 
-Le pipeline est un système ETL (Extract, Transform, Load) exécuté de manière éphémère sur GitHub Actions.
+| Étape | Description |
+|-------|-------------|
+| **Extract** | Téléchargement des CVs depuis Google Drive (API v3 + WIF) avec prise en charge des Shared Drives. |
+| **Transform** | Parsing hybride : OCR conditionnel, segmentation regex, appels Groq pour structurer chaque expérience, validation + fallback. |
+| **Load** | Génération JSON + PDF, puis upload dans le même dossier source. |
 
-- **Source :** Google Drive (Supporte les "Shared Drives").
-- **Compute :** GitHub Runner (Ubuntu 22.04/24.04, Python 3.11).
-- **Destination :** Google Drive (Même dossier que la source).
-- **Concurrency :** Traitement parallèle (Multi-threading) pour optimiser les I/O.
+L'exécution se fait sur GitHub Actions (Ubuntu, Python 3.11, Tesseract installé à la volée). Les secrets Drive et Groq sont injectés au runtime via OIDC + GitHub Secrets.
 
-## 2. Stratégie de Parsing (Le cœur du système)
+## 2. Chaîne de Parsing
 
-L'ancien parser (boîte noire fragile) a été remplacé par une implémentation maison (`parsers.py`) qui combine plusieurs techniques pour garantir un résultat, même sur des documents difficiles.
+### 2.1 Extraction de texte
+- `PyMuPDF` lit le texte natif.
+- Si la densité < 50 caractères/page, activation OCR (`pytesseract`) page par page.
+- Les documents `.docx` sont lus via `python-docx`.
 
-### A. Extraction de Texte Hybride
-Le système décide dynamiquement comment lire le fichier :
-1.  **Extraction native (`fitz`) :** Rapide et précise pour les "vrais" PDF.
-2.  **Détection de "Garbage" / Scan :** Si la densité de texte est trop faible (< 50 chars/page) ou si le ratio de caractères non-alphanumériques dépasse 40% (signe d'un mauvais encodage de police), le mode OCR s'active.
-3.  **OCR (`Tesseract`) :** Conversion des pages en images haute résolution (150 DPI) puis extraction optique.
+### 2.2 Segmentation
+- `UniversalParser` nettoie le texte (suppression des entêtes/pieds de page).
+- Les sections (`Expérience`, `Formation`, etc.) sont détectées par mots-clés.
+- À l'intérieur du bloc expérience, une regex `DATE_RANGE_REGEX` identifie les séparateurs (dates sur la ligne). Chaque bloc contient :
+  - texte brut,
+  - extrait de dates exact,
+  - indice de localisation (extraction heuristique),
+  - lignes d'origine.
 
-### B. Analyse Sémantique "Inter-Section"
-Au lieu de traiter le texte comme un bloc unique, le parser le segmente :
-1.  **Identification des Headers :** Utilisation de mots-clés (`Expérience`, `Formation`, `Langues`) pour découper le texte en blocs logiques.
-2.  **Parsing Granulaire (Expérience) :**
-    - À l'intérieur du bloc "Expérience", une Regex puissante détecte les lignes contenant des dates (ex: `Jan 2020 - Present`).
-    - Ces lignes servent de séparateurs pour créer des objets `ExperienceEntry` structurés.
-    - Une analyse NER (Spacy) est tentée sur ces lignes pour extraire le nom de l'entreprise (`ORG`).
-3.  **Extraction de Champs Spécifiques :**
-    - **Emails/Téléphones/Liens :** Regex strictes.
-    - **Compétences :** Recherche par dictionnaire de mots-clés (Tech vs Soft) + NLP.
+### 2.3 Structuration IA + Fallback
+1. **IA (Groq)**
+   - `ai_client.py` : wrapper Groq (modèle `llama-3.1-70b-versatile` par défaut), retries exponentiels, sortie forcée JSON.
+   - `ai_parsers.py` : prompt strict (pas d'invention, format JSON imposé).
+   - `ai_parse_experience_block` renvoie `titre_poste`, `entreprise`, `localisation`, `dates`, `duree`, `resume`, `taches`, `competences`.
 
-### C. Modèle de Données (Schema)
-Les données ne sont plus des dictionnaires en vrac, mais des `dataclass` Python typées, garantissant une structure JSON constante :
+2. **Validation**
+   - Champs obligatoires : titre, entreprise, dates, au moins 1 tâche + 1 compétence tech.
+   - Si un champ est manquant → résultat ignoré.
+
+3. **Fallback Rule-based**
+   - `_rule_based_entry` exploite les lignes d'origine : découpe du header (`Titre – Entreprise`), extraction location, bullets `-/*/•`, dictionnaire de technos.
+   - Durée calculée par `compute_duration_label` (via `dateparser`).
+
+4. **Sortie unifiée**
+   - `ExperienceEntry` dataclass: `job_title`, `company`, `location`, `dates`, `duration`, `summary`, `tasks`, `skills`, `full_text`.
+   - Toujours au moins un objet par bloc d'expérience.
+
+### 2.4 Normalisation
+- `formatters.py` génère exactement le rendu demandé :
+
+```
+[Titre] – [Entreprise], [Localisation]
+[Dates] ([Durée])
+
+Résumé
+...
+
+Tâches principales
+- ...
+
+Compétences liées à cette expérience
+Java, Spring Boot, ...
+```
+
+Le résumé et les sections sont masqués si vides, garantissant la structure visuelle.
+
+## 3. Gestion des Durées
+- `compute_duration_label` découpe la chaîne de dates et utilise `dateparser` pour interpréter des formats FR/EN (mois abrégés, "Présent", etc.).
+- Gestion des cas ouverts (Présent → date du jour).
+- Résultat normalisé : `"{X} ans {Y} mois"` ou `"{X} mois"`.
+
+## 4. Robustesse & Observabilité
+- **AI Client** : `GROQ_API_KEY` obligatoire, `GROQ_MODEL` optionnel. Les erreurs sont journalisées (`logger.warning`), puis fallback automatique.
+- **Logging** : tous les modules (`google_drive`, `parsers`, `ai_client`) partagent le logger standard.
+- **Filet de sécurité** : `full_text` stocke le bloc original, et la section `Annexe` du PDF conserve les lignes non classifiées.
+
+## 5. JSON Final
 
 ```json
 {
-  "meta": { "filename": "cv.pdf", "ocr_applied": "True" },
+  "meta": { "filename": "...", "ocr_applied": "False" },
   "basics": { "name": "...", "email": "...", "phone": "..." },
-  "skills_tech": ["Python", "Docker"],
   "experience": [
     {
-      "title": "Devops Engineer",
-      "company": "TechCorp",
-      "date_start": "2020",
-      "date_end": "Present",
-      "description": ["Managed K8s cluster", "CI/CD pipeline"]
+      "job_title": "...",
+      "company": "...",
+      "location": "...",
+      "dates": "Janv. 2021 - Présent",
+      "duration": "3 ans 2 mois",
+      "summary": "",
+      "tasks": ["..."],
+      "skills": ["Java", "Spring Boot"],
+      "full_text": "Bloc brut..."
     }
   ],
+  "education": [{"degree": "...", "full_text": "..."}],
+  "skills_tech": [...],
+  "skills_soft": [...],
   "raw_text": "..."
 }
 ```
 
-## 3. Performance & Scalabilité
-
-- **Chargement Unique :** Le modèle NLP (Spacy `en_core_web_sm`) est chargé une seule fois en mémoire au démarrage du script, et partagé entre les threads.
-- **Parallélisme :** Utilisation de `ThreadPoolExecutor` (4 workers par défaut) pour télécharger, traiter et uploader 4 CVs simultanément. Cela permet de masquer la latence réseau de l'API Google Drive.
-
-## 4. Robustesse & Gestion d'Erreurs
-
-- **Logging :** Utilisation du module `logging` standard.
-- **Fallback :** Si le parsing structuré échoue (cas très rare), le script ne plante pas. Il capture l'exception et renvoie un objet `CVData` valide contenant au moins le texte brut (`raw_text`) et l'erreur dans les métadonnées.
-- **Nettoyage :** Les ressources graphiques (Pixmaps) générées lors de l'OCR sont explicitement libérées de la mémoire.
-
-## 5. Pistes d'Évolution
-
-Pour aller encore plus loin :
-- **LLM (GPT-4o/Gemini) :** Remplacer la logique Regex/Spacy par un appel API à un LLM pour structurer le JSON. C'est plus coûteux mais imbattable sur la qualité d'extraction.
-- **Base de données Vectorielle :** Au lieu de générer des JSON, indexer les `raw_text` et les `skills` dans une DB vectorielle (Pinecone, Weaviate) pour permettre la recherche sémantique ("Trouve-moi un candidat qui connaît Python et a fait de la finance").
+## 6. Points d'Extension
+- Support multi-langues pour les prompts Groq (FR/EN déjà gérés implicitement).
+- Ajout de tests unitaires sur `compute_duration_label` + `segment_experience_blocks`.
+- Ajout d'une file `ai_cache.json` si l'on souhaite mémoïser les réponses Groq sur un repo public (non requis aujourd'hui).
 

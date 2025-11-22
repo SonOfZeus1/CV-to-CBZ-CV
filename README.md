@@ -2,14 +2,18 @@
 
 Ce projet automatise le traitement de CVs (.pdf, .docx) stockés dans un dossier Google Drive en utilisant une GitHub Action et une authentification sécurisée sans clé via Workload Identity Federation.
 
-## Fonctionnalités (Mise à jour v2)
+## Fonctionnalités (Mise à jour IA Stable)
 
 - **Téléchargement depuis Google Drive** : Récupère les fichiers .pdf et .docx d'un dossier spécifié (supporte les Shared Drives).
 - **Extraction Hybride Robuste** : 
     - OCR intelligent (via Tesseract) qui ne s'active que si la densité de texte est insuffisante.
     - Extraction de texte via Regex (Emails, Téléphones, Liens) et NLP (Spacy) pour les noms et compétences.
     - Segmentation automatique des sections (Expérience, Formation).
-- **Performance** : Traitement parallélisé des fichiers (multi-threading) pour réduire le temps d'exécution.
+- **Structuration IA Groq** :
+    - Chaque bloc d'expérience est restructuré par un modèle Groq (LLM) avec validation stricte.
+    - Format imposé : `Titre – Entreprise, Localisation` + `Dates (Durée)` + Résumé + Tâches + Compétences.
+    - Fallback déterministe regex si l'IA échoue ou n'est pas disponible.
+- **Performance** : Traitement séquentiel (1 worker) pour la stabilité, prêt pour le multi-threading si nécessaire.
 - **Génération de Fichiers** : Crée un fichier `.json` structuré et un `.pdf` formaté.
 - **Upload vers Google Drive** : Renvoie les résultats directement dans le dossier source.
 
@@ -53,6 +57,13 @@ Ensuite, vous devez configurer les secrets suivants dans votre dépôt GitHub (`
     - L'ID du dossier se trouve dans l'URL (`https://drive.google.com/drive/folders/THIS_IS_THE_ID`).
     - Créez un secret avec cet ID.
 
+5. **`GROQ_API_KEY`** :
+    - Clé API Groq utilisée pour l'appel LLM.
+    - Le workflow l'injecte dans `main.py` pour activer le parsing IA. Sans cette clé, le fallback regex sera utilisé.
+
+6. *(Optionnel)* **`GROQ_MODEL`** (Variables → Repository variables) :
+    - Permet de surcharger le modèle Groq (ex: `llama-3.1-70b-versatile`). Par défaut, ce modèle est utilisé.
+
 ## Lancement
 
 Le workflow est configuré pour s'exécuter de deux manières :
@@ -61,3 +72,26 @@ Le workflow est configuré pour s'exécuter de deux manières :
 2.  **Planifié** : Le workflow s'exécute automatiquement tous les jours à 2h UTC (configurable dans `process-cvs.yml`).
 
 Les fichiers traités (`.json` et `.pdf`) seront automatiquement uploadés dans le même dossier que les fichiers sources sur Google Drive.
+
+## Format JSON des expériences
+
+Chaque expérience est garantie avec le schéma suivant :
+
+```json
+{
+  "job_title": "Développeur Fullstack",
+  "company": "TechCorp",
+  "location": "Montréal, QC",
+  "dates": "Janvier 2021 - Présent",
+  "duration": "3 ans 2 mois",
+  "summary": "Synthèse optionnelle si présente dans le CV original.",
+  "tasks": [
+    "Construire ...",
+    "Maintenir ..."
+  ],
+  "skills": ["Java", "Spring Boot", "React"],
+  "full_text": "Bloc brut conservé en filet de sécurité."
+}
+```
+
+Ce format est ensuite injecté tel quel dans le template HTML (Résumé → Tâches → Compétences), garantissant une restitution stable entre le JSON et le PDF.
