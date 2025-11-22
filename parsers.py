@@ -3,40 +3,24 @@ import logging
 import os
 import re
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import docx
 import fitz  # PyMuPDF
 import pytesseract
-import spacy
 from PIL import Image
-from dateparser import parse as parse_date
+
+# New AI Modules
+from ai_parsers import (
+    ai_parse_contact,
+    ai_parse_segmentation,
+    ai_parse_experience_block,
+    ai_parse_education
+)
 
 logger = logging.getLogger(__name__)
 
-# --- Feature flag pour activer/désactiver l'IA ---
-# --- Feature flag pour activer/désactiver l'IA ---
-# Force AI if API key is present
-HAS_API_KEY = bool(os.getenv("GROQ_API_KEY"))
-USE_AI_EXPERIENCE = HAS_API_KEY or (os.getenv("USE_AI_EXPERIENCE", "false").lower() in {"1", "true", "yes"})
-
-if USE_AI_EXPERIENCE:
-    try:
-        from ai_parsers import ai_parse_experience_block, ai_parse_contact  # type: ignore
-        logger.info("AI Module loaded successfully. USE_AI_EXPERIENCE=True")
-    except Exception as exc:  # pragma: no cover
-        logger.warning("Désactivation IA (import impossible) : %s", exc)
-        USE_AI_EXPERIENCE = False
-        ai_parse_experience_block = None  # type: ignore
-        ai_parse_contact = None  # type: ignore
-else:
-    logger.info("AI Module disabled (no key or flag). USE_AI_EXPERIENCE=False")
-    ai_parse_experience_block = None  # type: ignore
-    ai_parse_contact = None  # type: ignore
-
-# --- SCHÉMA DE DONNÉES ---
-
+# --- DATA SCHEMA ---
 
 @dataclass
 class ExperienceEntry:
@@ -53,22 +37,18 @@ class ExperienceEntry:
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
-
 @dataclass
 class EducationEntry:
     degree: str = ""
     institution: str = ""
-    date_start: str = ""
+    date_start: str = "" # Often just "Year"
     date_end: str = ""
     full_text: str = ""
-
 
 @dataclass
 class CVData:
     meta: Dict[str, str] = field(default_factory=dict)
-    basics: Dict[str, str] = field(
-        default_factory=lambda: {"name": "", "email": "", "phone": "", "location": ""}
-    )
+    basics: Dict[str, Any] = field(default_factory=dict)
     summary: str = ""
     skills_tech: List[str] = field(default_factory=list)
     skills_soft: List[str] = field(default_factory=list)
@@ -87,24 +67,7 @@ class CVData:
         payload["education"] = [asdict(edu) for edu in self.education]
         return payload
 
-
-# --- OUTILS GÉNÉRAUX ---
-
-NLP = None
-
-
-def load_spacy_model():
-    global NLP
-    if NLP is None:
-        try:
-            NLP = spacy.load("en_core_web_sm")
-        except OSError:
-            from spacy.cli import download
-
-            download("en_core_web_sm")
-            NLP = spacy.load("en_core_web_sm")
-    return NLP
-
+# --- TEXT EXTRACTION ---
 
 def extract_text_from_docx(file_path: str) -> str:
     try:
@@ -113,7 +76,6 @@ def extract_text_from_docx(file_path: str) -> str:
     except Exception as exc:
         logger.warning("DOCX extraction failed (%s): %s", file_path, exc)
         return ""
-
 
 def extract_text_from_pdf(file_path: str) -> tuple[str, bool]:
     text = ""
@@ -132,481 +94,34 @@ def extract_text_from_pdf(file_path: str) -> tuple[str, bool]:
                     img_bytes = pix.tobytes("png")
                     image = Image.open(io.BytesIO(img_bytes))
                     text += pytesseract.image_to_string(image) + "\n"
-                    del pix
-                    del image
     except Exception as exc:
         logger.error("PDF extraction failed (%s): %s", file_path, exc)
     return text, ocr_applied
 
+# --- CORE PIPELINE ---
 
-# --- PARSING AVANCÉ ---
-
-TECH_KEYWORDS = {
-    "python",
-    "java",
-    "c++",
-    "c#",
-    ".net",
-    "javascript",
-    "typescript",
-    "react",
-    "angular",
-    "vue",
-    "sql",
-    "mysql",
-    "postgresql",
-    "oracle",
-    "mongodb",
-    "docker",
-    "kubernetes",
-    "aws",
-    "azure",
-    "gcp",
-    "jenkins",
-    "gitlab",
-    "git",
-    "jira",
-    "confluence",
-    "tableau",
-    "power bi",
-    "sap",
-    "salesforce",
-    "linux",
-    "windows",
-    "spark",
-    "hadoop",
-    "terraform",
-    "ansible",
-    "snowflake",
-    "databricks",
-    "pandas",
-    "numpy",
-    "scikit-learn",
-    "matlab",
-}
-
-DATE_RANGE_REGEX = re.compile(
-    r"(?i)((?:\d{4}|"
-    r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
-    r"|\b(?:janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\b)"
-    r"[\w\séû\.']{0,15}?\d{4})\s*[-–—]\s*("
-    r"(?:\d{4}|"
-    r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
-    r"[\w\séû\.']{0,15}?\d{4}|"
-    r"(?:présent|present|aujourd'hui|aujourd’hui|maintenant|current))"
-    r")"
-)
-
-PRESENT_TOKENS = {"present", "présent", "aujourd'hui", "aujourd’hui", "maintenant", "current"}
-
-
-def _parse_natural_date(chunk: str) -> Optional[datetime]:
-    cleaned = chunk.strip().lower()
-    if not cleaned:
-        return None
-    if cleaned in PRESENT_TOKENS:
-        return datetime.utcnow()
-    parsed = parse_date(chunk, languages=["fr", "en"])
-    return parsed
-
-
-def compute_duration_label(dates_text: str) -> str:
-    if not dates_text:
-        return ""
-    parts = re.split(r"\s*[-–—]\s*", dates_text)
-    if len(parts) < 2:
-        return ""
-    start = _parse_natural_date(parts[0])
-    end = _parse_natural_date(parts[1])
-    if not start:
-        return ""
-    end = end or datetime.utcnow()
-    months = (end.year - start.year) * 12 + (end.month - start.month)
-    if end.day < start.day:
-        months -= 1
-    if months < 0:
-        return ""
-    years, remaining_months = divmod(months, 12)
-    chunks = []
-    if years > 0:
-        chunks.append(f"{years} an{'s' if years > 1 else ''}")
-    if remaining_months > 0:
-        chunks.append(f"{remaining_months} mois")
-    if not chunks and months >= 0:
-        chunks.append("1 mois")
-    return " ".join(chunks)
-
-
-def extract_skills_from_text(text: str, limit: int = 12) -> List[str]:
-    tokens = re.findall(r"[A-Za-z0-9\+#\.]+(?:\s+[A-Za-z0-9\+#\.]+)?", text.lower())
-    found: List[str] = []
-    for token in tokens:
-        normalized = token.strip()
-        if not normalized:
+def pre_process_text(text: str) -> str:
+    """Removes repetitive headers/footers."""
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    cleaned_lines = []
+    patterns_to_remove = [
+        r"^page\s*\d+\s*(/|sur|of)\s*\d+$",
+        r"^document\s+généré\s+automatiquement",
+        r"^curriculum\s*vitae$",
+        r"^cv$",
+    ]
+    
+    for line in lines:
+        if any(re.match(pat, line, re.IGNORECASE) for pat in patterns_to_remove):
             continue
-        if normalized in TECH_KEYWORDS and normalized.capitalize() not in found:
-            found.append(normalized.capitalize())
-        if len(found) >= limit:
-            break
-    return found
-
-
-class UniversalParser:
-    def __init__(self, text: str):
-        self.raw_text = text
-        self.nlp = load_spacy_model()
-        self.doc = self.nlp(text[:100000])
-        self.lines = self.pre_process_text(text)
-
-    def pre_process_text(self, text: str) -> List[str]:
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-        
-        # 1. Detect repetitive lines (headers/footers)
-        # We look for lines that appear on multiple pages (if we could detect pages).
-        # Since we have flat text, we look for exact duplicates that appear at regular intervals 
-        # or specific patterns like "Page X of Y".
-        
-        cleaned_lines = []
-        patterns_to_remove = [
-            r"^page\s*\d+\s*(/|sur|of)\s*\d+$",
-            r"^document\s+généré\s+automatiquement",
-            r"^curriculum\s*vitae$",
-            r"^cv$",
-        ]
-        
-        # Count line occurrences to identify potential headers/footers
-        line_counts = {}
-        for line in lines:
-            if len(line) < 50: # Headers are usually short
-                line_counts[line] = line_counts.get(line, 0) + 1
-        
-        # Threshold: if a line appears more than once and matches a pattern or is very short/common
-        # Note: Be careful not to remove "Experience" if it appears multiple times (unlikely but possible)
-        
-        for line in lines:
-            # Always remove explicit page numbers / generated by
-            if any(re.match(pat, line, re.IGNORECASE) for pat in patterns_to_remove):
-                continue
-            
-            # Remove duplicates that look like headers (e.g. Name repeated on every page)
-            # Heuristic: if it appears > 2 times and is short, or > 1 time and is very short
-            # But we must be careful. For now, let's stick to explicit patterns and "Page X"
-            
-            cleaned_lines.append(line)
-            
-        return cleaned_lines
-
-    def normalize_paragraph(self, text_lines: List[str]) -> str:
-        full_text = " ".join(text_lines)
-        return re.sub(r"\s+", " ", full_text).strip()
-
-    def extract_basics(self) -> Dict[str, Any]:
-        # AI-First approach for basics if enabled
-        if USE_AI_EXPERIENCE and ai_parse_contact:
-            # On prend les 3000 premiers caractères pour être sûr d'avoir l'entête
-            head_text = "\n".join(self.lines[:50]) 
-            logger.info("Calling AI for contact extraction...")
-            try:
-                ai_basics = ai_parse_contact(head_text)
-                if ai_basics and ai_basics.get("name") and ai_basics.get("name").lower() not in ["compétences techniques", "curriculum vitae"]:
-                    logger.info("AI Contact extraction successful: %s", ai_basics.get("name"))
-                    return {
-                        "name": ai_basics.get("name", ""),
-                        "email": ai_basics.get("email", ""),
-                        "phone": ai_basics.get("phone", ""),
-                        "links": [ai_basics.get("linkedin", "")] if ai_basics.get("linkedin") else [],
-                        "location": ai_basics.get("location", ""),
-                        "title": ai_basics.get("title", ""),
-                        "languages": ai_basics.get("languages", []),
-                    }
-            except Exception as exc:
-                logger.warning("AI contact extraction failed, falling back to regex: %s", exc)
-
-        # Fallback Regex
-        full_text = "\n".join(self.lines)
-        email_regex = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
-        phone_regex = r"(\+?\d{1,3}[-.\s]?)?(\(?\d{2,4}\)?[-.\s]?)?(\d{2,4}[-.\s]?){2,4}"
-        link_regex = r"(https?://\S+|www\.\S+|linkedin\.com/in/\S+|github\.com/\S+)"
-
-        emails = re.findall(email_regex, full_text)
-        phones = [
-            m.group(0).strip()
-            for m in re.finditer(phone_regex, full_text)
-            if len(re.sub(r"\D", "", m.group(0))) >= 9
-        ]
-        links = list(set(re.findall(link_regex, full_text, re.IGNORECASE)))
-
-        name = "Inconnu"
-        blacklist = {
-            "curriculum",
-            "vitae",
-            "resume",
-            "cv",
-            "email",
-            "phone",
-            "page",
-            "profil",
-            "summary",
-            "compétences",
-            "techniques",
-            "experience",
-            "education"
-        }
-        for line in self.lines[:40]:
-            words = line.split()
-            if 2 <= len(words) <= 4:
-                if any(w.lower() in blacklist for w in words):
-                    continue
-                if any(c.isdigit() or c in "@+/" for c in line):
-                    continue
-                if line.isupper():
-                    name = line.title()
-                    break
-                if line.istitle() and name == "Inconnu":
-                    name = line
-        return {
-            "name": name,
-            "email": emails[0] if emails else "",
-            "phone": phones[0] if phones else "",
-            "links": links,
-            "title": "", # Regex parser doesn't extract title reliably
-            "location": "",
-            "languages": []
-        }
-
-    def extract_skills(self) -> Dict[str, List[str]]:
-        tech_keywords = TECH_KEYWORDS
-        soft_keywords = {
-            "management",
-            "communication",
-            "leadership",
-            "agile",
-            "scrum",
-            "anglais",
-            "français",
-            "espagnol",
-            "analyste",
-            "stratégique",
-            "coordination",
-        }
-        tech, soft = set(), set()
-        for token in [t.text.lower() for t in self.doc if not t.is_stop]:
-            if token in tech_keywords:
-                tech.add(token.capitalize())
-            if token in soft_keywords:
-                soft.add(token.capitalize())
-        return {"tech": list(tech), "soft": list(soft)}
-
-    def segment_sections(self) -> Dict[str, List[str]]:
-        sections = {
-            "experience": [],
-            "education": [],
-            "summary": [],
-            "skills": [],
-            "languages": [],
-            "achievements": [],
-            "extra": [],
-            "unmapped": [],
-        }
-        map_keys = {
-            "experience": ["expérience", "experience", "mandats", "parcours"],
-            "education": ["formation", "education", "diplômes"],
-            "skills": ["compétences", "skills", "expertises", "technologies", "technique"],
-            "summary": ["résumé", "summary", "profil", "objectif"],
-            "languages": ["langues"],
-            "achievements": ["réalisations", "projets"],
-            "extra": ["intérêts", "hobbies", "certifications"],
-        }
-        current = "unmapped"
-        # Header detection improvement:
-        # We track if we are in a header section (e.g. name/contact info)
-        # Usually, the first few lines are basics.
-        
-        for i, line in enumerate(self.lines):
-            line_lower = line.lower()
-            
-            # Heuristique simple : les 10 premières lignes sont souvent des basics si non mappées
-            if i < 10 and current == "unmapped":
-                 # On ne change rien, ça ira dans unmapped qui servira au basics extraction
-                 pass
-
-            if len(line) < 60:
-                for key, aliases in map_keys.items():
-                    # Check if line is a section header
-                    if any(val == line_lower or val in line_lower for val in aliases) and (
-                        line.isupper() or len(line.split()) < 5 or line.endswith(":")
-                    ):
-                        current = key
-                        break
-            
-            # Check for recurring headers/footers to ignore (simple duplicate check could be added here)
-            sections[current].append(line)
-            
-        return sections
-
-    def extract_experience_blocks(self, raw_lines: List[str]) -> List[Dict[str, Any]]:
-        if not raw_lines:
-            return []
-        header_indices = []
-        for idx, line in enumerate(raw_lines):
-            if len(line) < 140 and DATE_RANGE_REGEX.search(line):
-                if not header_indices or idx - header_indices[-1] > 1:
-                    header_indices.append(idx)
-        if not header_indices:
-            header_indices = [0]
-
-        blocks: List[Dict[str, Any]] = []
-        for i, start in enumerate(header_indices):
-            end = header_indices[i + 1] if i + 1 < len(header_indices) else len(raw_lines)
-            block_lines = raw_lines[start:end]
-            block_text = "\n".join(block_lines).strip()
-            if not block_text:
-                continue
-            date_text = ""
-            for header_line in block_lines[:3]:
-                match = DATE_RANGE_REGEX.search(header_line)
-                if match:
-                    date_text = match.group(0).strip()
-                    break
-            location_hint = self._extract_location_hint(block_lines)
-            blocks.append(
-                {
-                    "text": block_text,
-                    "lines": block_lines,
-                    "date_text": date_text,
-                    "location_hint": location_hint,
-                }
-            )
-        return blocks
-
-    @staticmethod
-    def _extract_location_hint(block_lines: List[str]) -> str:
-        for line in block_lines[:3]:
-            if "," in line:
-                candidate = line.split(",")[-1].strip()
-                if 2 <= len(candidate) <= 40:
-                    return candidate
-        return ""
-
-
-def _build_entry_from_ai(block: Dict[str, Any], ai_payload: Dict[str, Any]) -> ExperienceEntry:
-    dates = ai_payload.get("dates") or block.get("date_text", "")
-    duration = ai_payload.get("duree") or compute_duration_label(dates)
-    location = ai_payload.get("localisation") or block.get("location_hint", "")
-    tasks = [task.strip() for task in ai_payload.get("taches", []) if task.strip()]
-    skills = [skill.strip() for skill in ai_payload.get("competences", []) if skill.strip()]
-
-    return ExperienceEntry(
-        job_title=ai_payload.get("titre_poste", ""),
-        company=ai_payload.get("entreprise", ""),
-        location=location,
-        dates=dates,
-        duration=duration,
-        summary=ai_payload.get("resume", ""),
-        tasks=tasks,
-        skills=skills,
-        full_text=block.get("text", ""),
-    )
-
-
-def _rule_based_entry(block: Dict[str, Any]) -> ExperienceEntry:
-    lines = [line.strip() for line in block.get("lines", []) if line.strip()]
-    header = lines[0] if lines else ""
-    job_title = header
-    company = ""
-    location = block.get("location_hint", "")
-
-    # Tentative d'extraction Titre / Entreprise
-    if " - " in header:
-        parts = header.split(" - ", 1)
-        job_title = parts[0].strip()
-        company = parts[1].strip()
-    elif "|" in header:
-        parts = header.split("|", 1)
-        job_title = parts[0].strip()
-        company = parts[1].strip()
+        cleaned_lines.append(line)
     
-    # Nettoyage Titre/Entreprise si collés
-    if "," in company and not location:
-        company_parts = company.split(",")
-        location = company_parts[-1].strip()
-        company = ",".join(company_parts[:-1]).strip()
-
-    tasks: List[str] = []
-    skills: List[str] = []
-    
-    # Extraction plus agressive des tâches
-    # On scanne tout le bloc sauf le header et les dates
-    lines_to_scan = []
-    stop_scan = False
-    
-    for line in lines[1:]:
-        lower_line = line.lower()
-        if "environnement technologique" in lower_line or "compétences" in lower_line:
-            # C'est probablement la section skills, on arrête de chercher des tâches ici
-            # mais on continue pour extraire les skills
-            stop_scan = True
-        
-        if not stop_scan:
-            # On ignore les lignes qui ressemblent à des dates
-            if not DATE_RANGE_REGEX.search(line):
-                lines_to_scan.append(line)
-        
-        # Extraction de skills partout
-        found_skills = extract_skills_from_text(line)
-        for s in found_skills:
-            if s not in skills:
-                skills.append(s)
-
-    for raw in lines_to_scan:
-        clean_line = raw.strip()
-        if not clean_line:
-            continue
-            
-        # 1. Puces explicites
-        if re.match(r"^[\-\*•▪‣➢\+]+", clean_line):
-             task_text = re.sub(r"^[\-\*•▪‣➢\+\s]+", "", clean_line).strip()
-             # Fix punctuation: remove trailing dot if present
-             if task_text.endswith("."):
-                 task_text = task_text[:-1]
-             tasks.append(task_text)
-        # 2. Verbes d'action au début
-        elif re.match(r"^(Développer|Concevoir|Gérer|Analyser|Participer|Mettre en place|Assurer|Réaliser|Créer|Optimiser|Maintenir|Support|Rédaction|Configuration|Migration|Refonte|Implanter|Définir|Coordonner)\b", clean_line, re.IGNORECASE):
-             if clean_line.endswith("."):
-                 clean_line = clean_line[:-1]
-             tasks.append(clean_line)
-        # 3. Phrases longues qui ne sont pas des titres (fallback)
-        elif len(clean_line) > 20 and not clean_line.isupper():
-             if clean_line.endswith("."):
-                 clean_line = clean_line[:-1]
-             tasks.append(clean_line)
-
-    dates = block.get("date_text", "")
-    duration = compute_duration_label(dates)
-    
-    # Si skills vide, on re-scan tout le texte du bloc
-    if not skills:
-        skills = extract_skills_from_text(block.get("text", ""))
-
-    return ExperienceEntry(
-        job_title=job_title,
-        company=company,
-        location=location,
-        dates=dates,
-        duration=duration,
-        summary="",
-        tasks=tasks,
-        skills=skills,
-        full_text=block.get("text", ""),
-    )
-
+    return "\n".join(cleaned_lines)
 
 def verify_content_coverage(cv_data: Dict[str, Any], raw_text: str):
-    """
-    Vérifie que le contenu utile du CV a bien été capturé dans les sections structurées.
-    Log un warning si une partie significative manque.
-    """
+    """Checks if generated content covers the raw text."""
     captured_text = ""
+    
     # Basics
     basics = cv_data.get("basics", {})
     captured_text += f"{basics.get('name', '')} {basics.get('email', '')} {basics.get('phone', '')} "
@@ -616,107 +131,130 @@ def verify_content_coverage(cv_data: Dict[str, Any], raw_text: str):
         captured_text += f"{exp.get('job_title', '')} {exp.get('company', '')} {exp.get('dates', '')} "
         captured_text += " ".join(exp.get("tasks", [])) + " "
         captured_text += " ".join(exp.get("skills", [])) + " "
-        captured_text += f"{exp.get('full_text', '')} " # On compte le full_text car c'est la source
-
+    
     # Education
     for edu in cv_data.get("education", []):
-        captured_text += f"{edu.get('degree', '')} {edu.get('institution', '')} {edu.get('full_text', '')} "
+        captured_text += f"{edu.get('degree', '')} {edu.get('institution', '')} "
 
     # Skills
     captured_text += " ".join(cv_data.get("skills_tech", [])) + " "
-    captured_text += " ".join(cv_data.get("skills_soft", [])) + " "
+    
+    # Extra
+    captured_text += " ".join(cv_data.get("extra_info", [])) + " "
 
-    # Normalisation pour comparaison
     def normalize(s):
         return re.sub(r"\s+", "", s.lower())
 
     raw_norm = normalize(raw_text)
     captured_norm = normalize(captured_text)
 
-    # On vérifie si des gros blocs de raw sont absents de captured
-    # C'est une heuristique simple : ratio de longueur
     if len(raw_norm) > 0:
         ratio = len(captured_norm) / len(raw_norm)
         logger.info(f"Content Coverage Ratio: {ratio:.2f}")
-        if ratio < 0.6: # Si moins de 60% du texte est capturé (très conservateur car full_text est inclus)
-            logger.warning("ALERTE: Une partie significative du CV semble manquer dans la structure générée !")
-
+        if ratio < 0.6:
+            logger.warning("ALERTE: Coverage < 60%. Some content might be missing.")
 
 def parse_cv(file_path: str) -> Optional[dict]:
     filename = os.path.basename(file_path)
     _, extension = os.path.splitext(filename)
+    
+    # 1. Extract Text
     text, ocr_applied = "", False
     if extension.lower() == ".pdf":
         text, ocr_applied = extract_text_from_pdf(file_path)
     elif extension.lower() == ".docx":
         text = extract_text_from_docx(file_path)
+    
     if not text.strip():
+        logger.error("Empty text extracted.")
         return None
 
-    try:
-        parser = UniversalParser(text)
-        basics = parser.extract_basics()
-        skills = parser.extract_skills()
-        sections = parser.segment_sections()
+    # 2. Clean Text
+    clean_text = pre_process_text(text)
+    
+    # 3. AI Contact Extraction
+    logger.info("Step 1: Extracting Contact Info...")
+    basics = ai_parse_contact(clean_text)
+    if not basics:
+        logger.warning("Contact extraction failed.")
+        basics = {}
 
-        experience_blocks = parser.extract_experience_blocks(sections["experience"])
-        structured_experiences: List[ExperienceEntry] = []
+    # 4. AI Segmentation
+    logger.info("Step 2: Segmenting CV...")
+    segments = ai_parse_segmentation(clean_text)
+    if not segments:
+        logger.warning("Segmentation failed. Using full text as 'other'.")
+        segments = {"other_block": clean_text}
+
+    # 5. Process Experience
+    logger.info("Step 3: Processing Experience Blocks...")
+    structured_experiences = []
+    exp_blocks = segments.get("experience_blocks", [])
+    if isinstance(exp_blocks, str): # Handle case where AI returns string instead of list
+        exp_blocks = [exp_blocks]
         
-        logger.info(f"Found {len(experience_blocks)} experience blocks.")
-
-        for block in experience_blocks:
-            entry: Optional[ExperienceEntry] = None
-
-            if USE_AI_EXPERIENCE and ai_parse_experience_block:
-                logger.info(f"Parsing AI expérience (bloc de {len(block['text'])} chars)...")
-                try:
-                    ai_payload = ai_parse_experience_block(block["text"])
-                except Exception as exc:
-                    logger.warning("AI parsing failure, fallback to rule-based: %s", exc)
-                    ai_payload = {}
-                
-                if ai_payload:
-                    try:
-                        entry = _build_entry_from_ai(block, ai_payload)
-                        logger.info("AI parsing successful for block.")
-                    except Exception as exc:  # pragma: no cover
-                        logger.warning("AI payload invalide, fallback rule-based: %s", exc)
-                        entry = None
-            
-            if entry is None:
-                logger.info("Utilisation parser Rule-based pour ce bloc.")
-                entry = _rule_based_entry(block)
-
+    for block in exp_blocks:
+        if len(block) < 20: continue
+        exp_data = ai_parse_experience_block(block)
+        if exp_data:
+            entry = ExperienceEntry(
+                job_title=exp_data.get("titre_poste", ""),
+                company=exp_data.get("entreprise", ""),
+                location=exp_data.get("localisation", ""),
+                dates=exp_data.get("dates", ""),
+                duration=exp_data.get("duree", ""),
+                summary=exp_data.get("resume", ""),
+                tasks=exp_data.get("taches", []),
+                skills=exp_data.get("competences", []),
+                full_text=block
+            )
             structured_experiences.append(entry)
 
-        clean_summary = parser.normalize_paragraph(sections["summary"])
+    # 6. Process Education
+    logger.info("Step 4: Processing Education...")
+    education_entries = []
+    edu_block = segments.get("education_block", "")
+    if edu_block:
+        edu_data = ai_parse_education(edu_block)
+        for item in edu_data.get("education", []):
+            education_entries.append(EducationEntry(
+                degree=item.get("diplome", ""),
+                institution=item.get("etablissement", ""),
+                date_start=item.get("annee", ""),
+                full_text=str(item)
+            ))
 
-        education_entries = [
-            EducationEntry(degree=line, full_text=line)
-            for line in sections["education"]
-            if len(line) > 3
-        ]
+    # 7. Process Skills & Extra
+    skills_tech = []
+    skills_block = segments.get("skills_block", "")
+    # Simple split for now, or we could use AI to listify. 
+    # Let's just keep it as a list of lines/words for now or use a simple heuristic.
+    # Actually, let's just split by comma/newline for the list.
+    if skills_block:
+        skills_tech = [s.strip() for s in re.split(r"[,•\n]", skills_block) if s.strip()]
 
-        cv_data = CVData(
-            meta={"filename": filename, "ocr_applied": str(ocr_applied)},
-            basics=basics,
-            links=basics["links"],
-            summary=clean_summary,
-            skills_tech=skills["tech"],
-            skills_soft=skills["soft"],
-            experience=structured_experiences,
-            education=education_entries,
-            languages=basics.get("languages", []) or [l for l in sections["languages"] if len(l) > 2], # Use AI langs if avail
-            achievements_global=sections["achievements"],
-            extra_info=sections["extra"],
-            unmapped=sections["unmapped"],
-            raw_text=text,
-        )
-        
-        result_dict = cv_data.to_dict()
-        verify_content_coverage(result_dict, text)
-        return result_dict
+    extra_info = []
+    other_block = segments.get("other_block", "")
+    if other_block:
+        extra_info = [other_block]
 
-    except Exception as exc:
-        logger.error("Parsing failed for %s: %s", filename, exc, exc_info=True)
-        return CVData(raw_text=text, meta={"error": str(exc)}).to_dict()
+    # 8. Assemble CV Data
+    cv_data = CVData(
+        meta={"filename": filename, "ocr_applied": str(ocr_applied)},
+        basics=basics,
+        links=[basics.get("linkedin")] if basics.get("linkedin") else [],
+        summary=basics.get("summary", ""), # Sometimes summary is in basics or separate
+        skills_tech=skills_tech,
+        experience=structured_experiences,
+        education=education_entries,
+        languages=basics.get("languages", []),
+        extra_info=extra_info,
+        raw_text=text
+    )
+
+    result_dict = cv_data.to_dict()
+    
+    # 9. Verify Coverage
+    verify_content_coverage(result_dict, clean_text)
+    
+    return result_dict

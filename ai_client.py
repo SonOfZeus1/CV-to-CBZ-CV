@@ -1,107 +1,98 @@
+import os
 import json
 import logging
-import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional, Union
 
 from groq import Groq
 
+# Configure logging
 logger = logging.getLogger(__name__)
 
+# Constants
+DEFAULT_MODEL = "llama-3.1-8b-instant"
+MAX_RETRIES = 3
 
-class AIClientUnavailable(RuntimeError):
-    """Raised when the Groq client cannot be initialised."""
+class AIClient:
+    _instance = None
 
-
-class GroqStructuredClient:
-    """
-    Thin wrapper around Groq chat completions that guarantees JSON output,
-    retries on transient errors and centralises configuration.
-    """
-
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        model: Optional[str] = None,
-        max_retries: int = 3,
-        timeout: int = 60,
-    ):
-        api_key = api_key or os.getenv("GROQ_API_KEY")
+    def __init__(self):
+        api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
-            raise AIClientUnavailable(
-                "GROQ_API_KEY is required to run the AI parsing pipeline."
-            )
+            logger.warning("GROQ_API_KEY not found. AI features will be disabled.")
+            self.client = None
+        else:
+            self.client = Groq(api_key=api_key)
+            logger.info("Groq Client initialized successfully.")
 
-        self.model = model or os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
-        self.max_retries = max_retries
-        self.timeout = timeout
-        self._client = Groq(api_key=api_key)
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
 
-    def _extract_json(self, content: str) -> Dict[str, Any]:
-        snippet = content.strip()
-        if snippet.startswith("```"):
-            parts = snippet.split("```")
-            # Format: ```json { ... } ```
-            if len(parts) >= 2:
-                snippet = parts[1]
-        return json.loads(snippet)
-
-    def structured_completion(
-        self,
-        messages: List[Dict[str, str]],
-        temperature: float = 0.0,
-        response_format: Optional[Dict[str, Any]] = None,
-        max_tokens: int = 1200,
-    ) -> Dict[str, Any]:
+    def call_ai(self, prompt: str, system_prompt: str = "You are a helpful assistant.", expect_json: bool = False) -> Union[str, Dict[str, Any]]:
         """
-        Calls Groq with retries and returns a parsed JSON payload.
+        Generic function to call the AI.
+        
+        Args:
+            prompt: The user prompt.
+            system_prompt: The system prompt.
+            expect_json: If True, tries to parse the response as JSON.
+            
+        Returns:
+            String response or Dictionary if expect_json is True.
         """
-        if not messages:
-            raise ValueError("messages cannot be empty")
+        if not self.client:
+            logger.error("AI call attempted but client is not initialized (missing key).")
+            return {} if expect_json else ""
 
-        response_format = response_format or {"type": "json_object"}
-        last_error: Optional[Exception] = None
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ]
 
-        for attempt in range(1, self.max_retries + 1):
+        if expect_json:
+             messages.append({"role": "system", "content": "IMPORTANT: Output ONLY valid JSON. No markdown, no explanations."})
+
+        logger.info(f"Calling AI (JSON={expect_json}). Prompt length: {len(prompt)}")
+        start_time = time.time()
+
+        for attempt in range(MAX_RETRIES):
             try:
-                logger.info("Calling Groq (attempt %s/%s) with model %s...", attempt, self.max_retries, self.model)
-                start_time = time.time()
-                response = self._client.chat.completions.create(
-                    model=self.model,
+                completion = self.client.chat.completions.create(
+                    model=DEFAULT_MODEL,
                     messages=messages,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                    response_format=response_format,
-                    timeout=self.timeout,
+                    temperature=0.1 if expect_json else 0.3,
+                    response_format={"type": "json_object"} if expect_json else None
                 )
-                duration = time.time() - start_time
-                content = response.choices[0].message.content
-                if not content:
-                    raise ValueError("Empty response content from Groq")
                 
-                logger.info("Groq call successful in %.2fs. Response length: %d chars", duration, len(content))
-                return self._extract_json(content)
-            except Exception as exc:
-                last_error = exc
-                logger.warning(
-                    "Groq call failed (attempt %s/%s): %s",
-                    attempt,
-                    self.max_retries,
-                    exc,
-                )
-                sleep_seconds = min(2 ** (attempt - 1), 10)
-                time.sleep(sleep_seconds)
+                content = completion.choices[0].message.content
+                duration = time.time() - start_time
+                logger.info(f"AI Response received in {duration:.2f}s. Length: {len(content)}")
 
-        logger.error("All Groq attempts failed. Last error: %s", last_error)
-        raise RuntimeError(f"Groq call failed after retries: {last_error}") from last_error
+                if expect_json:
+                    try:
+                        return json.loads(content)
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse JSON from AI response: {content[:100]}...")
+                        if attempt < MAX_RETRIES - 1:
+                            logger.info("Retrying...")
+                            continue
+                        return {}
+                
+                return content
 
+            except Exception as e:
+                logger.error(f"AI Call failed (Attempt {attempt+1}/{MAX_RETRIES}): {e}")
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(1)
+                else:
+                    return {} if expect_json else ""
+        
+        return {} if expect_json else ""
 
-_CLIENT_CACHE: Optional[GroqStructuredClient] = None
-
-
-def get_ai_client() -> GroqStructuredClient:
-    global _CLIENT_CACHE
-    if _CLIENT_CACHE is None:
-        _CLIENT_CACHE = GroqStructuredClient()
-    return _CLIENT_CACHE
-
+# Global helper function
+def call_ai(prompt: str, system_prompt: str = "", expect_json: bool = False) -> Union[str, Dict[str, Any]]:
+    client = AIClient.get_instance()
+    return client.call_ai(prompt, system_prompt, expect_json)
