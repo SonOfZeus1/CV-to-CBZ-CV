@@ -15,27 +15,31 @@ EXPERIENCE_USER_PROMPT = """
 Tu reçois un bloc brut issu d'un CV. Tu dois en extraire UNIQUEMENT les informations présentes.
 
 Contraintes absolues :
-1. Ne reformate pas les dates : reprends exactement le texte des dates.
+1. Ne reformate pas les dates : reprends exactement le texte des dates (ex: "Septembre 2021-Aujourd’hui").
 2. Ne crée jamais d'expérience ni d'information qui n'existe pas.
 3. Si un champ manque dans le texte, laisse-le vide (""), sauf les listes qui doivent être vides ([]).
-4. Les tâches doivent être des phrases courtes, orientées action, directement tirées du texte.
-5. Les compétences doivent uniquement contenir des technologies/outils/méthodes mentionnés dans le bloc.
+4. Les "taches" DOIVENT être extraites. Cherche toutes les phrases d'action (bullet points ou phrases) décrivant le travail.
+   - Ne résume pas, extrait les points clés.
+   - Si aucune tâche n'est explicite, cherche des phrases décrivant ce que la personne a fait.
+5. Les "competences" doivent uniquement contenir des technologies/outils/méthodes mentionnés EXPLICITEMENT dans le bloc (ex: Java, AWS, Git).
+   - Ne devine pas les compétences.
 
 Retourne un JSON strict avec les clés suivantes :
 {
-  "titre_poste": "",
-  "entreprise": "",
-  "localisation": "",
-  "dates": "",
-  "duree": "",
-  "resume": "",
-  "taches": [],
-  "competences": []
+  "titre_poste": "Le titre exact du poste",
+  "entreprise": "Le nom de l'entreprise",
+  "localisation": "Ville, PAYS (ex: Montréal, CANADA)",
+  "dates": "Les dates exactes telles qu'écrites",
+  "duree": "Calcul approximatif si possible (ex: 4 ans 2 mois), sinon vide",
+  "resume": "Court résumé si présent, sinon vide",
+  "taches": ["Tâche 1", "Tâche 2", ...],
+  "competences": ["Java", "Python", ...]
 }
 
 Bloc à analyser :
 \"\"\"{experience_block}\"\"\"
 """
+
 
 REQUIRED_STRING_FIELDS = ("titre_poste", "entreprise", "dates")
 REQUIRED_LIST_FIELDS = ("taches", "competences")

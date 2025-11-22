@@ -64,6 +64,8 @@ class GroqStructuredClient:
 
         for attempt in range(1, self.max_retries + 1):
             try:
+                logger.info("Calling Groq (attempt %s/%s) with model %s...", attempt, self.max_retries, self.model)
+                start_time = time.time()
                 response = self._client.chat.completions.create(
                     model=self.model,
                     messages=messages,
@@ -72,9 +74,12 @@ class GroqStructuredClient:
                     response_format=response_format,
                     timeout=self.timeout,
                 )
+                duration = time.time() - start_time
                 content = response.choices[0].message.content
                 if not content:
                     raise ValueError("Empty response content from Groq")
+                
+                logger.info("Groq call successful in %.2fs. Response length: %d chars", duration, len(content))
                 return self._extract_json(content)
             except Exception as exc:
                 last_error = exc
@@ -87,6 +92,7 @@ class GroqStructuredClient:
                 sleep_seconds = min(2 ** (attempt - 1), 10)
                 time.sleep(sleep_seconds)
 
+        logger.error("All Groq attempts failed. Last error: %s", last_error)
         raise RuntimeError(f"Groq call failed after retries: {last_error}") from last_error
 
 

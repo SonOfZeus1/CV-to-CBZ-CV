@@ -16,15 +16,21 @@ from dateparser import parse as parse_date
 logger = logging.getLogger(__name__)
 
 # --- Feature flag pour activer/désactiver l'IA ---
-USE_AI_EXPERIENCE = os.getenv("USE_AI_EXPERIENCE", "false").lower() in {"1", "true", "yes"}
+# --- Feature flag pour activer/désactiver l'IA ---
+# Force AI if API key is present
+HAS_API_KEY = bool(os.getenv("GROQ_API_KEY"))
+USE_AI_EXPERIENCE = HAS_API_KEY or (os.getenv("USE_AI_EXPERIENCE", "false").lower() in {"1", "true", "yes"})
+
 if USE_AI_EXPERIENCE:
     try:
         from ai_parsers import ai_parse_experience_block  # type: ignore
+        logger.info("AI Module loaded successfully. USE_AI_EXPERIENCE=True")
     except Exception as exc:  # pragma: no cover
         logger.warning("Désactivation IA (import impossible) : %s", exc)
         USE_AI_EXPERIENCE = False
         ai_parse_experience_block = None  # type: ignore
 else:
+    logger.info("AI Module disabled (no key or flag). USE_AI_EXPERIENCE=False")
     ai_parse_experience_block = None  # type: ignore
 
 # --- SCHÉMA DE DONNÉES ---
@@ -455,6 +461,7 @@ def _rule_based_entry(block: Dict[str, Any]) -> ExperienceEntry:
     company = ""
     location = block.get("location_hint", "")
 
+    # Tentative d'extraction Titre / Entreprise
     if " - " in header:
         parts = header.split(" - ", 1)
         job_title = parts[0].strip()
@@ -463,42 +470,60 @@ def _rule_based_entry(block: Dict[str, Any]) -> ExperienceEntry:
         parts = header.split("|", 1)
         job_title = parts[0].strip()
         company = parts[1].strip()
-
+    
+    # Nettoyage Titre/Entreprise si collés
     if "," in company and not location:
         company_parts = company.split(",")
         location = company_parts[-1].strip()
         company = ",".join(company_parts[:-1]).strip()
 
     tasks: List[str] = []
-    # On commence après la première ligne (header)
-    # et on s'arrête avant la ligne "environnement technologique" si elle existe
+    skills: List[str] = []
+    
+    # Extraction plus agressive des tâches
+    # On scanne tout le bloc sauf le header et les dates
     lines_to_scan = []
     stop_scan = False
+    
     for line in lines[1:]:
-         if "environnement technologique" in line.lower():
-             stop_scan = True
-             continue # On ne prend pas la ligne de footer tech
-         if not stop_scan:
-             lines_to_scan.append(line)
+        lower_line = line.lower()
+        if "environnement technologique" in lower_line or "compétences" in lower_line:
+            # C'est probablement la section skills, on arrête de chercher des tâches ici
+            # mais on continue pour extraire les skills
+            stop_scan = True
+        
+        if not stop_scan:
+            # On ignore les lignes qui ressemblent à des dates
+            if not DATE_RANGE_REGEX.search(line):
+                lines_to_scan.append(line)
+        
+        # Extraction de skills partout
+        found_skills = extract_skills_from_text(line)
+        for s in found_skills:
+            if s not in skills:
+                skills.append(s)
 
     for raw in lines_to_scan:
-        # Nettoyage des caractères invisibles
         clean_line = raw.strip()
-        # Regex élargie pour détecter les puces : tiret, astérisque, bullet ronde, bullet carrée, flèche
+        if not clean_line:
+            continue
+            
+        # 1. Puces explicites
         if re.match(r"^[\-\*•▪‣➢\+]+", clean_line):
              tasks.append(re.sub(r"^[\-\*•▪‣➢\+\s]+", "", clean_line).strip())
-        # Heuristique : si la ligne commence par un verbe d'action (liste non exhaustive) et pas de puce
-        elif re.match(r"^(Développer|Concevoir|Gérer|Analyser|Participer|Mettre en place|Assurer|Réaliser|Créer|Optimiser|Maintenir|Support|Rédaction|Configuration|Migration|Refonte)\b", clean_line, re.IGNORECASE):
+        # 2. Verbes d'action au début
+        elif re.match(r"^(Développer|Concevoir|Gérer|Analyser|Participer|Mettre en place|Assurer|Réaliser|Créer|Optimiser|Maintenir|Support|Rédaction|Configuration|Migration|Refonte|Implanter|Définir|Coordonner)\b", clean_line, re.IGNORECASE):
              tasks.append(clean_line)
-             
-    if not tasks:
-        # Fallback ultime : on prend toutes les lignes de longueur > 15 chars qui ne sont pas des headers/dates
-        # On exclut les lignes trop courtes (titres, lieux)
-        tasks = [line for line in lines_to_scan if len(line) > 15 and not DATE_RANGE_REGEX.search(line)]
+        # 3. Phrases longues qui ne sont pas des titres (fallback)
+        elif len(clean_line) > 20 and not clean_line.isupper():
+             tasks.append(clean_line)
 
     dates = block.get("date_text", "")
     duration = compute_duration_label(dates)
-    skills = extract_skills_from_text(block.get("text", ""))
+    
+    # Si skills vide, on re-scan tout le texte du bloc
+    if not skills:
+        skills = extract_skills_from_text(block.get("text", ""))
 
     return ExperienceEntry(
         job_title=job_title,
@@ -511,6 +536,47 @@ def _rule_based_entry(block: Dict[str, Any]) -> ExperienceEntry:
         skills=skills,
         full_text=block.get("text", ""),
     )
+
+
+def verify_content_coverage(cv_data: Dict[str, Any], raw_text: str):
+    """
+    Vérifie que le contenu utile du CV a bien été capturé dans les sections structurées.
+    Log un warning si une partie significative manque.
+    """
+    captured_text = ""
+    # Basics
+    basics = cv_data.get("basics", {})
+    captured_text += f"{basics.get('name', '')} {basics.get('email', '')} {basics.get('phone', '')} "
+    
+    # Experience
+    for exp in cv_data.get("experience", []):
+        captured_text += f"{exp.get('job_title', '')} {exp.get('company', '')} {exp.get('dates', '')} "
+        captured_text += " ".join(exp.get("tasks", [])) + " "
+        captured_text += " ".join(exp.get("skills", [])) + " "
+        captured_text += f"{exp.get('full_text', '')} " # On compte le full_text car c'est la source
+
+    # Education
+    for edu in cv_data.get("education", []):
+        captured_text += f"{edu.get('degree', '')} {edu.get('institution', '')} {edu.get('full_text', '')} "
+
+    # Skills
+    captured_text += " ".join(cv_data.get("skills_tech", [])) + " "
+    captured_text += " ".join(cv_data.get("skills_soft", [])) + " "
+
+    # Normalisation pour comparaison
+    def normalize(s):
+        return re.sub(r"\s+", "", s.lower())
+
+    raw_norm = normalize(raw_text)
+    captured_norm = normalize(captured_text)
+
+    # On vérifie si des gros blocs de raw sont absents de captured
+    # C'est une heuristique simple : ratio de longueur
+    if len(raw_norm) > 0:
+        ratio = len(captured_norm) / len(raw_norm)
+        logger.info(f"Content Coverage Ratio: {ratio:.2f}")
+        if ratio < 0.6: # Si moins de 60% du texte est capturé (très conservateur car full_text est inclus)
+            logger.warning("ALERTE: Une partie significative du CV semble manquer dans la structure générée !")
 
 
 def parse_cv(file_path: str) -> Optional[dict]:
@@ -532,6 +598,9 @@ def parse_cv(file_path: str) -> Optional[dict]:
 
         experience_blocks = parser.extract_experience_blocks(sections["experience"])
         structured_experiences: List[ExperienceEntry] = []
+        
+        logger.info(f"Found {len(experience_blocks)} experience blocks.")
+
         for block in experience_blocks:
             entry: Optional[ExperienceEntry] = None
 
@@ -542,15 +611,14 @@ def parse_cv(file_path: str) -> Optional[dict]:
                 except Exception as exc:
                     logger.warning("AI parsing failure, fallback to rule-based: %s", exc)
                     ai_payload = {}
+                
                 if ai_payload:
                     try:
                         entry = _build_entry_from_ai(block, ai_payload)
+                        logger.info("AI parsing successful for block.")
                     except Exception as exc:  # pragma: no cover
                         logger.warning("AI payload invalide, fallback rule-based: %s", exc)
                         entry = None
-            else:
-                if USE_AI_EXPERIENCE:
-                    logger.warning("IA activée mais module non disponible. Fallback rule-based.")
             
             if entry is None:
                 logger.info("Utilisation parser Rule-based pour ce bloc.")
@@ -581,7 +649,11 @@ def parse_cv(file_path: str) -> Optional[dict]:
             unmapped=sections["unmapped"],
             raw_text=text,
         )
-        return cv_data.to_dict()
+        
+        result_dict = cv_data.to_dict()
+        verify_content_coverage(result_dict, text)
+        return result_dict
+
     except Exception as exc:
         logger.error("Parsing failed for %s: %s", filename, exc, exc_info=True)
         return CVData(raw_text=text, meta={"error": str(exc)}).to_dict()
