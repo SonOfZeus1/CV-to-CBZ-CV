@@ -112,3 +112,58 @@ def ai_parse_experience_block(block_text: str) -> Dict[str, Any]:
 
     return processed
 
+
+CONTACT_SYSTEM_PROMPT = (
+    "Tu es un expert en extraction de données de CV. Ta mission est d'identifier "
+    "le candidat et ses coordonnées avec une précision absolue."
+)
+
+CONTACT_USER_PROMPT = """
+Voici le début d'un CV (texte brut). Extrait uniquement les informations de contact et d'entête candidat.
+
+Contraintes CRITIQUES :
+1. Le "name" est le NOM PROPRE du candidat (ex: 'Jean Dupont').
+   - Ce n'est JAMAIS un titre de section comme "COMPÉTENCES TECHNIQUES", "EXPERIENCE", "CURRICULUM VITAE".
+   - Si tu trouves "COMPÉTENCES TECHNIQUES" en haut, CE N'EST PAS LE NOM. Cherche ailleurs.
+2. Le "title" est le rôle professionnel (ex: 'Ingénieur Logiciel', 'Développeur Fullstack').
+3. Ne rien inventer. Si une info est absente, laisse vide "".
+
+Retourne un JSON strict :
+{
+  "name": "Nom Prénom",
+  "title": "Titre du poste",
+  "email": "email@example.com",
+  "phone": "+1 234...",
+  "linkedin": "url ou handle",
+  "location": "Ville, Pays",
+  "languages": ["Français", "Anglais"]
+}
+
+Texte à analyser :
+\"\"\"{text_head}\"\"\"
+"""
+
+def ai_parse_contact(text_head: str) -> Dict[str, Any]:
+    """
+    Uses AI to extract contact info from the first ~2000 chars of the CV.
+    """
+    if not text_head.strip():
+        return {}
+    
+    try:
+        client = get_ai_client()
+    except AIClientUnavailable:
+        return {}
+
+    messages = [
+        {"role": "system", "content": CONTACT_SYSTEM_PROMPT},
+        {"role": "user", "content": CONTACT_USER_PROMPT.format(text_head=text_head[:2500])},
+    ]
+
+    try:
+        return client.structured_completion(messages)
+    except Exception as exc:
+        logger.warning("AI contact parsing failed: %s", exc)
+        return {}
+
+
