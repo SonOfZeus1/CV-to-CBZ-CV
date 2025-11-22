@@ -22,7 +22,7 @@ Contraintes CRITIQUES :
 3. Ne rien inventer. Si une info est absente, laisse vide "".
 
 Retourne un JSON strict :
-{
+{{
   "name": "Nom Prénom",
   "title": "Titre du poste",
   "email": "email@example.com",
@@ -30,7 +30,7 @@ Retourne un JSON strict :
   "linkedin": "url ou handle",
   "location": "Ville, Pays",
   "languages": ["Français", "Anglais"]
-}
+}}
 
 Texte à analyser :
 \"\"\"{text}\"\"\"
@@ -52,13 +52,13 @@ Sections attendues :
 - "other_block": Tout le reste (certifications, intérêts, etc.).
 
 Retourne un JSON strict :
-{
+{{
   "contact_block": "...",
   "skills_block": "...",
   "experience_blocks": ["Expérience 1...", "Expérience 2..."],
   "education_block": "...",
   "other_block": "..."
-}
+}}
 
 Texte du CV :
 \"\"\"{text}\"\"\"
@@ -81,7 +81,7 @@ Contraintes :
 - Les "competences" doivent venir exclusivement du texte de cette expérience (stack technique citée).
 
 Retourne un JSON strict :
-{
+{{
   "titre_poste": "...",
   "entreprise": "...",
   "localisation": "...",
@@ -90,7 +90,7 @@ Retourne un JSON strict :
   "resume": "Court résumé si présent",
   "taches": ["Tâche 1", "Tâche 2"],
   "competences": ["Java", "Python"]
-}
+}}
 
 Bloc expérience :
 \"\"\"{text}\"\"\"
@@ -105,16 +105,16 @@ Voici le texte brut de la section formation / éducation.
 Tu dois en extraire une liste de diplômes.
 
 Retourne un JSON strict :
-{
+{{
   "education": [
-    {
+    {{
       "diplome": "Titre du diplôme",
       "etablissement": "Nom de l'école/université",
       "annee": "Année ou période",
       "localisation": "Ville, Pays"
-    }
+    }}
   ]
-}
+}}
 
 Section formation :
 \"\"\"{text}\"\"\"
