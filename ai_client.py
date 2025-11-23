@@ -10,7 +10,7 @@ from groq import Groq
 logger = logging.getLogger(__name__)
 
 # Constants
-DEFAULT_MODEL = "llama-3.1-8b-instant"
+DEFAULT_MODEL = "llama-3.1-70b-versatile"
 MAX_RETRIES = 3
 
 class AIClient:

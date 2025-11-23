@@ -18,6 +18,13 @@ def format_experience_entry(entry):
     skills = entry.get("skills", []) or []
     full_text = entry.get("full_text", "")
 
+    # Clean location: remove "Canada" (case insensitive)
+    if location:
+        # Remove ", Canada" or "Canada"
+        location = re.sub(r",?\s*canada", "", location, flags=re.IGNORECASE).strip()
+        # Remove trailing comma if any
+        location = location.rstrip(",")
+
     header_line = job_title
     if company:
         header_line += f" – {company}"
@@ -28,16 +35,20 @@ def format_experience_entry(entry):
     if duration:
         dates_line = dates_line + f" ({duration})" if dates_line else f"({duration})"
 
+    # New Layout: Header and Dates on the same line using Flexbox
     html_parts = [
         "<div style='margin-bottom: 20px; border-left: 3px solid #eee; padding-left: 15px;'>",
-        f"<p><strong>{header_line}</strong></p>",
+        "<div style='display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px;'>"
+        f"<div><strong>{header_line}</strong></div>",
     ]
 
     if dates_line:
-        html_parts.append(f"<p>{dates_line}</p>")
+        html_parts.append(f"<div style='font-style: italic; color: #7f8c8d; font-weight: bold; white-space: nowrap; margin-left: 10px;'>{dates_line}</div>")
+    
+    html_parts.append("</div>") # Close flex container
 
     if summary:
-        html_parts.append("<p><strong>Résumé</strong><br>" + summary + "</p>")
+        html_parts.append("<p style='margin-top: 0;'><strong>Résumé</strong><br>" + summary + "</p>")
 
     if tasks:
         html_parts.append("<p><strong>Tâches principales</strong></p><ul>")
