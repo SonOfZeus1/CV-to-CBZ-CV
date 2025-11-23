@@ -16,3 +16,4 @@ WeasyPrint
 reportlab
 groq
 dateparser
+python-dotenv

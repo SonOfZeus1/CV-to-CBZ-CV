@@ -45,6 +45,9 @@ jobs:
         python -m nltk.downloader punkt
         python -m nltk.downloader averaged_perceptron_tagger
 
+    - name: Install python-dotenv
+      run: pip install python-dotenv
+
     - name: Run CV processing script
       env:
         SOURCE_FOLDER_ID: ${{ secrets.SOURCE_FOLDER_ID }}
