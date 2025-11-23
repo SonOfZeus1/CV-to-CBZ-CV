@@ -101,11 +101,14 @@ def normalize_data_for_template(data):
     return normalized
 
 
-def generate_pdf_from_data(data, template_path, output_path):
+def generate_pdf_from_data(data, template_path, output_path, blur_contact=False):
     if not data:
         return None
 
     template_data = normalize_data_for_template(data)
+    # Add blur flag to data context for template
+    template_data["is_blurred"] = blur_contact
+    
     template_dir = os.path.dirname(template_path)
     template_name = os.path.basename(template_path)
 

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="fr">
+
 <head>
     <meta charset="UTF-8">
     <title>CV de {{ data.name }}</title>
@@ -11,6 +12,7 @@
             margin: 0;
             padding: 0;
         }
+
         .container {
             width: 100%;
             max-width: 800px;
@@ -19,11 +21,13 @@
             padding-left: 40px;
             padding-right: 40px;
         }
+
         header {
             border-bottom: 2px solid #2c3e50;
             padding-bottom: 20px;
             margin-bottom: 30px;
         }
+
         h1 {
             color: #2c3e50;
             font-size: 28px;
@@ -31,11 +35,13 @@
             text-transform: uppercase;
             letter-spacing: 1px;
         }
+
         .contact-info p {
             margin: 5px 0;
             font-size: 14px;
             color: #555;
         }
+
         h2 {
             color: #2c3e50;
             font-size: 18px;
@@ -46,28 +52,35 @@
             margin-bottom: 15px;
             page-break-after: avoid;
         }
+
         ul {
             list-style-type: none;
             padding: 0;
             margin: 0;
         }
+
         li {
             margin-bottom: 8px;
         }
+
         .exp-item {
             margin-bottom: 25px;
-            page-break-inside: avoid; /* Évite de couper un mandat au milieu */
+            page-break-inside: avoid;
+            /* Évite de couper un mandat au milieu */
         }
+
         /* Style pour le HTML injecté par le formatters.py */
         .exp-item div strong {
             color: #2c3e50;
             font-size: 15px;
         }
+
         .exp-item div em {
             color: #7f8c8d;
             font-style: normal;
             font-weight: bold;
         }
+
         .exp-item ul {
             list-style-type: disc;
             padding-left: 20px;
@@ -75,6 +88,7 @@
             font-size: 14px;
             color: #444;
         }
+
         .appendix {
             margin-top: 50px;
             border-top: 2px dashed #ccc;
@@ -82,24 +96,32 @@
             color: #666;
             font-size: 12px;
         }
+
         .appendix pre {
             white-space: pre-wrap;
             background: #f9f9f9;
             padding: 10px;
             border-radius: 4px;
         }
+
+        .blurred {
+            color: transparent !important;
+            text-shadow: 0 0 8px rgba(0, 0, 0, 0.5);
+            user-select: none;
+        }
     </style>
 </head>
+
 <body>
     <div class="container">
         <header>
-            <h1>{{ data.name }}</h1>
-            <div class="contact-info">
+            <h1 class="{% if data.is_blurred %}blurred{% endif %}">{{ data.name }}</h1>
+            <div class="contact-info {% if data.is_blurred %}blurred{% endif %}">
                 {% if data.email %}
-                    <p><strong>Email:</strong> {{ data.email }}</p>
+                <p><strong>Email:</strong> {{ data.email }}</p>
                 {% endif %}
                 {% if data.mobile_number %}
-                    <p><strong>Téléphone:</strong> {{ data.mobile_number }}</p>
+                <p><strong>Téléphone:</strong> {{ data.mobile_number }}</p>
                 {% endif %}
             </div>
         </header>
@@ -118,18 +140,18 @@
         <div class="section">
             <h2>Expérience Professionnelle</h2>
             {% for exp in data.experience %}
-                <div class="exp-item">{{ exp | safe }}</div>
+            <div class="exp-item">{{ exp | safe }}</div>
             {% endfor %}
         </div>
         {% endif %}
-        
+
         <!-- ÉDUCATION -->
         {% if data.education %}
         <div class="section">
             <h2>Formation</h2>
-             <ul>
+            <ul>
                 {% for edu in data.education %}
-                    <li>{{ edu }}</li>
+                <li>{{ edu }}</li>
                 {% endfor %}
             </ul>
         </div>
@@ -141,7 +163,9 @@
             <h2>Compétences</h2>
             <ul>
                 {% for skill in data.skills %}
-                    <li style="display: inline-block; background: #eef2f5; padding: 4px 8px; margin: 2px; border-radius: 4px; font-size: 13px; color: #2c3e50; border: 1px solid #dce4ec;">{{ skill }}</li>
+                <li
+                    style="display: inline-block; background: #eef2f5; padding: 4px 8px; margin: 2px; border-radius: 4px; font-size: 13px; color: #2c3e50; border: 1px solid #dce4ec;">
+                    {{ skill }}</li>
                 {% endfor %}
             </ul>
         </div>
@@ -153,7 +177,7 @@
             <h2>Autres Réalisations</h2>
             <ul>
                 {% for item in data.achievements_global %}
-                    <li>{{ item }}</li>
+                <li>{{ item }}</li>
                 {% endfor %}
             </ul>
         </div>
@@ -165,25 +189,28 @@
             <h2>Informations Complémentaires</h2>
             <ul>
                 {% for item in data.extra_info %}
-                    <li>{{ item }}</li>
+                <li>{{ item }}</li>
                 {% endfor %}
             </ul>
         </div>
         {% endif %}
-        
+
         <!-- ANNEXE : FILETS DE SÉCURITÉ -->
         {% if data.unmapped %}
         <div class="appendix">
             <h3>Annexe : Contenu brut non classifié</h3>
-            <p><em>Les sections suivantes n'ont pas pu être attribuées automatiquement mais sont conservées pour intégrité.</em></p>
+            <p><em>Les sections suivantes n'ont pas pu être attribuées automatiquement mais sont conservées pour
+                    intégrité.</em></p>
             <pre>{{ data.unmapped | join('\n') }}</pre>
         </div>
         {% endif %}
 
-        <div class="section" style="margin-top: 50px; font-size: 10px; color: #999; border-top: 1px solid #eee; padding-top: 10px;">
+        <div class="section"
+            style="margin-top: 50px; font-size: 10px; color: #999; border-top: 1px solid #eee; padding-top: 10px;">
             <p>Document généré automatiquement le {{ date_generation }}</p>
         </div>
 
     </div>
 </body>
+
 </html>

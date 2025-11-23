@@ -20,6 +20,7 @@ OUTPUTS_DIR = "processed_cvs"
 TEMPLATE_PATH = "templates/template.html"
 # Réduction de la concurrence pour stabilité (évite SSL error & Segfault)
 MAX_WORKERS = 1 
+BLUR_CONTACT_INFO = True # Set to True to blur name, email, and phone for anonymous CVs 
 
 def process_single_file(file_path, drive_service, source_folder_id):
     """
@@ -50,7 +51,7 @@ def process_single_file(file_path, drive_service, source_folder_id):
             
             # 3. Générer le PDF formaté
             pdf_output_path = os.path.join(OUTPUTS_DIR, f"{base_name}_processed.pdf")
-            generate_pdf_from_data(parsed_data, TEMPLATE_PATH, pdf_output_path)
+            generate_pdf_from_data(parsed_data, TEMPLATE_PATH, pdf_output_path, blur_contact=BLUR_CONTACT_INFO)
             
             # 4. Uploader les fichiers générés sur Google Drive
             logger.info(f"Upload des résultats pour {filename}...")
