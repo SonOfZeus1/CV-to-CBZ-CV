@@ -148,8 +148,16 @@ Texte du CV :
 """
 
 EXPERIENCE_SYSTEM_PROMPT = """
-Tu es un expert en formatage de CV. Tu dois structurer une expérience professionnelle sans rien inventer.
-Tu dois être robuste à des mises en forme variées (puces sur plusieurs lignes, phrases coupées, dates mal espacées, etc.).
+You are an expert CV parser. Your goal is to extract experience details from the provided text segment.
+Return a JSON object with the following fields:
+- job_title: The job title.
+- company: The company name.
+- localisation: The location (City, Country).
+- dates: The date range (e.g., "Jan 2020 - Present").
+- duration: The duration (e.g., "2 ans").
+- resume: A brief summary of the role (optional).
+- taches: A list of key tasks/responsibilities.
+- competences: A list of skills used in this role.
 """
 
 EXPERIENCE_USER_PROMPT = """
@@ -160,6 +168,10 @@ Contraintes :
 - Reprendre EXACTEMENT les dates du CV (ne jamais modifier le format).
 - Calculer la durée en années+mois si possible (ex: "2 ans 3 mois").
 - Les "taches" doivent être extraites du texte original.
+  CRITICAL RULES FOR TASKS:
+  1.  **MAXIMUM 5 TASKS**: Extract only the top 5 most important tasks. If there are more, select the most significant ones.
+  2.  **STRICT TRUTHFULNESS**: Reformulate tasks to be professional and concise, but REMAIN STRICTLY TRUTHFUL to the original text. Do not invent, exaggerate, or hallucinate details.
+  3.  **NO BULLSHIT**: Avoid buzzwords or vague fluff. Be specific and grounded in the source text.
   - Tu peux fusionner des lignes cassées pour reconstituer des phrases complètes.
   - Reformule légèrement pour que ce soit propre et professionnel (verbe d'action), mais n'invente RIEN.
   - Ne laisse jamais "taches" vide si le texte contient des descriptions.
