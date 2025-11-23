@@ -396,12 +396,41 @@ def heuristic_parse_education(text: str) -> Dict[str, Any]:
     """
     Extracts education info using regex.
     """
-    # Very basic extraction: just take the whole block as one entry if we can't parse
+    # Clean lines
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    
+    # Remove header if present
+    if lines and "ÉDUCATION" in lines[0].upper():
+        lines = lines[1:]
+        
+    degree = "Diplôme (Non spécifié)"
+    institution = "Établissement (Non spécifié)"
+    year = ""
+    
+    # Heuristic: Look for a year (4 digits)
+    year_idx = -1
+    for i, line in enumerate(lines):
+        if re.match(r"^\d{4}$", line):
+            year = line
+            year_idx = i
+            break
+            
+    if year_idx != -1:
+        # If year found, assume line before is degree, line after is institution
+        if year_idx > 0:
+            degree = lines[year_idx - 1]
+        if year_idx < len(lines) - 1:
+            institution = " ".join(lines[year_idx + 1:]) # Join remaining lines for institution
+    elif len(lines) >= 2:
+        # Fallback: First line degree, second line institution
+        degree = lines[0]
+        institution = " ".join(lines[1:])
+        
     return {
         "education": [{
-            "diplome": "Diplôme (Non spécifié)",
-            "etablissement": "Établissement (Non spécifié)",
-            "annee": "",
+            "diplome": degree,
+            "etablissement": institution,
+            "annee": year,
             "full_text": text
         }]
     }
