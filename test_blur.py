@@ -29,13 +29,12 @@ try:
     else:
         print("[FAILURE] generate_pdf_from_data missing 'blur_contact'")
 
-    # We can also check if the template file has the class
     with open("templates/template.html", "r") as f:
         content = f.read()
-        if ".blurred" in content and "{% if data.is_blurred %}blurred{% endif %}" in content:
-             print("[SUCCESS] Template has blur logic")
+        if "rgba(41, 128, 185, 0.7)" in content and "text-shadow" in content:
+             print("[SUCCESS] Template has bluish blur logic")
         else:
-             print("[FAILURE] Template missing blur logic")
+             print("[FAILURE] Template missing bluish blur logic")
 
 except Exception as e:
     print(f"[ERROR] {e}")
