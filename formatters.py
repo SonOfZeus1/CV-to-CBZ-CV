@@ -35,7 +35,7 @@ def format_experience_entry(entry):
 
     # New Layout: Header and Dates on the same line using Flexbox with CSS classes
     html_parts = [
-        "<div style='margin-bottom: 20px; border-left: 3px solid #eee; padding-left: 0px;'>",
+        "<div style='margin-bottom: 20px; border-left: 3px solid #eee; padding-left: 15px;'>",
         "<div class='exp-header-row'>",
         f"<div class='exp-header-left'>{header_line}</div>",
         "<div class='exp-header-right'>"

@@ -17,8 +17,55 @@ from ai_parsers import (
     ai_parse_experience_block,
     ai_parse_education
 )
+import dateparser
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
 
 logger = logging.getLogger(__name__)
+
+# --- HELPERS ---
+
+def calculate_duration_string(date_range_str: str) -> str:
+    """
+    Calculates duration from a date range string like "Septembre 2021 - Aujourd'hui".
+    Returns a string like "2 ans 3 mois".
+    """
+    if not date_range_str:
+        return ""
+        
+    # Split by hyphen or "to"
+    parts = re.split(r'\s*-\s*|\s+to\s+', date_range_str)
+    if len(parts) != 2:
+        return ""
+        
+    start_str, end_str = parts[0].strip(), parts[1].strip()
+    
+    # Handle "Present", "Aujourd'hui", etc.
+    now = datetime.now()
+    if re.match(r'(?i)(aujourd\'hui|présent|present|current|now)', end_str):
+        end_date = now
+    else:
+        end_date = dateparser.parse(end_str, languages=['fr', 'en'])
+        
+    start_date = dateparser.parse(start_str, languages=['fr', 'en'])
+    
+    if not start_date or not end_date:
+        return ""
+        
+    # Calculate difference
+    diff = relativedelta(end_date, start_date)
+    
+    # Format output
+    parts = []
+    if diff.years > 0:
+        parts.append(f"{diff.years} ans")
+    if diff.months > 0:
+        parts.append(f"{diff.months} mois")
+        
+    if not parts:
+        return "Moins d'un mois"
+        
+    return " ".join(parts)
 
 # --- DATA SCHEMA ---
 
@@ -516,34 +563,41 @@ def parse_cv(file_path: str) -> Optional[dict]:
     # 5. Process Experience
     logger.info("Step 3: Processing Experience Blocks...")
     structured_experiences = []
-    exp_blocks = segments.get("experience_blocks", [])
-    if isinstance(exp_blocks, str): # Handle case where AI returns string instead of list
-        exp_blocks = [exp_blocks]
-        
-    for block in exp_blocks:
-        if len(block) < 20: continue
-        
-        # Try AI first
-        exp_data = ai_parse_experience_block(block)
-        
-        # Fallback if AI fails
-        if not exp_data:
-            logger.warning("AI Experience Parsing failed. Using Heuristic Fallback.")
-            exp_data = heuristic_parse_experience(block)
-            
-        if exp_data:
-            entry = ExperienceEntry(
-                job_title=exp_data.get("titre_poste", ""),
-                company=exp_data.get("entreprise", ""),
-                location=exp_data.get("localisation", ""),
-                dates=exp_data.get("dates", ""),
-                duration=exp_data.get("duree", ""),
-                summary=exp_data.get("resume", ""),
-                tasks=exp_data.get("taches", []),
-                skills=exp_data.get("competences", []),
-                full_text=block
-            )
-            structured_experiences.append(entry)
+    # Parse experience blocks
+    if "experience_blocks" in segments and isinstance(segments["experience_blocks"], list):
+        for exp_text in segments["experience_blocks"]:
+            if isinstance(exp_text, str) and exp_text.strip():
+                exp_data = ai_parse_experience_block(exp_text)
+                
+                # Fallback calculation for duration if missing
+                if not exp_data.get("duration") and exp_data.get("dates"):
+                    exp_data["duration"] = calculate_duration_string(exp_data["dates"])
+                    
+                # Fallback parsing if AI failed to extract key fields
+                if not exp_data.get("job_title") and not exp_data.get("company"):
+                    logger.warning("AI failed to extract experience details, trying heuristic fallback...")
+                    heuristic_data = heuristic_parse_experience(exp_text)
+                    # Merge heuristic data, preferring AI data if present
+                    for k, v in heuristic_data.items():
+                        if not exp_data.get(k):
+                            exp_data[k] = v
+                            
+                    # Recalculate duration if we just got dates from heuristic
+                    if not exp_data.get("duration") and exp_data.get("dates"):
+                        exp_data["duration"] = calculate_duration_string(exp_data["dates"])
+
+                entry = ExperienceEntry(
+                    job_title=exp_data.get("job_title", ""),
+                    company=exp_data.get("company", ""),
+                    location=exp_data.get("localisation", ""),
+                    dates=exp_data.get("dates", ""),
+                    duration=exp_data.get("duration", ""),
+                    summary=exp_data.get("resume", ""),
+                    tasks=exp_data.get("taches", []),
+                    skills=exp_data.get("competences", []),
+                    full_text=exp_text
+                )
+                structured_experiences.append(entry)
 
     # 6. Process Education
     logger.info("Step 4: Processing Education...")
