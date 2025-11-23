@@ -176,11 +176,116 @@ def heuristic_segmentation(text: str) -> Dict[str, Any]:
             
         # Special handling for experience to make it a list
         if section_name == "experience_blocks":
-            # Heuristic split by dates or common job titles is hard without AI.
-            # We will just return it as a single block list for now, 
-            # and let the per-block AI try to parse it (or fail gracefully).
-            # Ideally we would split by date patterns here.
-            segments[section_name] = [content]
+            # Attempt to split by date patterns
+            # Pattern for dates: Month Year - Month Year (or Present)
+            date_pattern = r"(?:Janvier|Février|Mars|Avril|Mai|Juin|Juillet|Août|Septembre|Octobre|Novembre|Décembre)\s+\d{4}\s*-\s*(?:Aujourd’hui|Présent|(?:Janvier|Février|Mars|Avril|Mai|Juin|Juillet|Août|Septembre|Octobre|Novembre|Décembre)\s+\d{4})"
+            
+            # Find all date matches
+            matches = list(re.finditer(date_pattern, content, re.IGNORECASE))
+            
+            if not matches:
+                segments[section_name] = [content]
+            else:
+                exp_list = []
+                # We assume each job block starts some lines before the date.
+                # A simple heuristic is to split at the line that is 2 lines before the date line?
+                # Or simpler: The end of the previous block is the start of the current block's title.
+                # But we don't know where the title starts.
+                
+                # Let's try to find the start of the block by looking backwards from the date.
+                # Usually: Title \n Company \n Date
+                # So we can try to split 2 non-empty lines before the date.
+                
+                # Alternative: Just split AT the date, and attach the preceding lines to the current block?
+                # No, the preceding lines (Title/Company) belong to the date.
+                
+                # Strategy:
+                # 1. Identify the line index of each date match.
+                # 2. Go back 2 non-empty lines to find the "start" of this entry.
+                # 3. Everything from that start until the start of the next entry is the block.
+                
+                lines = content.split("\n")
+                # Map character index to line index
+                # This is getting complicated. Let's use a simpler split:
+                # We assume the job starts with the Title.
+                # If we can't find it easily, we might just split roughly around the dates.
+                
+                # Let's try this:
+                # We will iterate through the text and find "islands" around dates.
+                # Actually, looking at the CV, the structure is consistent.
+                # Let's use the "2 lines before date" heuristic.
+                
+                block_starts = []
+                for m in matches:
+                    # Find the line containing this date
+                    date_start_idx = m.start()
+                    
+                    # Count newlines before this index to find line number
+                    preceding_text = content[:date_start_idx]
+                    line_idx = preceding_text.count("\n")
+                    
+                    # Walk back 2 non-empty lines
+                    current_line = line_idx
+                    lines_back = 0
+                    start_line_idx = 0
+                    
+                    # We need to access lines list
+                    # Let's just work with lines directly
+                    pass
+
+                # Re-implementation working with lines
+                lines = content.split("\n")
+                date_line_indices = []
+                for idx, line in enumerate(lines):
+                    if re.search(date_pattern, line, re.IGNORECASE):
+                        date_line_indices.append(idx)
+                
+                if not date_line_indices:
+                     segments[section_name] = [content]
+                else:
+                    # Calculate start indices for each block
+                    # We assume the block starts 2 non-empty lines before the date line
+                    # If there aren't 2 lines, we take what we can.
+                    
+                    block_start_indices = []
+                    for date_idx in date_line_indices:
+                        # Walk back
+                        found_lines = 0
+                        curr = date_idx - 1
+                        while curr >= 0:
+                            if lines[curr].strip():
+                                found_lines += 1
+                            if found_lines == 2:
+                                break
+                            curr -= 1
+                        # If we went below 0, start is 0. Otherwise curr is the start line.
+                        start = max(0, curr)
+                        
+                        # Ensure we don't overlap with previous block's end (which is effectively this block's start)
+                        # Actually, the previous block ends where this one starts.
+                        # But we need to make sure we don't go back past the previous block's date line.
+                        if block_start_indices:
+                            prev_start = block_start_indices[-1]
+                            # The previous block must have a date line.
+                            # We can't really enforce "don't go past previous date" easily without more state.
+                            # But generally, 2 lines back is safe enough for this format.
+                            if start <= prev_start:
+                                start = prev_start + 1 # Force forward progress?
+                                
+                        block_start_indices.append(start)
+                        
+                    # Now slice
+                    for i in range(len(block_start_indices)):
+                        start = block_start_indices[i]
+                        if i < len(block_start_indices) - 1:
+                            end = block_start_indices[i+1]
+                        else:
+                            end = len(lines)
+                            
+                        block_lines = lines[start:end]
+                        exp_list.append("\n".join(block_lines).strip())
+                        
+                    segments[section_name] = exp_list
         else:
             segments[section_name] = content
             
@@ -388,11 +493,22 @@ def parse_cv(file_path: str) -> Optional[dict]:
     # 7. Process Skills & Extra
     skills_tech = []
     skills_block = segments.get("skills_block", "")
-    # Simple split for now, or we could use AI to listify. 
-    # Let's just keep it as a list of lines/words for now or use a simple heuristic.
-    # Actually, let's just split by comma/newline for the list.
     if skills_block:
-        skills_tech = [s.strip() for s in re.split(r"[,•\n]", skills_block) if s.strip()]
+        # Split by comma, bullet, or newline
+        raw_skills = re.split(r"[,•\n]", skills_block)
+        for s in raw_skills:
+            s = s.strip()
+            if not s: continue
+            # Filter out headers and noise
+            # Check for colons at end (standard and full-width)
+            if s.endswith(":") or s.endswith("："): continue 
+            # Check for known headers
+            if "COMPÉTENCES" in s.upper() or "TECHNIQUES" in s.upper(): continue
+            if "DÉVELOPPEMENT" in s.upper() and s.endswith(":"): continue
+            
+            if len(s) < 2: continue # Filter single chars like "."
+            
+            skills_tech.append(s)
 
     extra_info = []
     other_block = segments.get("other_block", "")
