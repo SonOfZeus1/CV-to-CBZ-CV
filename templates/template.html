@@ -105,10 +105,12 @@
         }
 
         .blurred {
-            color: rgba(41, 128, 185, 0.2) !important;
-            /* Faint blue base */
-            text-shadow: 0 0 8px rgba(41, 128, 185, 1);
-            /* Stronger blur */
+            color: transparent !important;
+            background-color: #bdc3c7;
+            /* Redacted style (grey block) */
+            text-shadow: none;
+            border-radius: 3px;
+            padding: 0 2px;
             user-select: none;
         }
 
@@ -123,7 +125,7 @@
         .exp-header-left {
             font-weight: bold;
             color: #2c3e50;
-            font-size: 13px;
+            font-size: 15px;
             /* Modifier la taille du titre ici */
         }
 
@@ -149,6 +151,8 @@
             font-style: italic;
             display: block;
             margin-top: 2px;
+            text-align: right;
+            /* Ensure right alignment */
         }
     </style>
 </head>

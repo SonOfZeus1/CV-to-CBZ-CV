@@ -29,13 +29,13 @@ def format_experience_entry(entry):
     if company:
         header_line += f" – {company}"
     if location:
-        header_line += f", {location}"
+        header_line += f" ({location})"
 
 
 
     # New Layout: Header and Dates on the same line using Flexbox with CSS classes
     html_parts = [
-        "<div style='margin-bottom: 20px; border-left: 3px solid #eee; padding-left: 15px;'>",
+        "<div style='margin-bottom: 20px; border-left: 3px solid #eee; padding-left: 0px;'>",
         "<div class='exp-header-row'>",
         f"<div class='exp-header-left'>{header_line}</div>",
         "<div class='exp-header-right'>"
