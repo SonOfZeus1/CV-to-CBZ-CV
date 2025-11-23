@@ -18,7 +18,8 @@ logger = logging.getLogger(__name__)
 
 # Configuration
 DOWNLOADS_DIR = "downloaded_cvs"
-OUTPUTS_DIR = "processed_cvs"
+JSON_OUTPUT_DIR = "JSON generated"
+PDF_OUTPUT_DIR = "CV generated"
 TEMPLATE_PATH = "templates/template.html"
 # Réduction de la concurrence pour stabilité (évite SSL error & Segfault)
 MAX_WORKERS = 1 
@@ -39,8 +40,8 @@ def process_single_file(file_path, drive_service, source_folder_id):
     base_name = os.path.splitext(filename)[0]
     
     # Check if output already exists locally to avoid re-processing
-    json_output_path = os.path.join(OUTPUTS_DIR, f"{base_name}_processed.json")
-    pdf_output_path = os.path.join(OUTPUTS_DIR, f"{base_name}_processed.pdf")
+    json_output_path = os.path.join(JSON_OUTPUT_DIR, f"{base_name}_processed.json")
+    pdf_output_path = os.path.join(PDF_OUTPUT_DIR, f"{base_name}_processed.pdf")
     
     if os.path.exists(json_output_path) and os.path.exists(pdf_output_path):
         logger.info(f"SKIP: Fichiers de sortie déjà existants localement pour {filename}")
@@ -138,8 +139,9 @@ def main():
     downloaded_files = list(set(downloaded_files))
     logger.info(f"{len(downloaded_files)} fichiers uniques à traiter.")
 
-    # Création du dossier de sortie local
-    os.makedirs(OUTPUTS_DIR, exist_ok=True)
+    # Création des dossiers de sortie locaux
+    os.makedirs(JSON_OUTPUT_DIR, exist_ok=True)
+    os.makedirs(PDF_OUTPUT_DIR, exist_ok=True)
 
     # Traitement parallèle (désactivé pour stabilité = 1)
     logger.info(f"Lancement du traitement avec {MAX_WORKERS} workers...")
