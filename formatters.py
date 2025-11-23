@@ -1,6 +1,7 @@
 from jinja2 import Environment, FileSystemLoader
 from weasyprint import HTML
 import os
+import re
 
 
 def format_experience_entry(entry):
