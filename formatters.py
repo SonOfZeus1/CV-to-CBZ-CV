@@ -77,6 +77,35 @@ def format_experience_entry(entry):
     return "".join(html_parts)
 
 
+def format_contact_info(contact_info) -> str:
+    """
+    Formats contact info into HTML.
+    """
+    html_parts = []
+    
+    # Name
+    if contact_info.name:
+        html_parts.append(f"<h1>{contact_info.name}</h1>")
+    
+    # Contact details container
+    html_parts.append("<div class='contact-info'>")
+    
+    details = []
+    if contact_info.email:
+        details.append(f"<strong>Email:</strong> {contact_info.email}")
+    if contact_info.phone:
+        details.append(f"<strong>Téléphone:</strong> {contact_info.phone}")
+    if contact_info.linkedin:
+        details.append(f"<strong>LinkedIn:</strong> {contact_info.linkedin}")
+    if contact_info.location:
+        details.append(f"<strong>Localisation:</strong> {contact_info.location}")
+        
+    html_parts.append(" | ".join(details))
+    html_parts.append("</div>")
+    
+    return "\n".join(html_parts)
+
+
 def normalize_data_for_template(data):
     """
     Adapte la structure de données du parser vers le template HTML.
