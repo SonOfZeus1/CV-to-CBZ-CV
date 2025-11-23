@@ -1,8 +1,12 @@
 import os
 import sys
 from groq import Groq
+from dotenv import load_dotenv
 
 def test_key():
+    # Load env vars
+    load_dotenv()
+    
     # 1. Get the key
     api_key = os.getenv("GROQ_API_KEY")
     

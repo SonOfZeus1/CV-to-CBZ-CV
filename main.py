@@ -2,6 +2,8 @@ import os
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from dotenv import load_dotenv # Import load_dotenv
+
 from google_drive import get_drive_service, download_files_from_folder, upload_file_to_folder
 from parsers import parse_cv
 from formatters import generate_pdf_from_data
@@ -35,6 +37,15 @@ def process_single_file(file_path, drive_service, source_folder_id):
         return False
         
     base_name = os.path.splitext(filename)[0]
+    
+    # Check if output already exists locally to avoid re-processing
+    json_output_path = os.path.join(OUTPUTS_DIR, f"{base_name}_processed.json")
+    pdf_output_path = os.path.join(OUTPUTS_DIR, f"{base_name}_processed.pdf")
+    
+    if os.path.exists(json_output_path) and os.path.exists(pdf_output_path):
+        logger.info(f"SKIP: Fichiers de sortie déjà existants localement pour {filename}")
+        return True
+
     logger.info(f"START Traitement : {filename}")
 
     try:
@@ -44,13 +55,10 @@ def process_single_file(file_path, drive_service, source_folder_id):
 
         if parsed_data:
             # 2. Enregistrer le JSON
-            json_output_path = os.path.join(OUTPUTS_DIR, f"{base_name}_processed.json")
-            
             with open(json_output_path, 'w', encoding='utf-8') as f:
                 json.dump(parsed_data, f, ensure_ascii=False, indent=4)
             
             # 3. Générer le PDF formaté
-            pdf_output_path = os.path.join(OUTPUTS_DIR, f"{base_name}_processed.pdf")
             generate_pdf_from_data(parsed_data, TEMPLATE_PATH, pdf_output_path, blur_contact=BLUR_CONTACT_INFO)
             
             # 4. Uploader les fichiers générés sur Google Drive
@@ -98,6 +106,9 @@ def main():
     """
     Script principal pour le traitement des CV depuis Google Drive.
     """
+    # Load environment variables
+    load_dotenv()
+    
     logger.info("--- Début du pipeline ETL CV ---")
 
     # Récupération des variables d'environnement
@@ -114,13 +125,6 @@ def main():
         logger.critical(f"Erreur authentification Google Drive : {e}")
         return
 
-    # Préchauffage du modèle NLP (Désactivé - remplacé par AI)
-    # logger.info("Chargement du modèle NLP (Spacy)...")
-    # try:
-    #     load_spacy_model()
-    # except Exception as e:
-    #     logger.error(f"Erreur chargement Spacy: {e}")
-
     # Téléchargement des CV
     logger.info(f"Téléchargement des fichiers depuis le dossier source...")
     # Note: download_files_from_folder inclut maintenant un filtre "not name contains '_processed'"
@@ -129,6 +133,10 @@ def main():
     if not downloaded_files:
         logger.info("Aucun fichier à traiter. Fin du script.")
         return
+        
+    # Deduplicate files based on filename to avoid double processing
+    downloaded_files = list(set(downloaded_files))
+    logger.info(f"{len(downloaded_files)} fichiers uniques à traiter.")
 
     # Création du dossier de sortie local
     os.makedirs(OUTPUTS_DIR, exist_ok=True)
