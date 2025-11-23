@@ -189,20 +189,6 @@
         </div>
         {% endif %}
 
-        <!-- COMPÉTENCES -->
-        {% if data.skills %}
-        <div class="section">
-            <h2>Compétences</h2>
-            <ul>
-                {% for skill in data.skills %}
-                <li
-                    style="display: inline-block; background: #eef2f5; padding: 4px 8px; margin: 2px; border-radius: 4px; font-size: 13px; color: #2c3e50; border: 1px solid #dce4ec;">
-                    {{ skill }}</li>
-                {% endfor %}
-            </ul>
-        </div>
-        {% endif %}
-
         <!-- AUTRES RÉALISATIONS -->
         {% if data.achievements_global %}
         <div class="section">

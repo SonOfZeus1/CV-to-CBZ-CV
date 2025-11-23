@@ -77,6 +77,34 @@ def format_experience_entry(entry):
     return "".join(html_parts)
 
 
+def format_education_entry(entry: dict) -> str:
+    """
+    Formats a single education entry into HTML.
+    """
+    degree = entry.get("degree", "")
+    institution = entry.get("institution", "")
+    year = entry.get("date_end", "") or entry.get("date_start", "")
+    
+    # Clean up institution location if needed (e.g. remove Canada)
+    if institution:
+        institution = re.sub(r",?\s*canada", "", institution, flags=re.IGNORECASE).strip()
+        institution = institution.rstrip(",")
+
+    header_line = degree
+    if institution:
+        header_line += f" – {institution}"
+        
+    html_parts = [
+        "<div style='margin-bottom: 15px; border-left: 3px solid #eee; padding-left: 0px;'>",
+        "<div class='exp-header-row'>",
+        f"<div class='exp-header-left'>{header_line}</div>",
+        f"<div class='exp-header-right'><span class='exp-date'>{year}</span></div>",
+        "</div></div>"
+    ]
+    
+    return "".join(html_parts)
+
+
 def format_contact_info(contact_info) -> str:
     """
     Formats contact info into HTML.

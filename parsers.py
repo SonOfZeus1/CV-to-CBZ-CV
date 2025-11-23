@@ -586,15 +586,18 @@ def parse_cv(file_path: str) -> Optional[dict]:
                     if not exp_data.get("duration") and exp_data.get("dates"):
                         exp_data["duration"] = calculate_duration_string(exp_data["dates"])
 
+                # Map various possible keys for job title
+                job_title = exp_data.get("job_title") or exp_data.get("titre_poste") or exp_data.get("titre") or "Poste inconnu"
+
                 entry = ExperienceEntry(
-                    job_title=exp_data.get("job_title", ""),
-                    company=exp_data.get("company", ""),
-                    location=exp_data.get("localisation", ""),
+                    job_title=job_title,
+                    company=exp_data.get("company", "") or exp_data.get("entreprise", ""),
+                    location=exp_data.get("localisation", "") or exp_data.get("location", ""),
                     dates=exp_data.get("dates", ""),
-                    duration=exp_data.get("duration", ""),
-                    summary=exp_data.get("resume", ""),
-                    tasks=exp_data.get("taches", []),
-                    skills=exp_data.get("competences", []),
+                    duration=exp_data.get("duration", "") or exp_data.get("duree", ""),
+                    summary=exp_data.get("resume", "") or exp_data.get("summary", ""),
+                    tasks=exp_data.get("taches", []) or exp_data.get("tasks", []),
+                    skills=exp_data.get("competences", []) or exp_data.get("skills", []),
                     full_text=exp_text
                 )
                 structured_experiences.append(entry)
