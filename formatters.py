@@ -77,13 +77,20 @@ def format_experience_entry(entry):
     return "".join(html_parts)
 
 
-def format_education_entry(entry: dict) -> str:
+def format_education_entry(entry) -> str:
     """
     Formats a single education entry into HTML.
+    Handles both dictionary and EducationEntry object.
     """
-    degree = entry.get("degree", "")
-    institution = entry.get("institution", "")
-    year = entry.get("date_end", "") or entry.get("date_start", "")
+    # Helper to get attribute from dict or object
+    def get_field(obj, field_name):
+        if isinstance(obj, dict):
+            return obj.get(field_name, "")
+        return getattr(obj, field_name, "")
+
+    degree = get_field(entry, "degree")
+    institution = get_field(entry, "institution")
+    year = get_field(entry, "date_end") or get_field(entry, "date_start")
     
     # Clean up institution location if needed (e.g. remove Canada)
     if institution:
@@ -153,7 +160,7 @@ def normalize_data_for_template(data):
         if isinstance(edu, str):
             formatted_education.append(edu)
         else:
-            formatted_education.append(edu.get("full_text", edu.get("degree", "")))
+            formatted_education.append(format_education_entry(edu))
 
     normalized = {
         "name": basics.get("name", "Nom Inconnu"),
@@ -171,13 +178,11 @@ def normalize_data_for_template(data):
     return normalized
 
 
-def generate_pdf_from_data(data, template_path, output_path, blur_contact=False):
+def generate_pdf_from_data(data, template_path, output_path):
     if not data:
         return None
 
     template_data = normalize_data_for_template(data)
-    # Add blur flag to data context for template
-    template_data["is_blurred"] = blur_contact
     
     template_dir = os.path.dirname(template_path)
     template_name = os.path.basename(template_path)
