@@ -45,11 +45,13 @@ def format_experience_entry(entry):
         html_parts.append("</ul>")
 
     if skills:
-        html_parts.append(
-            "<p><strong>Compétences liées à cette expérience</strong><br>"
-            + ", ".join(skills)
-            + "</p>"
-        )
+        html_parts.append("<p><strong>Environnement Technologique</strong></p>")
+        html_parts.append("<ul style='list-style-type: none; padding: 0; margin: 0;'>")
+        for skill in skills:
+            html_parts.append(
+                f"<li style='display: inline-block; background: #eef2f5; padding: 4px 8px; margin: 2px; border-radius: 4px; font-size: 13px; color: #2c3e50; border: 1px solid #dce4ec;'>{skill}</li>"
+            )
+        html_parts.append("</ul>")
 
     if not summary and not tasks and not skills and full_text:
         html_parts.append(
