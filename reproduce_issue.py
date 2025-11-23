@@ -3,6 +3,9 @@ import logging
 import json
 from unittest.mock import patch
 from parsers import parse_cv
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

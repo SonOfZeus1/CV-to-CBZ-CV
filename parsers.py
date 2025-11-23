@@ -15,7 +15,8 @@ from ai_parsers import (
     ai_parse_contact,
     ai_parse_segmentation,
     ai_parse_experience_block,
-    ai_parse_education
+    ai_parse_education,
+    ai_generate_summary
 )
 import dateparser
 from datetime import datetime
@@ -602,6 +603,18 @@ def parse_cv(file_path: str) -> Optional[dict]:
                 )
                 structured_experiences.append(entry)
 
+    # 5b. Generate Dynamic Summary
+    logger.info("Step 3b: Generating Dynamic Summary...")
+    generated_summary = ""
+    if structured_experiences:
+        try:
+            # Convert ExperienceEntry objects to dicts for the AI function
+            exp_dicts = [exp.to_dict() for exp in structured_experiences]
+            summary_result = ai_generate_summary(exp_dicts)
+            generated_summary = summary_result.get("generated_summary", "")
+        except Exception as e:
+            logger.error(f"Error generating summary: {e}")
+
     # 6. Process Education
     logger.info("Step 4: Processing Education...")
     education_entries = []
@@ -652,7 +665,7 @@ def parse_cv(file_path: str) -> Optional[dict]:
         meta={"filename": filename, "ocr_applied": str(ocr_applied)},
         basics=basics,
         links=[basics.get("linkedin")] if basics.get("linkedin") else [],
-        summary=basics.get("summary", ""), # Sometimes summary is in basics or separate
+        summary=generated_summary if generated_summary else basics.get("summary", ""), 
         skills_tech=skills_tech,
         experience=structured_experiences,
         education=education_entries,

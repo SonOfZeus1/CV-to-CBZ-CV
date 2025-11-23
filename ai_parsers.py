@@ -169,9 +169,10 @@ Contraintes :
 - Calculer la durée en années+mois si possible (ex: "2 ans 3 mois").
 - Les "taches" doivent être extraites du texte original.
   CRITICAL RULES FOR TASKS:
-  1.  **MAXIMUM 5 TASKS**: Extract only the top 5 most important tasks. If there are more, select the most significant ones.
-  2.  **STRICT TRUTHFULNESS**: Reformulate tasks to be professional and concise, but REMAIN STRICTLY TRUTHFUL to the original text. Do not invent, exaggerate, or hallucinate details.
-  3.  **NO BULLSHIT**: Avoid buzzwords or vague fluff. Be specific and grounded in the source text.
+  1.  **MAXIMUM 5 TASKS**: Extract only the top 5 most important tasks.
+  2.  **TECHNICAL SPECIFICITY**: You MUST include specific technologies, tools, and frameworks mentioned in the source text within the task descriptions (e.g., "Développement d'API REST avec Spring Boot" instead of just "Développement d'API").
+  3.  **STRICT TRUTHFULNESS**: Do NOT invent technologies. Only use what is explicitly stated in the text.
+  4.  **NO BULLSHIT**: Avoid vague buzzwords. Be precise and technical.
   - Tu peux fusionner des lignes cassées pour reconstituer des phrases complètes.
   - Reformule légèrement pour que ce soit propre et professionnel (verbe d'action), mais n'invente RIEN.
   - Ne laisse jamais "taches" vide si le texte contient des descriptions.
@@ -248,3 +249,37 @@ def ai_parse_education(block_text: str) -> Dict[str, Any]:
         return {"education": []}
     prompt = EDUCATION_USER_PROMPT.format(text=block_text)
     return call_ai(prompt, EDUCATION_SYSTEM_PROMPT, expect_json=True)
+
+SUMMARY_SYSTEM_PROMPT = """
+You are an expert career consultant. Your goal is to write a single, powerful summary sentence for a CV.
+"""
+
+SUMMARY_USER_PROMPT = """
+Based on the following experience list, generate a single summary sentence following this EXACT template:
+
+"[Role] [seniority] comptant plus de [X] années d’expérience en [Main Tech/Field], ayant travaillé pour des organisations d’envergure telles que [Company1], [Company2] et [Company3]."
+
+Rules:
+1. [Role]: Extract the most common or current role (e.g., Ingénieur logiciel, Développeur Java).
+2. [seniority]: Add "senior" if > 5 years, "intermédiaire" if > 2 years, else remove.
+3. [X]: Calculate total years of experience from the dates provided.
+4. [Main Tech/Field]: The primary technology or field (e.g., développement Java, architecture Cloud).
+5. [CompanyList]: List 3-5 most significant/recognizable companies from the list.
+6. Output MUST be a JSON object with a single key "generated_summary".
+
+Experiences:
+{experiences_text}
+"""
+
+def ai_generate_summary(experiences: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Generates a dynamic summary based on extracted experiences."""
+    if not experiences:
+        return {"generated_summary": ""}
+        
+    # Format experiences for the prompt
+    exp_text = ""
+    for exp in experiences:
+        exp_text += f"- {exp.get('job_title')} at {exp.get('company')} ({exp.get('dates')})\n"
+        
+    prompt = SUMMARY_USER_PROMPT.format(experiences_text=exp_text)
+    return call_ai(prompt, SUMMARY_SYSTEM_PROMPT, expect_json=True)
