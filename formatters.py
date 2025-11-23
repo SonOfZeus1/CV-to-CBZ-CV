@@ -29,7 +29,9 @@ def format_experience_entry(entry):
     if company:
         header_line += f" – {company}"
     if location:
-        header_line += f" ({location})"
+        # Extract just the city (first part before comma)
+        city = location.split(',')[0].strip()
+        header_line += f" <span class='exp-location'>({city})</span>"
 
 
 
