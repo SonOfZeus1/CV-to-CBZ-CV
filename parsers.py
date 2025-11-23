@@ -300,21 +300,67 @@ def heuristic_parse_experience(block_text: str) -> Dict[str, Any]:
     dates_match = re.search(date_pattern, block_text, re.IGNORECASE)
     dates = dates_match.group(1) if dates_match else ""
     
-    # Try to find job title (usually first line)
+    # Extract lines
     lines = [l.strip() for l in block_text.split("\n") if l.strip()]
-    title = lines[0] if lines else ""
-    company = lines[1] if len(lines) > 1 else ""
     
+    # Identify Title and Company (heuristic: usually first 2 lines)
+    # But sometimes date is first if we split poorly.
+    # We already extracted date.
+    
+    title = ""
+    company = ""
+    
+    # Filter out the date line if it's in the first few lines
+    clean_lines = []
+    for l in lines:
+        if dates and l in dates: continue # Exact match
+        if len(l) < 3: continue # Skip noise
+        clean_lines.append(l)
+        
+    if clean_lines:
+        title = clean_lines[0]
+    if len(clean_lines) > 1:
+        company = clean_lines[1]
+        
     # If title looks like a date, swap or fix
     if re.match(date_pattern, title, re.IGNORECASE):
         title = "Poste Inconnu"
+
+    # Extract Skills from "Environnement Technologique"
+    skills = []
+    tasks_raw = clean_lines[2:] if len(clean_lines) > 2 else []
+    tasks_clean = []
+    
+    for line in tasks_raw:
+        # Check for Environment line
+        if "Environnement Technologique" in line or "Environnement:" in line:
+            # Extract skills
+            # Remove label
+            content = re.sub(r".*Environnement.*[:]\s*", "", line, flags=re.IGNORECASE)
+            # Split
+            raw_skills = re.split(r"[,•/]", content)
+            for s in raw_skills:
+                s = s.strip()
+                if len(s) > 1:
+                    skills.append(s)
+            continue # Do not add to tasks
+            
+        # Clean task line
+        # Remove bullets
+        line = re.sub(r"^[\•\-\*]\s*", "", line)
         
+        # Merge with previous if starts with lowercase (continuation)
+        if tasks_clean and line and line[0].islower():
+            tasks_clean[-1] += " " + line
+        else:
+            tasks_clean.append(line)
+            
     return {
         "titre_poste": title,
         "entreprise": company,
         "dates": dates,
-        "taches": lines[2:] if len(lines) > 2 else [],
-        "competences": [] # Hard to extract without AI or known list
+        "taches": tasks_clean,
+        "competences": skills
     }
 
 def heuristic_parse_contact(text: str) -> Dict[str, Any]:
