@@ -105,11 +105,50 @@
         }
 
         .blurred {
-            color: transparent !important;
-            text-shadow: 0 0 5px rgba(41, 128, 185, 0.7);
-            /* Bluish blur */
+            color: rgba(41, 128, 185, 0.2) !important;
+            /* Faint blue base */
+            text-shadow: 0 0 8px rgba(41, 128, 185, 1);
+            /* Stronger blur */
             user-select: none;
-            /* No background, just blurry text silhouettes */
+        }
+
+        /* Experience Section Styles */
+        .exp-header-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 5px;
+        }
+
+        .exp-header-left {
+            font-weight: bold;
+            color: #2c3e50;
+            font-size: 13px;
+            /* Modifier la taille du titre ici */
+        }
+
+        .exp-header-right {
+            text-align: right;
+            white-space: nowrap;
+            margin-left: 10px;
+        }
+
+        .exp-date {
+            font-style: italic;
+            color: #7f8c8d;
+            font-weight: bold;
+            font-size: 12px;
+            /* Modifier la taille de la date ici */
+            display: block;
+        }
+
+        .exp-duration {
+            font-size: 10px;
+            /* Modifier la taille de la durée ici */
+            color: #999;
+            font-style: italic;
+            display: block;
+            margin-top: 2px;
         }
     </style>
 </head>

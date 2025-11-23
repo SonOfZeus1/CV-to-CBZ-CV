@@ -31,21 +31,23 @@ def format_experience_entry(entry):
     if location:
         header_line += f", {location}"
 
-    dates_line = dates
-    if duration:
-        dates_line = dates_line + f" ({duration})" if dates_line else f"({duration})"
 
-    # New Layout: Header and Dates on the same line using Flexbox
+
+    # New Layout: Header and Dates on the same line using Flexbox with CSS classes
     html_parts = [
         "<div style='margin-bottom: 20px; border-left: 3px solid #eee; padding-left: 15px;'>",
-        "<div style='display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px;'>"
-        f"<div><strong>{header_line}</strong></div>",
+        "<div class='exp-header-row'>",
+        f"<div class='exp-header-left'>{header_line}</div>",
+        "<div class='exp-header-right'>"
     ]
 
-    if dates_line:
-        html_parts.append(f"<div style='font-style: italic; color: #7f8c8d; font-weight: bold; white-space: nowrap; margin-left: 10px;'>{dates_line}</div>")
+    if dates:
+        html_parts.append(f"<span class='exp-date'>{dates}</span>")
     
-    html_parts.append("</div>") # Close flex container
+    if duration:
+        html_parts.append(f"<span class='exp-duration'>({duration})</span>")
+    
+    html_parts.append("</div></div>") # Close right div and row div
 
     if summary:
         html_parts.append("<p style='margin-top: 0;'><strong>Résumé</strong><br>" + summary + "</p>")
