@@ -118,6 +118,143 @@ def pre_process_text(text: str) -> str:
     
     return "\n".join(cleaned_lines)
 
+def heuristic_segmentation(text: str) -> Dict[str, Any]:
+    """
+    Fallback segmentation using regex keywords if AI fails.
+    """
+    logger.info("Running Heuristic Segmentation...")
+    
+    # Normalize text for easier matching
+    # We keep original text for extraction but use lower case for finding indices
+    text_lower = text.lower()
+    
+    # Define keywords for sections
+    # Note: Order matters less here as we find all indices first
+    section_map = {
+        "skills_block": ["compétences techniques", "technical skills", "skills", "compétences"],
+        "experience_blocks": ["expérience", "experience", "emploi", "employment", "work history"],
+        "education_block": ["éducation", "education", "formation", "diplômes", "academic background"],
+        "languages_block": ["langues", "languages"]
+    }
+    
+    # Find start indices for each section
+    indices = []
+    for section, keywords in section_map.items():
+        for kw in keywords:
+            # We look for the keyword at the start of a line or preceded by newline
+            # to avoid matching inside a sentence
+            matches = list(re.finditer(r"(^|\n)\s*" + re.escape(kw), text_lower))
+            if matches:
+                # Take the first match for this section type
+                start_idx = matches[0].start()
+                indices.append((start_idx, section))
+                break
+    
+    # Sort indices by position
+    indices.sort(key=lambda x: x[0])
+    
+    # If no sections found, return everything as other
+    if not indices:
+        return {"other_block": text}
+        
+    segments = {}
+    
+    # The text before the first section is usually Contact/Header
+    if indices[0][0] > 0:
+        segments["contact_block"] = text[:indices[0][0]].strip()
+        
+    # Slice text between indices
+    for i in range(len(indices)):
+        start_idx, section_name = indices[i]
+        
+        if i < len(indices) - 1:
+            end_idx = indices[i+1][0]
+            content = text[start_idx:end_idx].strip()
+        else:
+            # Last section goes to end of text
+            content = text[start_idx:].strip()
+            
+        # Special handling for experience to make it a list
+        if section_name == "experience_blocks":
+            # Heuristic split by dates or common job titles is hard without AI.
+            # We will just return it as a single block list for now, 
+            # and let the per-block AI try to parse it (or fail gracefully).
+            # Ideally we would split by date patterns here.
+            segments[section_name] = [content]
+        else:
+            segments[section_name] = content
+            
+    return segments
+
+def heuristic_parse_experience(block_text: str) -> Dict[str, Any]:
+    """
+    Attempts to extract experience details using regex if AI fails.
+    """
+    # Try to find dates
+    date_pattern = r"((?:Janvier|Février|Mars|Avril|Mai|Juin|Juillet|Août|Septembre|Octobre|Novembre|Décembre)\s+\d{4}\s*-\s*(?:Aujourd’hui|Présent|(?:Janvier|Février|Mars|Avril|Mai|Juin|Juillet|Août|Septembre|Octobre|Novembre|Décembre)\s+\d{4}))"
+    dates_match = re.search(date_pattern, block_text, re.IGNORECASE)
+    dates = dates_match.group(1) if dates_match else ""
+    
+    # Try to find job title (usually first line)
+    lines = [l.strip() for l in block_text.split("\n") if l.strip()]
+    title = lines[0] if lines else ""
+    company = lines[1] if len(lines) > 1 else ""
+    
+    # If title looks like a date, swap or fix
+    if re.match(date_pattern, title, re.IGNORECASE):
+        title = "Poste Inconnu"
+        
+    return {
+        "titre_poste": title,
+        "entreprise": company,
+        "dates": dates,
+        "taches": lines[2:] if len(lines) > 2 else [],
+        "competences": [] # Hard to extract without AI or known list
+    }
+
+def heuristic_parse_contact(text: str) -> Dict[str, Any]:
+    """
+    Extracts basic contact info using regex.
+    """
+    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    name = lines[0] if lines else ""
+    
+    # Try to find email
+    email_match = re.search(r"[\w\.-]+@[\w\.-]+\.\w+", text)
+    email = email_match.group(0) if email_match else ""
+    
+    # Try to find phone
+    phone_match = re.search(r"(\+\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}", text)
+    phone = phone_match.group(0) if phone_match else ""
+    
+    # Try to find languages (often labeled)
+    languages = []
+    lang_match = re.search(r"(?:Langues|Languages)\s*[:\-\n]\s*(.*)", text, re.IGNORECASE)
+    if lang_match:
+        languages = [l.strip() for l in re.split(r"[,/]", lang_match.group(1)) if l.strip()]
+        
+    return {
+        "name": name,
+        "email": email,
+        "phone": phone,
+        "languages": languages,
+        "title": lines[1] if len(lines) > 1 else "" # Assumption: Title is often 2nd line
+    }
+
+def heuristic_parse_education(text: str) -> Dict[str, Any]:
+    """
+    Extracts education info using regex.
+    """
+    # Very basic extraction: just take the whole block as one entry if we can't parse
+    return {
+        "education": [{
+            "diplome": "Diplôme (Non spécifié)",
+            "etablissement": "Établissement (Non spécifié)",
+            "annee": "",
+            "full_text": text
+        }]
+    }
+
 def verify_content_coverage(cv_data: Dict[str, Any], raw_text: str):
     """Checks if generated content covers the raw text."""
     captured_text = ""
@@ -176,14 +313,24 @@ def parse_cv(file_path: str) -> Optional[dict]:
     logger.info("Step 1: Extracting Contact Info...")
     basics = ai_parse_contact(clean_text)
     if not basics:
-        logger.warning("Contact extraction failed.")
-        basics = {}
-
+        logger.warning("Contact extraction failed. Attempting Heuristic Fallback.")
+        # Use the contact block from segmentation if available, otherwise use first few lines
+        contact_text = clean_text[:1000]
+        basics = heuristic_parse_contact(contact_text)
+        
     # 4. AI Segmentation
     logger.info("Step 2: Segmenting CV...")
     segments = ai_parse_segmentation(clean_text)
+    
+    # Check if AI segmentation failed (empty or just other_block)
+    is_ai_failed = not segments or (list(segments.keys()) == ["other_block"] and len(segments) == 1)
+    
+    if is_ai_failed:
+        logger.warning("AI Segmentation failed or returned only 'other_block'. Attempting Heuristic Fallback.")
+        segments = heuristic_segmentation(clean_text)
+        
     if not segments:
-        logger.warning("Segmentation failed. Using full text as 'other'.")
+        logger.warning("Heuristic segmentation also failed. Using full text as 'other'.")
         segments = {"other_block": clean_text}
 
     # 5. Process Experience
@@ -195,7 +342,15 @@ def parse_cv(file_path: str) -> Optional[dict]:
         
     for block in exp_blocks:
         if len(block) < 20: continue
+        
+        # Try AI first
         exp_data = ai_parse_experience_block(block)
+        
+        # Fallback if AI fails
+        if not exp_data:
+            logger.warning("AI Experience Parsing failed. Using Heuristic Fallback.")
+            exp_data = heuristic_parse_experience(block)
+            
         if exp_data:
             entry = ExperienceEntry(
                 job_title=exp_data.get("titre_poste", ""),
@@ -216,6 +371,12 @@ def parse_cv(file_path: str) -> Optional[dict]:
     edu_block = segments.get("education_block", "")
     if edu_block:
         edu_data = ai_parse_education(edu_block)
+        
+        # Fallback
+        if not edu_data or not edu_data.get("education"):
+             logger.warning("AI Education Parsing failed. Using Heuristic Fallback.")
+             edu_data = heuristic_parse_education(edu_block)
+             
         for item in edu_data.get("education", []):
             education_entries.append(EducationEntry(
                 degree=item.get("diplome", ""),
@@ -257,4 +418,12 @@ def parse_cv(file_path: str) -> Optional[dict]:
     # 9. Verify Coverage
     verify_content_coverage(result_dict, clean_text)
     
+    # 10. Critical Validation
+    if not result_dict.get("experience") and "EXPÉRIENCE" in clean_text.upper():
+        logger.error("CRITICAL: Experience section missing in JSON but present in text!")
+    if not result_dict.get("education") and "ÉDUCATION" in clean_text.upper():
+        logger.error("CRITICAL: Education section missing in JSON but present in text!")
+    if not result_dict.get("basics", {}).get("name"):
+        logger.error("CRITICAL: Name missing in basics!")
+        
     return result_dict

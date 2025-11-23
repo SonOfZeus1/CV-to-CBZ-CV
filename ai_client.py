@@ -73,7 +73,16 @@ class AIClient:
 
                 if expect_json:
                     try:
-                        return json.loads(content)
+                        # Clean up markdown code blocks if present
+                        cleaned_content = content.strip()
+                        if cleaned_content.startswith("```"):
+                            # Remove first line (```json or just ```)
+                            cleaned_content = "\n".join(cleaned_content.split("\n")[1:])
+                            # Remove last line if it is ```
+                            if cleaned_content.strip().endswith("```"):
+                                cleaned_content = cleaned_content.strip()[:-3]
+                        
+                        return json.loads(cleaned_content)
                     except json.JSONDecodeError:
                         logger.error(f"Failed to parse JSON from AI response: {content[:100]}...")
                         if attempt < MAX_RETRIES - 1:
