@@ -138,7 +138,8 @@ def fetch_pending_cvs(service, sheet_id, target_status="EN_ATTENTE", sheet_range
                 'row': i,
                 'file_name': row[1] if len(row) > 1 else "Unknown",
                 'file_id': row[2] if len(row) > 2 else "",
-                'json_link': row[5] if len(row) > 5 else "" # Column F is JSON Link
+                'json_link': row[5] if len(row) > 5 else "", # Column F is JSON Link
+                'pdf_link': row[6] if len(row) > 6 else ""   # Column G is PDF Link
             })
             
     return pending_cvs

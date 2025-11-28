@@ -57,6 +57,13 @@ def process_render_row(row_data, drive_service, sheets_service, sheet_id, output
     # Hack: Extract ID from Drive Link: https://drive.google.com/file/d/FILE_ID/view...
     
     json_link = row_data.get('json_link', '')
+    pdf_link_existing = row_data.get('pdf_link', '')
+    
+    # Skip if PDF already exists
+    if pdf_link_existing:
+        logger.info(f"Row {row_num}: PDF already exists. Skipping.")
+        return
+
     if not json_link or "id=" not in json_link and "/d/" not in json_link:
         logger.error(f"Row {row_num}: Invalid JSON Link: {json_link}")
         update_cv_status(sheets_service, sheet_id, row_num, "ERREUR_LIEN_JSON")
@@ -77,7 +84,12 @@ def process_render_row(row_data, drive_service, sheets_service, sheet_id, output
     original_filename = row_data['file_name']
     logger.info(f"RENDER Row {row_num}: {original_filename}")
     
-    update_cv_status(sheets_service, sheet_id, row_num, "RENDU_EN_COURS", json_link=json_link)
+    # We do NOT update status to RENDU_EN_COURS to avoid noise, or we can if we want.
+    # User requested NO status change. So we skip this update or keep it but revert to JSON_OK at end?
+    # "le pipeline 2 ne doit généré aucun status" -> implying it shouldn't change it permanently?
+    # But if it fails, we might want to know.
+    # I will skip the intermediate status update to be safe and strictly follow "no status generated".
+    # update_cv_status(sheets_service, sheet_id, row_num, "RENDU_EN_COURS", json_link=json_link)
     
     # 1. Download JSON
     json_filename = f"render_{row_num}.json"
@@ -107,8 +119,8 @@ def process_render_row(row_data, drive_service, sheets_service, sheet_id, output
         # 5. Get Summary (from JSON)
         summary = cv_data.get('summary', '')
         
-        # 6. Update Sheet -> TERMINÉ
-        update_cv_status(sheets_service, sheet_id, row_num, "TERMINÉ", json_link=json_link, pdf_link=pdf_link, summary=summary)
+        # 6. Update Sheet -> Keep JSON_OK, but add PDF Link
+        update_cv_status(sheets_service, sheet_id, row_num, "JSON_OK", json_link=json_link, pdf_link=pdf_link, summary=summary)
         logger.info(f"SUCCESS RENDER Row {row_num}: {original_filename}")
 
     except Exception as e:

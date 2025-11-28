@@ -39,6 +39,6 @@ jobs:
       env:
         SHEET_ID: ${{ secrets.SHEET_ID }}
         SOURCE_FOLDER_ID: ${{ secrets.SOURCE_FOLDER_ID }}
-        JSON_INPUT_FOLDER_ID: ${{ secrets.JSON_INPUT_FOLDER_ID }}
+        JSON_INPUT_FOLDER_ID: ${{ secrets.JSON_OUTPUT_FOLDER_ID }}
         PDF_OUTPUT_FOLDER_ID: ${{ secrets.PDF_OUTPUT_FOLDER_ID }}
       run: python etl_render.py
