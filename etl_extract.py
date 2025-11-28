@@ -2,13 +2,11 @@ import os
 import json
 import logging
 import io
-from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 from googleapiclient.http import MediaIoBaseDownload
 
 from google_drive import get_drive_service, get_sheets_service, fetch_pending_cvs, update_cv_status, upload_file_to_folder
 from parsers import parse_cv
-from formatters import generate_pdf_from_data
 
 # --- Configuration Logging ---
 logging.basicConfig(
@@ -21,9 +19,6 @@ logger = logging.getLogger(__name__)
 # Configuration
 DOWNLOADS_DIR = "downloaded_cvs"
 JSON_OUTPUT_DIR = "JSON generated"
-PDF_OUTPUT_DIR = "CV generated"
-TEMPLATE_PATH = "templates/template.html"
-MAX_WORKERS = 1 
 
 def download_file_by_id(drive_service, file_id, file_name, destination_folder):
     """Downloads a specific file by ID."""
@@ -47,70 +42,69 @@ def download_file_by_id(drive_service, file_id, file_name, destination_folder):
         logger.error(f"Error downloading {file_name} ({file_id}): {e}")
         return None
 
-def process_single_row(row_data, drive_service, sheets_service, sheet_id, output_folder_id):
+def process_extract_row(row_data, drive_service, sheets_service, sheet_id, output_folder_id):
     """
-    Processes a single row from the Sheet.
-    row_data: {'row': int, 'file_id': str, 'file_name': str}
+    Pipeline 1: Extraction
+    PDF -> JSON
     """
     row_num = row_data['row']
     file_id = row_data['file_id']
     file_name = row_data['file_name']
     
-    logger.info(f"Processing Row {row_num}: {file_name}")
+    logger.info(f"EXTRACT Row {row_num}: {file_name}")
     
     # Update status to PROCESSING
-    update_cv_status(sheets_service, sheet_id, row_num, "EN_COURS")
+    update_cv_status(sheets_service, sheet_id, row_num, "EXTRACTION_EN_COURS")
     
-    # 1. Download
+    # 1. Download PDF
     local_path = download_file_by_id(drive_service, file_id, file_name, DOWNLOADS_DIR)
     if not local_path:
         update_cv_status(sheets_service, sheet_id, row_num, "ERREUR_DOWNLOAD")
         return
 
     try:
-        # 2. Parse
+        # 2. Parse (AI Extraction)
         parsed_data = parse_cv(local_path)
         
         if not parsed_data:
             update_cv_status(sheets_service, sheet_id, row_num, "ERREUR_PARSING")
             return
 
-        # 3. Generate PDF
+        # 3. Save JSON Locally
         base_name = os.path.splitext(file_name)[0]
-        pdf_output_path = os.path.join(PDF_OUTPUT_DIR, f"{base_name}_processed.pdf")
-        generate_pdf_from_data(parsed_data, TEMPLATE_PATH, pdf_output_path)
+        json_filename = f"{base_name}_extracted.json"
+        if not os.path.exists(JSON_OUTPUT_DIR):
+            os.makedirs(JSON_OUTPUT_DIR)
+        json_output_path = os.path.join(JSON_OUTPUT_DIR, json_filename)
         
-        # 4. Upload PDF
-        pdf_file_id = upload_file_to_folder(drive_service, pdf_output_path, output_folder_id)
+        with open(json_output_path, 'w', encoding='utf-8') as f:
+            json.dump(parsed_data, f, ensure_ascii=False, indent=4)
+            
+        # 4. Upload JSON to Drive
+        json_file_id = upload_file_to_folder(drive_service, json_output_path, output_folder_id)
         
-        # Get Web View Link
-        file_info = drive_service.files().get(fileId=pdf_file_id, fields='webViewLink').execute()
-        pdf_link = file_info.get('webViewLink', '')
+        # Get Web View Link for JSON
+        file_info = drive_service.files().get(fileId=json_file_id, fields='webViewLink').execute()
+        json_link = file_info.get('webViewLink', '')
         
-        # 5. Get Summary
-        summary = parsed_data.get('summary', '')
-        
-        # 6. Update Sheet -> SUCCESS
-        update_cv_status(sheets_service, sheet_id, row_num, "TERMINÉ", pdf_link, summary)
-        logger.info(f"SUCCESS Row {row_num}: {file_name}")
+        # 5. Update Sheet -> JSON_OK
+        # We leave PDF Link and Summary empty for now
+        update_cv_status(sheets_service, sheet_id, row_num, "JSON_OK", json_link=json_link)
+        logger.info(f"SUCCESS EXTRACT Row {row_num}: {file_name}")
 
     except Exception as e:
-        logger.error(f"Error processing {file_name}: {e}", exc_info=True)
+        logger.error(f"Error extracting {file_name}: {e}", exc_info=True)
         update_cv_status(sheets_service, sheet_id, row_num, f"ERREUR: {str(e)}")
 
 def main():
     load_dotenv()
-    logger.info("--- Starting Hybrid Pipeline (Sheet-Driven) ---")
+    logger.info("--- Starting Pipeline 1: EXTRACTION (PDF -> JSON) ---")
 
     sheet_id = os.environ.get('SHEET_ID')
-    output_folder_id = os.environ.get('SOURCE_FOLDER_ID') # We reuse source folder for output for now, or separate?
-    # Ideally output folder should be different or same. Let's assume same for simplicity or read from env.
+    output_folder_id = os.environ.get('SOURCE_FOLDER_ID') 
     
-    if not sheet_id:
-        logger.error("Missing SHEET_ID in .env")
-        return
-    if not output_folder_id:
-        logger.error("Missing SOURCE_FOLDER_ID in .env")
+    if not sheet_id or not output_folder_id:
+        logger.error("Missing SHEET_ID or SOURCE_FOLDER_ID in .env")
         return
 
     try:
@@ -120,22 +114,20 @@ def main():
         logger.critical(f"Auth Error: {e}")
         return
 
-    # 1. Fetch Pending
-    logger.info("Fetching pending CVs from Sheet...")
-    pending_rows = fetch_pending_cvs(sheets_service, sheet_id)
+    # Fetch rows with status "EN_ATTENTE"
+    logger.info("Fetching pending CVs (EN_ATTENTE)...")
+    pending_rows = fetch_pending_cvs(sheets_service, sheet_id, target_status="EN_ATTENTE")
     
     if not pending_rows:
         logger.info("No pending CVs found.")
         return
         
-    logger.info(f"Found {len(pending_rows)} pending CVs.")
+    logger.info(f"Found {len(pending_rows)} CVs to extract.")
 
-    # 2. Process
-    # Sequential for safety, or parallel if robust
     for row in pending_rows:
-        process_single_row(row, drive_service, sheets_service, sheet_id, output_folder_id)
+        process_extract_row(row, drive_service, sheets_service, sheet_id, output_folder_id)
 
-    logger.info("--- Pipeline Finished ---")
+    logger.info("--- Extraction Pipeline Finished ---")
 
 if __name__ == "__main__":
     main()

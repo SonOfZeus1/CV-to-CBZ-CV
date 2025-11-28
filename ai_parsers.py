@@ -148,13 +148,13 @@ Texte du CV :
 """
 
 EXPERIENCE_SYSTEM_PROMPT = """
-You are an expert CV parser. Your goal is to extract experience details from the provided text segment.
+You are an expert CV parser. Your goal is to extract experience details from the provided text segment with extreme precision.
 Return a JSON object with the following fields:
-- job_title: The job title.
+- job_title: The job title (normalized).
 - company: The company name.
 - localisation: The location (City, Country).
-- dates: The date range (e.g., "Jan 2020 - Present").
-- duration: The duration (e.g., "2 ans").
+- start_date: The start date (e.g., "Jan 2020").
+- end_date: The end date (e.g., "Present" or "Dec 2021").
 - resume: A brief summary of the role (optional).
 - taches: A list of key tasks/responsibilities.
 - competences: A list of skills used in this role.
@@ -162,32 +162,29 @@ Return a JSON object with the following fields:
 
 EXPERIENCE_USER_PROMPT = """
 Voici le texte brut d'une seule expérience professionnelle.
-Tu dois produire un JSON structuré.
+Tu dois produire un JSON structuré avec une précision chirurgicale.
 
-Contraintes :
-- Reprendre EXACTEMENT les dates du CV (ne jamais modifier le format).
-- Calculer la durée en années+mois si possible (ex: "2 ans 3 mois").
-- Les "taches" doivent être extraites du texte original.
-  CRITICAL RULES FOR TASKS:
-  1.  **MAXIMUM 5 TASKS**: Extract only the top 5 most important tasks.
-  2.  **TECHNICAL SPECIFICITY**: You MUST include specific technologies, tools, and frameworks mentioned in the source text within the task descriptions (e.g., "Développement d'API REST avec Spring Boot" instead of just "Développement d'API").
-  3.  **STRICT TRUTHFULNESS**: Do NOT invent technologies. Only use what is explicitly stated in the text.
-  4.  **NO BULLSHIT**: Avoid vague buzzwords. Be precise and technical.
-  - Tu peux fusionner des lignes cassées pour reconstituer des phrases complètes.
-  - Reformule légèrement pour que ce soit propre et professionnel (verbe d'action), mais n'invente RIEN.
-  - Ne laisse jamais "taches" vide si le texte contient des descriptions.
-- Les "competences" doivent venir exclusivement du texte de cette expérience (stack technique citée, environnement technologique, outils, langages).
+Contraintes CRITIQUES :
+1.  **DATES** : Extrait `start_date` et `end_date` séparément. Copie EXACTEMENT le texte du CV pour chaque date.
+    - Si "Aujourd'hui", "Présent", "Current" -> met "Aujourd'hui".
+2.  **LOCALISATION** : Format strict "Ville, Pays" (ex: "Paris, France"). Si le pays n'est pas précisé mais évident (Paris), ajoute-le.
+3.  **TITRE** : Garde le titre original mais corrige les majuscules (Title Case).
+4.  **TACHES** :
+    - Maximum 5 tâches les plus importantes.
+    - Sois précis sur les technologies (ex: "Spring Boot" au lieu de "Java").
+    - Verbes d'action à l'infinitif ou au passé composé selon le contexte, mais cohérent.
+5.  **COMPETENCES** : Liste les technologies explicites trouvées dans ce bloc.
 
 Retourne un JSON strict :
 {{
-  "titre_poste": "...",
-  "entreprise": "...",
-  "localisation": "...",
-  "dates": "...",
-  "duree": "...",
-  "resume": "Court résumé si présent",
-  "taches": ["Tâche 1", "Tâche 2"],
-  "competences": ["Java", "Python"]
+  "job_title": "...",
+  "company": "...",
+  "localisation": "Ville, Pays",
+  "start_date": "...",
+  "end_date": "...",
+  "resume": "...",
+  "taches": ["..."],
+  "competences": ["..."]
 }}
 
 Bloc expérience :

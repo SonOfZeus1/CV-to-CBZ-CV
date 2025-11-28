@@ -4,6 +4,7 @@ import os
 import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import docx
 import fitz  # PyMuPDF
@@ -19,40 +20,54 @@ from ai_parsers import (
     ai_generate_summary
 )
 import dateparser
-from datetime import datetime
+from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
 logger = logging.getLogger(__name__)
 
 # --- HELPERS ---
 
-def calculate_duration_string(date_range_str: str) -> str:
+def calculate_duration_string(start_str: str, end_str: str) -> str:
     """
-    Calculates duration from a date range string like "Septembre 2021 - Aujourd'hui".
+    Calculates duration from start and end date strings.
     Returns a string like "2 ans 3 mois".
+    Uses strict parsing: 1st of month for start, last of month for end (if day missing).
     """
-    if not date_range_str:
+    if not start_str or not end_str:
         return ""
         
-    # Split by hyphen or "to"
-    parts = re.split(r'\s*-\s*|\s+to\s+', date_range_str)
-    if len(parts) != 2:
-        return ""
-        
-    start_str, end_str = parts[0].strip(), parts[1].strip()
-    
-    # Handle "Present", "Aujourd'hui", etc.
     now = datetime.now()
-    if re.match(r'(?i)(aujourd\'hui|présent|present|current|now)', end_str):
-        end_date = now
-    else:
-        end_date = dateparser.parse(end_str, languages=['fr', 'en'])
-        
-    start_date = dateparser.parse(start_str, languages=['fr', 'en'])
+    end_date = None
     
+    # Handle "Present"
+    if re.match(r'(?i)^(aujourd\'hui|présent|present|current|now|ce jour)$', end_str):
+        end_date = now
+    elif re.match(r'^\d{4}$', end_str):
+        end_date = datetime(int(end_str), 12, 31)
+    else:
+        # End date: prefer last day of month
+        end_date = dateparser.parse(end_str, languages=['fr', 'en'], settings={'PREFER_DAY_OF_MONTH': 'last'})
+            
+    # Start date
+    if re.match(r'^\d{4}$', start_str):
+        start_date = datetime(int(start_str), 1, 1)
+    else:
+        start_date = dateparser.parse(start_str, languages=['fr', 'en'], settings={'PREFER_DAY_OF_MONTH': 'first'})
+
     if not start_date or not end_date:
         return ""
-        
+    
+    if end_date < start_date:
+        return ""
+
+    # Logic for inclusive months
+    # If end date was parsed as end of month (no specific day in input), add 1 day for inclusive calc
+    # Heuristic: check if input has a day digit
+    has_day_end = re.search(r'\b\d{1,2}\b', end_str) and not re.match(r'^\d{4}$', end_str)
+    
+    if not has_day_end and end_date != now:
+        end_date = end_date + timedelta(days=1)
+
     # Calculate difference
     diff = relativedelta(end_date, start_date)
     
@@ -64,7 +79,7 @@ def calculate_duration_string(date_range_str: str) -> str:
         parts.append(f"{diff.months} mois")
         
     if not parts:
-        return "Moins d'un mois"
+        return "1 mois" # Minimum
         
     return " ".join(parts)
 
@@ -562,30 +577,65 @@ def parse_cv(file_path: str) -> Optional[dict]:
         segments = {"other_block": clean_text}
 
     # 5. Process Experience
-    logger.info("Step 3: Processing Experience Blocks...")
+    logger.info("Step 3: Processing Experience Blocks (Parallel)...")
     structured_experiences = []
-    # Parse experience blocks
+    
     if "experience_blocks" in segments and isinstance(segments["experience_blocks"], list):
-        for exp_text in segments["experience_blocks"]:
-            if isinstance(exp_text, str) and exp_text.strip():
+        experience_blocks = [b for b in segments["experience_blocks"] if isinstance(b, str) and b.strip()]
+        
+        # Helper function for parallel execution
+        def process_single_experience(exp_text, index):
+            try:
                 exp_data = ai_parse_experience_block(exp_text)
+                return index, exp_data, exp_text
+            except Exception as e:
+                logger.error(f"Error parsing experience block {index}: {e}")
+                return index, None, exp_text
+
+        # Execute in parallel
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            futures = [executor.submit(process_single_experience, txt, i) for i, txt in enumerate(experience_blocks)]
+            
+            results = []
+            for future in as_completed(futures):
+                results.append(future.result())
                 
-                # Fallback calculation for duration if missing
-                if not exp_data.get("duration") and exp_data.get("dates"):
-                    exp_data["duration"] = calculate_duration_string(exp_data["dates"])
+            # Sort by original index to maintain order
+            results.sort(key=lambda x: x[0])
+            
+            for _, exp_data, exp_text in results:
+                if not exp_data:
+                    continue
                     
+                # Handle structured dates
+                start_date = exp_data.get("start_date", "")
+                end_date = exp_data.get("end_date", "")
+                
+                # Construct legacy dates string for display
+                dates_str = f"{start_date} - {end_date}" if start_date and end_date else exp_data.get("dates", "")
+                
+                # Calculate duration using structured dates
+                if not exp_data.get("duration"):
+                    exp_data["duration"] = calculate_duration_string(start_date, end_date)
+
                 # Fallback parsing if AI failed to extract key fields
                 if not exp_data.get("job_title") and not exp_data.get("company"):
                     logger.warning("AI failed to extract experience details, trying heuristic fallback...")
                     heuristic_data = heuristic_parse_experience(exp_text)
-                    # Merge heuristic data, preferring AI data if present
+                    # Merge heuristic data
                     for k, v in heuristic_data.items():
                         if not exp_data.get(k):
                             exp_data[k] = v
-                            
-                    # Recalculate duration if we just got dates from heuristic
+                    
+                    # If we fell back to heuristic, we might have a single 'dates' string
+                    # Try to split it for duration calculation if needed
                     if not exp_data.get("duration") and exp_data.get("dates"):
-                        exp_data["duration"] = calculate_duration_string(exp_data["dates"])
+                        # Heuristic returns "Start - End"
+                        d_str = exp_data.get("dates")
+                        # We can try to reuse our calc function by splitting loosely
+                        parts = re.split(r'\s+(?:-|–|—|to|à)\s+', d_str)
+                        if len(parts) == 2:
+                            exp_data["duration"] = calculate_duration_string(parts[0], parts[1])
 
                 # Map various possible keys for job title
                 job_title = exp_data.get("job_title") or exp_data.get("titre_poste") or exp_data.get("titre") or "Poste inconnu"
@@ -594,7 +644,7 @@ def parse_cv(file_path: str) -> Optional[dict]:
                     job_title=job_title,
                     company=exp_data.get("company", "") or exp_data.get("entreprise", ""),
                     location=exp_data.get("localisation", "") or exp_data.get("location", ""),
-                    dates=exp_data.get("dates", ""),
+                    dates=dates_str,
                     duration=exp_data.get("duration", "") or exp_data.get("duree", ""),
                     summary=exp_data.get("resume", "") or exp_data.get("summary", ""),
                     tasks=exp_data.get("taches", []) or exp_data.get("tasks", []),

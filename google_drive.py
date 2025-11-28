@@ -107,3 +107,55 @@ def get_or_create_folder(service, folder_name, parent_id=None):
         
         folder = service.files().create(body=file_metadata, fields='id', supportsAllDrives=True).execute()
         return folder.get('id')
+
+# --- SHEETS API ---
+
+def get_sheets_service():
+    """Authenticates with Google Sheets API."""
+    creds, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets'])
+    return build('sheets', 'v4', credentials=creds)
+
+def fetch_pending_cvs(service, sheet_id, target_status="EN_ATTENTE", sheet_range="Feuille 1!A:H"):
+    """
+    Fetches rows where Status (Column E, index 4) matches target_status.
+    Returns a list of dicts: {'row': int, 'file_id': str, 'file_name': str, 'json_link': str}
+    """
+    sheet = service.spreadsheets()
+    result = sheet.values().get(spreadsheetId=sheet_id, range=sheet_range).execute()
+    values = result.get('values', [])
+
+    pending_cvs = []
+    
+    if not values:
+        return []
+
+    # Skip header
+    for i, row in enumerate(values[1:], start=2): # Start at row 2 (1-based index for Sheets)
+        # Row structure: [Date, Name, ID, Link, Status, JSON Link, PDF Link, Summary]
+        # Check if row has enough columns and Status matches
+        if len(row) > 4 and row[4] == target_status:
+            pending_cvs.append({
+                'row': i,
+                'file_name': row[1] if len(row) > 1 else "Unknown",
+                'file_id': row[2] if len(row) > 2 else "",
+                'json_link': row[5] if len(row) > 5 else "" # Column F is JSON Link
+            })
+            
+    return pending_cvs
+
+def update_cv_status(service, sheet_id, row_number, status, json_link="", pdf_link="", summary=""):
+    """
+    Updates the status, JSON link, PDF link, and summary for a specific row.
+    Columns: E=Status, F=JSON Link, G=PDF Link, H=Summary
+    """
+    # We update range E{row}:H{row}
+    range_name = f"Feuille 1!E{row_number}:H{row_number}"
+    
+    values = [[status, json_link, pdf_link, summary]]
+    body = {'values': values}
+    
+    service.spreadsheets().values().update(
+        spreadsheetId=sheet_id, range=range_name,
+        valueInputOption="USER_ENTERED", body=body
+    ).execute()
+    print(f"Updated Sheet Row {row_number}: {status}")
