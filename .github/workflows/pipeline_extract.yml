@@ -2,8 +2,7 @@ name: Pipeline 1 - Extraction (PDF -> JSON)
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 * * * *' # Runs every hour
+
 
 jobs:
   extract-cvs:
