@@ -1,0 +1,42 @@
+name: Pipeline 2 - Rendering (JSON -> PDF)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  render-cvs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Authenticate to Google Cloud
+      id: auth
+      uses: 'google-github-actions/auth@v2'
+      with:
+        workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        audience: ${{ secrets.GCP_AUDIENCE }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      # We might not need Tesseract here, but WeasyPrint needs some libs
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run Rendering Pipeline
+      env:
+        SHEET_ID: ${{ secrets.SHEET_ID }}
+        SOURCE_FOLDER_ID: ${{ secrets.SOURCE_FOLDER_ID }}
+      run: python etl_render.py

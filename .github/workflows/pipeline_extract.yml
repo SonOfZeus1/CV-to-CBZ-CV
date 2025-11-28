@@ -1,0 +1,46 @@
+name: Pipeline 1 - Extraction (PDF -> JSON)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 * * * *' # Runs every hour
+
+jobs:
+  extract-cvs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Authenticate to Google Cloud
+      id: auth
+      uses: 'google-github-actions/auth@v2'
+      with:
+        workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        audience: ${{ secrets.GCP_AUDIENCE }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y tesseract-ocr
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        python -m nltk.downloader stopwords punkt averaged_perceptron_tagger
+
+    - name: Run Extraction Pipeline
+      env:
+        SHEET_ID: ${{ secrets.SHEET_ID }}
+        SOURCE_FOLDER_ID: ${{ secrets.SOURCE_FOLDER_ID }}
+        GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+        GROQ_MODEL: ${{ vars.GROQ_MODEL }}
+      run: python etl_extract.py
