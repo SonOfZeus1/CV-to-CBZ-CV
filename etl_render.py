@@ -120,11 +120,22 @@ def main():
     logger.info("--- Starting Pipeline 2: RENDERING (JSON -> PDF) ---")
 
     sheet_id = os.environ.get('SHEET_ID')
-    output_folder_id = os.environ.get('SOURCE_FOLDER_ID') 
+    source_folder_id = os.environ.get('SOURCE_FOLDER_ID')
+    json_input_folder_id = os.environ.get('JSON_INPUT_FOLDER_ID')
+    pdf_output_folder_id = os.environ.get('PDF_OUTPUT_FOLDER_ID')
     
-    if not sheet_id or not output_folder_id:
+    if not sheet_id or not source_folder_id:
         logger.error("Missing SHEET_ID or SOURCE_FOLDER_ID in .env")
         return
+
+    # Fallbacks
+    if not json_input_folder_id:
+         logger.warning("JSON_INPUT_FOLDER_ID not set. Assuming JSONs are in SOURCE_FOLDER_ID or linked correctly.")
+         # We don't strictly need it for logic if we download by ID, but good to have.
+    
+    if not pdf_output_folder_id:
+        logger.warning("PDF_OUTPUT_FOLDER_ID not set. Using SOURCE_FOLDER_ID as fallback for Output.")
+        pdf_output_folder_id = source_folder_id
 
     try:
         drive_service = get_drive_service()
@@ -142,9 +153,12 @@ def main():
         return
         
     logger.info(f"Found {len(pending_rows)} CVs to render.")
+    if json_input_folder_id:
+        logger.info(f"Input Folder (JSON): {json_input_folder_id}")
+    logger.info(f"Output Folder (PDF): {pdf_output_folder_id}")
 
     for row in pending_rows:
-        process_render_row(row, drive_service, sheets_service, sheet_id, output_folder_id)
+        process_render_row(row, drive_service, sheets_service, sheet_id, pdf_output_folder_id)
 
     logger.info("--- Rendering Pipeline Finished ---")
 

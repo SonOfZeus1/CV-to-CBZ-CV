@@ -101,11 +101,16 @@ def main():
     logger.info("--- Starting Pipeline 1: EXTRACTION (PDF -> JSON) ---")
 
     sheet_id = os.environ.get('SHEET_ID')
-    output_folder_id = os.environ.get('SOURCE_FOLDER_ID') 
+    source_folder_id = os.environ.get('SOURCE_FOLDER_ID')
+    json_output_folder_id = os.environ.get('JSON_OUTPUT_FOLDER_ID')
     
-    if not sheet_id or not output_folder_id:
+    if not sheet_id or not source_folder_id:
         logger.error("Missing SHEET_ID or SOURCE_FOLDER_ID in .env")
         return
+
+    if not json_output_folder_id:
+        logger.warning("JSON_OUTPUT_FOLDER_ID not set. Using SOURCE_FOLDER_ID as fallback.")
+        json_output_folder_id = source_folder_id
 
     try:
         drive_service = get_drive_service()
@@ -125,7 +130,7 @@ def main():
     logger.info(f"Found {len(pending_rows)} CVs to extract.")
 
     for row in pending_rows:
-        process_extract_row(row, drive_service, sheets_service, sheet_id, output_folder_id)
+        process_extract_row(row, drive_service, sheets_service, sheet_id, json_output_folder_id)
 
     logger.info("--- Extraction Pipeline Finished ---")
 
