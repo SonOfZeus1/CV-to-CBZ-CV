@@ -1,4 +1,5 @@
 import io
+import time
 import logging
 import os
 import re
@@ -63,7 +64,7 @@ def calculate_duration_string(start_str: str, end_str: str) -> str:
     # Logic for inclusive months
     # If end date was parsed as end of month (no specific day in input), add 1 day for inclusive calc
     # Heuristic: check if input has a day digit
-    has_day_end = re.search(r'\b\d{1,2}\b', end_str) and not re.match(r'^\d{4}$', end_str)
+    has_day_end = re.search(r'\\b\\d{1,2}\\b', end_str) and not re.match(r'^\\d{4}$', end_str)
     
     if not has_day_end and end_date != now:
         end_date = end_date + timedelta(days=1)
@@ -135,7 +136,7 @@ class CVData:
 def extract_text_from_docx(file_path: str) -> str:
     try:
         doc = docx.Document(file_path)
-        return "\n".join([para.text for para in doc.paragraphs])
+        return "\\n".join([para.text for para in doc.paragraphs])
     except Exception as exc:
         logger.warning("DOCX extraction failed (%s): %s", file_path, exc)
         return ""
@@ -156,7 +157,7 @@ def extract_text_from_pdf(file_path: str) -> tuple[str, bool]:
                     pix = page.get_pixmap(dpi=150)
                     img_bytes = pix.tobytes("png")
                     image = Image.open(io.BytesIO(img_bytes))
-                    text += pytesseract.image_to_string(image) + "\n"
+                    text += pytesseract.image_to_string(image) + "\\n"
     except Exception as exc:
         logger.error("PDF extraction failed (%s): %s", file_path, exc)
     return text, ocr_applied
@@ -165,7 +166,7 @@ def extract_text_from_pdf(file_path: str) -> tuple[str, bool]:
 
 def pre_process_text(text: str) -> str:
     """Removes repetitive headers/footers."""
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    lines = [l.strip() for l in text.split("\\n") if l.strip()]
     cleaned_lines = []
     patterns_to_remove = [
         r"^page\s*\d+\s*(/|sur|of)\s*\d+$",
@@ -179,7 +180,7 @@ def pre_process_text(text: str) -> str:
             continue
         cleaned_lines.append(line)
     
-    return "\n".join(cleaned_lines)
+    return "\\n".join(cleaned_lines)
 
 def heuristic_segmentation(text: str) -> Dict[str, Any]:
     """
@@ -206,7 +207,7 @@ def heuristic_segmentation(text: str) -> Dict[str, Any]:
         for kw in keywords:
             # We look for the keyword at the start of a line or preceded by newline
             # to avoid matching inside a sentence
-            matches = list(re.finditer(r"(^|\n)\s*" + re.escape(kw), text_lower))
+            matches = list(re.finditer(r"(^|\\n)\s*" + re.escape(kw), text_lower))
             if matches:
                 # Take the first match for this section type
                 start_idx = matches[0].start()
@@ -267,7 +268,7 @@ def heuristic_segmentation(text: str) -> Dict[str, Any]:
                 # 2. Go back 2 non-empty lines to find the "start" of this entry.
                 # 3. Everything from that start until the start of the next entry is the block.
                 
-                lines = content.split("\n")
+                lines = content.split("\\n")
                 # Map character index to line index
                 # This is getting complicated. Let's use a simpler split:
                 # We assume the job starts with the Title.
@@ -285,7 +286,7 @@ def heuristic_segmentation(text: str) -> Dict[str, Any]:
                     
                     # Count newlines before this index to find line number
                     preceding_text = content[:date_start_idx]
-                    line_idx = preceding_text.count("\n")
+                    line_idx = preceding_text.count("\\n")
                     
                     # Walk back 2 non-empty lines
                     current_line = line_idx
@@ -297,7 +298,7 @@ def heuristic_segmentation(text: str) -> Dict[str, Any]:
                     pass
 
                 # Re-implementation working with lines
-                lines = content.split("\n")
+                lines = content.split("\\n")
                 date_line_indices = []
                 for idx, line in enumerate(lines):
                     if re.search(date_pattern, line, re.IGNORECASE):
@@ -346,7 +347,7 @@ def heuristic_segmentation(text: str) -> Dict[str, Any]:
                             end = len(lines)
                             
                         block_lines = lines[start:end]
-                        exp_list.append("\n".join(block_lines).strip())
+                        exp_list.append("\\n".join(block_lines).strip())
                         
                     segments[section_name] = exp_list
         else:
@@ -364,7 +365,7 @@ def heuristic_parse_experience(block_text: str) -> Dict[str, Any]:
     dates = dates_match.group(1) if dates_match else ""
     
     # Extract lines
-    lines = [l.strip() for l in block_text.split("\n") if l.strip()]
+    lines = [l.strip() for l in block_text.split("\\n") if l.strip()]
     
     # Identify Title and Company (heuristic: usually first 2 lines)
     # But sometimes date is first if we split poorly.
@@ -430,7 +431,7 @@ def heuristic_parse_contact(text: str) -> Dict[str, Any]:
     """
     Extracts basic contact info using regex.
     """
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    lines = [l.strip() for l in text.split("\\n") if l.strip()]
     name = lines[0] if lines else ""
     
     # Try to find email
@@ -460,7 +461,7 @@ def heuristic_parse_education(text: str) -> Dict[str, Any]:
     Extracts education info using regex.
     """
     # Clean lines
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
+    lines = [l.strip() for l in text.split("\\n") if l.strip()]
     
     # Remove header if present
     if lines and "ÉDUCATION" in lines[0].upper():
@@ -586,14 +587,16 @@ def parse_cv(file_path: str) -> Optional[dict]:
         # Helper function for parallel execution
         def process_single_experience(exp_text, index):
             try:
+                # Add delay to respect rate limits
+                time.sleep(2)
                 exp_data = ai_parse_experience_block(exp_text)
                 return index, exp_data, exp_text
             except Exception as e:
                 logger.error(f"Error parsing experience block {index}: {e}")
                 return index, None, exp_text
 
-        # Execute in parallel
-        with ThreadPoolExecutor(max_workers=5) as executor:
+        # Execute in parallel with reduced workers
+        with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [executor.submit(process_single_experience, txt, i) for i, txt in enumerate(experience_blocks)]
             
             results = []
