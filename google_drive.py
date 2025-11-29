@@ -115,11 +115,12 @@ def get_sheets_service():
     creds, _ = google.auth.default(scopes=['https://www.googleapis.com/auth/drive', 'https://www.googleapis.com/auth/spreadsheets'])
     return build('sheets', 'v4', credentials=creds)
 
-def fetch_pending_cvs(service, sheet_id, target_status="EN_ATTENTE", sheet_range="Feuille 1!A:H"):
+def fetch_pending_cvs(service, sheet_id, sheet_name="Feuille 1", target_status="EN_ATTENTE"):
     """
     Fetches rows where Status (Column E, index 4) matches target_status.
     Returns a list of dicts: {'row': int, 'file_id': str, 'file_name': str, 'json_link': str}
     """
+    sheet_range = f"{sheet_name}!A:H"
     sheet = service.spreadsheets()
     result = sheet.values().get(spreadsheetId=sheet_id, range=sheet_range).execute()
     values = result.get('values', [])
@@ -144,13 +145,13 @@ def fetch_pending_cvs(service, sheet_id, target_status="EN_ATTENTE", sheet_range
             
     return pending_cvs
 
-def update_cv_status(service, sheet_id, row_number, status, json_link="", pdf_link="", summary=""):
+def update_cv_status(service, sheet_id, row_number, status, sheet_name="Feuille 1", json_link="", pdf_link="", summary=""):
     """
     Updates the status, JSON link, PDF link, and summary for a specific row.
     Columns: E=Status, F=JSON Link, G=PDF Link, H=Summary
     """
     # We update range E{row}:H{row}
-    range_name = f"Feuille 1!E{row_number}:H{row_number}"
+    range_name = f"{sheet_name}!E{row_number}:H{row_number}"
     
     values = [[status, json_link, pdf_link, summary]]
     body = {'values': values}

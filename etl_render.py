@@ -43,7 +43,7 @@ def download_file_by_id(drive_service, file_id, file_name, destination_folder):
         logger.error(f"Error downloading {file_name} ({file_id}): {e}")
         return None
 
-def process_render_row(row_data, drive_service, sheets_service, sheet_id, output_folder_id):
+def process_render_row(row_data, drive_service, sheets_service, sheet_id, output_folder_id, sheet_name):
     """
     Pipeline 2: Rendering
     JSON -> PDF
@@ -66,7 +66,7 @@ def process_render_row(row_data, drive_service, sheets_service, sheet_id, output
 
     if not json_link or "id=" not in json_link and "/d/" not in json_link:
         logger.error(f"Row {row_num}: Invalid JSON Link: {json_link}")
-        update_cv_status(sheets_service, sheet_id, row_num, "ERREUR_LIEN_JSON")
+        update_cv_status(sheets_service, sheet_id, row_num, "ERREUR_LIEN_JSON", sheet_name=sheet_name)
         return
 
     # Extract ID
@@ -78,7 +78,7 @@ def process_render_row(row_data, drive_service, sheets_service, sheet_id, output
         
     if not json_file_id:
         logger.error(f"Row {row_num}: Could not extract ID from {json_link}")
-        update_cv_status(sheets_service, sheet_id, row_num, "ERREUR_ID_JSON")
+        update_cv_status(sheets_service, sheet_id, row_num, "ERREUR_ID_JSON", sheet_name=sheet_name)
         return
         
     original_filename = row_data['file_name']
@@ -96,7 +96,7 @@ def process_render_row(row_data, drive_service, sheets_service, sheet_id, output
     local_json_path = download_file_by_id(drive_service, json_file_id, json_filename, DOWNLOADS_DIR)
     
     if not local_json_path:
-        update_cv_status(sheets_service, sheet_id, row_num, "ERREUR_DOWNLOAD_JSON", json_link=json_link)
+        update_cv_status(sheets_service, sheet_id, row_num, "ERREUR_DOWNLOAD_JSON", sheet_name=sheet_name, json_link=json_link)
         return
 
     try:
@@ -120,12 +120,12 @@ def process_render_row(row_data, drive_service, sheets_service, sheet_id, output
         summary = cv_data.get('summary', '')
         
         # 6. Update Sheet -> Keep JSON_OK, but add PDF Link
-        update_cv_status(sheets_service, sheet_id, row_num, "JSON_OK", json_link=json_link, pdf_link=pdf_link, summary=summary)
+        update_cv_status(sheets_service, sheet_id, row_num, "JSON_OK", sheet_name=sheet_name, json_link=json_link, pdf_link=pdf_link, summary=summary)
         logger.info(f"SUCCESS RENDER Row {row_num}: {original_filename}")
 
     except Exception as e:
         logger.error(f"Error rendering {original_filename}: {e}", exc_info=True)
-        update_cv_status(sheets_service, sheet_id, row_num, f"ERREUR_RENDU: {str(e)}", json_link=json_link)
+        update_cv_status(sheets_service, sheet_id, row_num, f"ERREUR_RENDU: {str(e)}", sheet_name=sheet_name, json_link=json_link)
 
 def main():
     load_dotenv()
@@ -135,6 +135,7 @@ def main():
     source_folder_id = os.environ.get('SOURCE_FOLDER_ID')
     json_input_folder_id = os.environ.get('JSON_INPUT_FOLDER_ID')
     pdf_output_folder_id = os.environ.get('PDF_OUTPUT_FOLDER_ID')
+    sheet_name = os.environ.get('SHEET_NAME', 'Feuille 1')
     
     if not sheet_id or not source_folder_id:
         logger.error("Missing SHEET_ID or SOURCE_FOLDER_ID in .env")
@@ -157,8 +158,8 @@ def main():
         return
 
     # Fetch rows with status "JSON_OK"
-    logger.info("Fetching ready CVs (JSON_OK)...")
-    pending_rows = fetch_pending_cvs(sheets_service, sheet_id, target_status="JSON_OK")
+    logger.info(f"Fetching ready CVs (JSON_OK) from {sheet_name}...")
+    pending_rows = fetch_pending_cvs(sheets_service, sheet_id, sheet_name=sheet_name, target_status="JSON_OK")
     
     if not pending_rows:
         logger.info("No ready CVs found.")
@@ -170,7 +171,7 @@ def main():
     logger.info(f"Output Folder (PDF): {pdf_output_folder_id}")
 
     for row in pending_rows:
-        process_render_row(row, drive_service, sheets_service, sheet_id, pdf_output_folder_id)
+        process_render_row(row, drive_service, sheets_service, sheet_id, pdf_output_folder_id, sheet_name)
 
     logger.info("--- Rendering Pipeline Finished ---")
 

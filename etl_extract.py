@@ -42,7 +42,7 @@ def download_file_by_id(drive_service, file_id, file_name, destination_folder):
         logger.error(f"Error downloading {file_name} ({file_id}): {e}")
         return None
 
-def process_extract_row(row_data, drive_service, sheets_service, sheet_id, output_folder_id):
+def process_extract_row(row_data, drive_service, sheets_service, sheet_id, output_folder_id, sheet_name):
     """
     Pipeline 1: Extraction
     PDF -> JSON
@@ -54,12 +54,12 @@ def process_extract_row(row_data, drive_service, sheets_service, sheet_id, outpu
     logger.info(f"EXTRACT Row {row_num}: {file_name}")
     
     # Update status to PROCESSING
-    update_cv_status(sheets_service, sheet_id, row_num, "EXTRACTION_EN_COURS")
+    update_cv_status(sheets_service, sheet_id, row_num, "EXTRACTION_EN_COURS", sheet_name=sheet_name)
     
     # 1. Download PDF
     local_path = download_file_by_id(drive_service, file_id, file_name, DOWNLOADS_DIR)
     if not local_path:
-        update_cv_status(sheets_service, sheet_id, row_num, "ERREUR_DOWNLOAD")
+        update_cv_status(sheets_service, sheet_id, row_num, "ERREUR_DOWNLOAD", sheet_name=sheet_name)
         return
 
     try:
@@ -67,7 +67,7 @@ def process_extract_row(row_data, drive_service, sheets_service, sheet_id, outpu
         parsed_data = parse_cv(local_path)
         
         if not parsed_data:
-            update_cv_status(sheets_service, sheet_id, row_num, "ERREUR_PARSING")
+            update_cv_status(sheets_service, sheet_id, row_num, "ERREUR_PARSING", sheet_name=sheet_name)
             return
 
         # 3. Save JSON Locally
@@ -89,12 +89,12 @@ def process_extract_row(row_data, drive_service, sheets_service, sheet_id, outpu
         
         # 5. Update Sheet -> JSON_OK
         # We leave PDF Link and Summary empty for now
-        update_cv_status(sheets_service, sheet_id, row_num, "JSON_OK", json_link=json_link)
+        update_cv_status(sheets_service, sheet_id, row_num, "JSON_OK", sheet_name=sheet_name, json_link=json_link)
         logger.info(f"SUCCESS EXTRACT Row {row_num}: {file_name}")
 
     except Exception as e:
         logger.error(f"Error extracting {file_name}: {e}", exc_info=True)
-        update_cv_status(sheets_service, sheet_id, row_num, f"ERREUR: {str(e)}")
+        update_cv_status(sheets_service, sheet_id, row_num, f"ERREUR: {str(e)}", sheet_name=sheet_name)
 
 def main():
     load_dotenv()
@@ -103,6 +103,7 @@ def main():
     sheet_id = os.environ.get('SHEET_ID')
     source_folder_id = os.environ.get('SOURCE_FOLDER_ID')
     json_output_folder_id = os.environ.get('JSON_OUTPUT_FOLDER_ID')
+    sheet_name = os.environ.get('SHEET_NAME', 'Feuille 1')
     
     if not sheet_id or not source_folder_id:
         logger.error("Missing SHEET_ID or SOURCE_FOLDER_ID in .env")
@@ -120,8 +121,8 @@ def main():
         return
 
     # Fetch rows with status "EN_ATTENTE"
-    logger.info("Fetching pending CVs (EN_ATTENTE)...")
-    pending_rows = fetch_pending_cvs(sheets_service, sheet_id, target_status="EN_ATTENTE")
+    logger.info(f"Fetching pending CVs (EN_ATTENTE) from {sheet_name}...")
+    pending_rows = fetch_pending_cvs(sheets_service, sheet_id, sheet_name=sheet_name, target_status="EN_ATTENTE")
     
     if not pending_rows:
         logger.info("No pending CVs found.")
@@ -130,7 +131,7 @@ def main():
     logger.info(f"Found {len(pending_rows)} CVs to extract.")
 
     for row in pending_rows:
-        process_extract_row(row, drive_service, sheets_service, sheet_id, json_output_folder_id)
+        process_extract_row(row, drive_service, sheets_service, sheet_id, json_output_folder_id, sheet_name)
 
     logger.info("--- Extraction Pipeline Finished ---")
 
