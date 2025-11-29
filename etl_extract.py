@@ -81,14 +81,10 @@ def process_extract_row(row_data, drive_service, sheets_service, sheet_id, outpu
             json.dump(parsed_data, f, ensure_ascii=False, indent=4)
             
         # 4. Upload JSON to Drive
-        json_file_id = upload_file_to_folder(drive_service, json_output_path, output_folder_id)
-        
-        # Get Web View Link for JSON
-        file_info = drive_service.files().get(fileId=json_file_id, fields='webViewLink').execute()
-        json_link = file_info.get('webViewLink', '')
+        json_file_id, json_link = upload_file_to_folder(drive_service, json_output_path, output_folder_id)
         
         # 5. Update Sheet -> JSON_OK
-        # We leave PDF Link and Summary empty for now
+        # We already have the link from the upload response
         update_cv_status(sheets_service, sheet_id, row_num, "JSON_OK", sheet_name=sheet_name, json_link=json_link)
         logger.info(f"SUCCESS EXTRACT Row {row_num}: {file_name}")
 

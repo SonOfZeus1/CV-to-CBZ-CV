@@ -595,13 +595,13 @@ def parse_cv(file_path: str) -> Optional[dict]:
                 logger.error(f"Error parsing experience block {index}: {e}")
                 return index, None, exp_text
 
-        # Execute in parallel with reduced workers
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = [executor.submit(process_single_experience, txt, i) for i, txt in enumerate(experience_blocks)]
-            
-            results = []
-            for future in as_completed(futures):
-                results.append(future.result())
+        # Execute sequentially to avoid Rate Limits
+        results = []
+        for i, txt in enumerate(experience_blocks):
+            # Add significant delay to respect strict rate limits
+            time.sleep(20) 
+            idx, exp_data, exp_text = process_single_experience(txt, i)
+            results.append((idx, exp_data, exp_text))
                 
             # Sort by original index to maintain order
             results.sort(key=lambda x: x[0])

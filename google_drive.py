@@ -75,11 +75,11 @@ def upload_file_to_folder(service, file_path, folder_id):
     file = service.files().create(
         body=file_metadata,
         media_body=media,
-        fields='id',
+        fields='id, webViewLink',
         supportsAllDrives=True
     ).execute()
     print(f"Uploaded '{file_name}' with ID: {file.get('id')}")
-    return file.get('id')
+    return file.get('id'), file.get('webViewLink')
 
 def get_or_create_folder(service, folder_name, parent_id=None):
     """Checks if a folder exists, creates it if not, and returns its ID."""
