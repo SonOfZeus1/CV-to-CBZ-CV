@@ -161,3 +161,27 @@ def update_cv_status(service, sheet_id, row_number, status, sheet_name="Feuille 
         valueInputOption="USER_ENTERED", body=body
     ).execute()
     print(f"Updated Sheet Row {row_number}: {status}")
+
+def reset_stuck_cvs(service, sheet_id, sheet_name="Feuille 1"):
+    """
+    Resets status to 'EN_ATTENTE' for rows where JSON Link is empty.
+    This ensures that stuck or failed CVs are retried.
+    """
+    sheet_range = f"{sheet_name}!A:H"
+    sheet = service.spreadsheets()
+    result = sheet.values().get(spreadsheetId=sheet_id, range=sheet_range).execute()
+    values = result.get('values', [])
+
+    if not values:
+        return
+
+    # Skip header (start at index 1, row 2)
+    for i, row in enumerate(values[1:], start=2):
+        # Row structure: [Date, Name, ID, Link, Status, JSON Link, PDF Link, Summary]
+        # Check if JSON Link (Column F, index 5) is empty
+        json_link = row[5] if len(row) > 5 else ""
+        status = row[4] if len(row) > 4 else ""
+        
+        if not json_link and status != "EN_ATTENTE":
+            print(f"Resetting Row {i} (Status: {status}) to EN_ATTENTE because JSON Link is empty.")
+            update_cv_status(service, sheet_id, i, "EN_ATTENTE", sheet_name=sheet_name)

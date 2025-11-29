@@ -5,7 +5,7 @@ import io
 from dotenv import load_dotenv
 from googleapiclient.http import MediaIoBaseDownload
 
-from google_drive import get_drive_service, get_sheets_service, fetch_pending_cvs, update_cv_status, upload_file_to_folder
+from google_drive import get_drive_service, get_sheets_service, fetch_pending_cvs, update_cv_status, upload_file_to_folder, reset_stuck_cvs
 from parsers import parse_cv
 
 # --- Configuration Logging ---
@@ -119,6 +119,10 @@ def main():
     except Exception as e:
         logger.critical(f"Auth Error: {e}")
         return
+
+    # Reset stuck CVs (Auto-Healing)
+    logger.info("Checking for stuck CVs (Empty JSON Link)...")
+    reset_stuck_cvs(sheets_service, sheet_id, sheet_name=sheet_name)
 
     # Fetch rows with status "EN_ATTENTE"
     logger.info(f"Fetching pending CVs (EN_ATTENTE) from {sheet_name}...")
