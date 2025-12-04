@@ -2,10 +2,10 @@ import os
 import argparse
 import shutil
 import logging
-from google_drive import get_drive_service, get_sheets_service, download_files_from_folder, append_to_sheet
+from google_drive import get_drive_service, get_sheets_service, list_files_in_folder, download_file, append_to_sheet
 import re
 import difflib
-from google_drive import get_drive_service, get_sheets_service, download_files_from_folder, append_to_sheet, get_sheet_values, clear_and_write_sheet, format_header_row, update_sheet_row
+from google_drive import get_drive_service, get_sheets_service, list_files_in_folder, download_file, append_to_sheet, get_sheet_values, clear_and_write_sheet, format_header_row, update_sheet_row
 from parsers import extract_text_from_pdf, extract_text_from_docx, heuristic_parse_contact
 
 # Configure logging
@@ -87,7 +87,7 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     # Use FORMULA render option to get the raw hyperlink formula for length comparison
     rows = get_sheet_values(sheets_service, sheet_id, sheet_name, value_render_option='FORMULA')
     
-    expected_header = ["Filename", "Email", "Phone"]
+    expected_header = ["Filename", "Email", "Phone", "Status", "JSON Link"]
     
     if not rows:
         # Sheet is empty, write header
@@ -104,14 +104,16 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
             data = rows # All rows are data
             header = expected_header
         else:
+            # If header exists but is missing columns, we might want to update it?
+            # For now, let's assume it's fine or user will fix.
             pass
 
     email_groups = {} # email -> list of rows
     rows_without_email = []
 
     for row in data:
-        # Ensure row has at least 3 columns (pad if needed)
-        while len(row) < 3:
+        # Ensure row has at least 5 columns (pad if needed)
+        while len(row) < 5:
             row.append("")
             
         # Assuming Email is in column 2 (index 1)
@@ -132,13 +134,10 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
             unique_data.append(group[0])
         else:
             # Sort by length of filename (row[0]), ascending.
-            # We keep the shortest one.
-            # Example: "CV.pdf" (shorter) vs "CV (1).pdf" (longer) -> Keep "CV.pdf"
             group.sort(key=lambda r: len(r[0]))
             unique_data.append(group[0])
             
     # Combine: Header + Rows without Email + Unique Rows
-    # We keep rows without email first (or last, doesn't matter much)
     final_rows = [expected_header] + rows_without_email + unique_data
     
     # Always rewrite to ensure header is correct and formatted
@@ -167,14 +166,13 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     if existing_rows:
         for i, row in enumerate(existing_rows):
             if i == 0: continue # Skip header
-            # Row: [Filename, Email, Phone]
+            # Row: [Filename, Email, Phone, Status, JSON Link]
             raw_filename = row[0] if len(row) > 0 else ""
             
             # Check if it's a hyperlink formula
             is_hyperlink = raw_filename.startswith('=HYPERLINK')
             
             # Check if it uses the correct separator (semicolon for French)
-            # If it uses comma, it's likely broken in this locale
             uses_semicolon = ';' in raw_filename if is_hyperlink else False
             
             # Extract clean filename
@@ -192,7 +190,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 'email': email.strip(),
                 'phone': phone.strip(),
                 'is_hyperlink': is_hyperlink,
-                'needs_fix': is_hyperlink and not uses_semicolon # Fix if it's a link but uses wrong separator
+                'needs_fix': is_hyperlink and not uses_semicolon
             }
 
     # 3. Create Temp Directory
@@ -217,8 +215,6 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             file_link = file_data['link']
             
             # Create Hyperlink Formula
-            # Use semicolon ; for French locale compatibility
-            # Escape double quotes in filename by doubling them
             safe_filename = filename.replace('"', '""')
             filename_cell = f'=HYPERLINK("{file_link}"; "{safe_filename}")' if file_link else filename
             
@@ -247,7 +243,6 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 
                 # Condition 3: All Good -> Skip
                 else:
-                    # logger.info(f"Skipping {filename}: Already complete and linked.")
                     should_full_process = False
                     use_existing_data = False
                     continue # Explicitly skip
@@ -256,11 +251,22 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             
             if use_existing_data and existing_data:
                 # Construct row with new link and existing data
+                # Preserve existing Status and JSON Link if they exist (need to fetch them from sheet? 
+                # Actually existing_data_map doesn't store them. 
+                # But since we are updating the row, we should probably preserve them.
+                # However, update_sheet_row overwrites the range.
+                # Let's just write empty strings for now or fetch the full row?
+                # Optimization: For now, just write the first 3 columns. 
+                # update_sheet_row takes values. If we pass 3 values, does it clear the rest?
+                # No, update overwrites only the cells provided in the range.
+                # So if we update A:C, D and E are safe.
+                
                 row_data = [
                     filename_cell, 
                     existing_data['email'], 
                     existing_data['phone']
                 ]
+                # We need to make sure update_sheet_row uses A:C range.
                 update_sheet_row(sheets_service, sheet_id, row_index_to_update, row_data, sheet_name=sheet_name)
                 continue # Done with this file
 
@@ -284,8 +290,8 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     
                     if not text:
                         logger.warning(f"Could not extract text from {filename}")
-                        # Still add to sheet with empty data so we have the link!
-                        row_data = [filename_cell, "NOT FOUND", ""]
+                        # Still add to sheet with empty data
+                        row_data = [filename_cell, "NOT FOUND", "", "", ""]
                         if row_index_to_update != -1:
                             update_sheet_row(sheets_service, sheet_id, row_index_to_update, row_data, sheet_name=sheet_name)
                         else:
@@ -308,9 +314,13 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     # Prepare Row Data
                     email_val = email if email else "NOT FOUND"
                     
-                    row_data = [filename_cell, email_val, phone]
+                    # Add empty Status and JSON Link
+                    row_data = [filename_cell, email_val, phone, "", ""]
                     
                     if row_index_to_update != -1:
+                        # If updating, we might want to preserve status? 
+                        # If we are reprocessing, maybe reset status?
+                        # Let's assume if we reprocess, we keep status empty or reset it.
                         update_sheet_row(sheets_service, sheet_id, row_index_to_update, row_data, sheet_name=sheet_name)
                     else:
                         append_to_sheet(sheets_service, sheet_id, row_data, sheet_name=sheet_name)

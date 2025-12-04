@@ -242,7 +242,7 @@ def get_sheet_values(service, sheet_id, sheet_name="Feuille 1", value_render_opt
     Returns all values from the specified sheet.
     value_render_option: 'FORMATTED_VALUE' (default), 'UNFORMATTED_VALUE', or 'FORMULA'
     """
-    range_name = f"{sheet_name}!A:C" # Columns A-C (Filename, Email, Phone)
+    range_name = f"{sheet_name}!A:E" # Columns A-E (Filename, Email, Phone, Status, JSON Link)
     result = service.spreadsheets().values().get(
         spreadsheetId=sheet_id, range=range_name, valueRenderOption=value_render_option
     ).execute()
@@ -332,7 +332,10 @@ def update_sheet_row(service, sheet_id, row_index, values, sheet_name="Feuille 1
     row_index is 0-based (but Sheets API uses 1-based for A1 notation).
     """
     sheet_row_num = row_index + 1
-    range_name = f"{sheet_name}!A{sheet_row_num}:E{sheet_row_num}"
+    # Determine range based on length of values
+    # A=1, B=2, C=3, D=4, E=5
+    end_col_char = chr(ord('A') + len(values) - 1)
+    range_name = f"{sheet_name}!A{sheet_row_num}:{end_col_char}{sheet_row_num}"
     
     body = {'values': [values]}
     
@@ -354,3 +357,48 @@ def update_sheet_row(service, sheet_id, row_index, values, sheet_name="Feuille 1
             else:
                 raise
     raise Exception("Max retries exceeded for update_sheet_row")
+
+import re
+
+def fetch_actionable_cvs(service, sheet_id, sheet_name="Feuille 1", target_status="A TRAITER"):
+    """
+    Fetches rows where Status (Column D, index 3) matches target_status.
+    Extracts File ID from the formula in Column A.
+    Returns a list of dicts: {'row': int, 'file_id': str, 'file_name': str}
+    """
+    # Use FORMULA render option to get the hyperlink formula
+    rows = get_sheet_values(service, sheet_id, sheet_name, value_render_option='FORMULA')
+    
+    actionable_cvs = []
+    
+    if not rows:
+        return []
+
+    # Skip header
+    for i, row in enumerate(rows[1:], start=2): # Start at row 2
+        # Row: [Filename, Email, Phone, Status, JSON Link]
+        if len(row) > 3:
+            status = row[3].strip().upper()
+            if status == target_status:
+                raw_filename = row[0]
+                
+                # Extract File ID from HYPERLINK formula
+                # Format: =HYPERLINK("https://drive.google.com/file/d/FILE_ID/view...", "name")
+                # Regex for ID: /d/([a-zA-Z0-9_-]+)
+                file_id_match = re.search(r'/d/([a-zA-Z0-9_-]+)', raw_filename)
+                
+                # Extract clean name
+                name_match = re.search(r'"([^"]+)"\)$', raw_filename)
+                clean_name = name_match.group(1) if name_match else "Unknown"
+                
+                if file_id_match:
+                    file_id = file_id_match.group(1)
+                    actionable_cvs.append({
+                        'row': i,
+                        'file_id': file_id,
+                        'file_name': clean_name
+                    })
+                else:
+                    print(f"Warning: Could not extract File ID from row {i}: {raw_filename}")
+                    
+    return actionable_cvs
