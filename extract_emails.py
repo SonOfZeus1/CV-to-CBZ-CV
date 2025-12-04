@@ -5,82 +5,49 @@ import logging
 from google_drive import get_drive_service, get_sheets_service, download_files_from_folder, append_to_sheet
 import re
 import difflib
-from google_drive import get_drive_service, get_sheets_service, download_files_from_folder, append_to_sheet, get_sheet_values, clear_and_write_sheet
+from google_drive import get_drive_service, get_sheets_service, download_files_from_folder, append_to_sheet, get_sheet_values, clear_and_write_sheet, format_header_row
 from parsers import extract_text_from_pdf, extract_text_from_docx, heuristic_parse_contact
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# ... (imports and logging)
 
-TEMP_DIR = "temp_cvs"
-
-def select_best_email(emails, filename):
-    """
-    Selects the best email from a list based on similarity to the filename.
-    """
-    if not emails:
-        return ""
-    if len(emails) == 1:
-        return emails[0]
-    
-    # Normalize filename: remove extension, lower case, split by non-alphanumeric
-    fname_base = os.path.splitext(filename)[0].lower()
-    fname_parts = re.split(r'[^a-z0-9]', fname_base)
-    fname_parts = [p for p in fname_parts if len(p) > 2] # Filter short parts like 'cv', 'de', etc.
-    
-    best_email = emails[0]
-    max_score = -1.0
-    
-    for email in emails:
-        score = 0.0
-        email_lower = email.lower()
-        
-        # Check if name parts are in email (high weight)
-        for part in fname_parts:
-            if part in email_lower:
-                score += 1.0
-        
-        # Tie-breaker: similarity ratio (0 to 1)
-        ratio = difflib.SequenceMatcher(None, fname_base, email_lower).ratio()
-        score += ratio
-        
-        logger.info(f"Email candidate: {email}, Score: {score:.2f}")
-        
-        if score > max_score:
-            max_score = score
-            best_email = email
-            
-    return best_email
-
-def split_name(full_name):
-    """
-    Splits a full name into First Name and Last Name.
-    Simple heuristic: Last word is Last Name, rest is First Name.
-    """
-    if not full_name:
-        return "", ""
-    parts = full_name.strip().split()
-    if len(parts) == 1:
-        return parts[0], ""
-    return " ".join(parts[:-1]), parts[-1]
+# ... (select_best_email and split_name functions)
 
 def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     """
     Reads the sheet, removes rows with duplicate emails, and rewrites it.
+    Ensures header exists.
     """
     logger.info("Running deduplication...")
     rows = get_sheet_values(sheets_service, sheet_id, sheet_name)
-    if not rows:
-        return
     
+    expected_header = ["Filename", "Email", "Phone", "First Name", "Last Name"]
+    
+    if not rows:
+        # Sheet is empty, write header
+        clear_and_write_sheet(sheets_service, sheet_id, [expected_header], sheet_name)
+        format_header_row(sheets_service, sheet_id, sheet_name)
+        return
+
     header = rows[0]
     data = rows[1:]
     
+    # Check if header matches expected (loose check)
+    if header != expected_header:
+        # If first row looks like data (e.g. contains email), prepend header
+        # Simple check: "Email" not in header
+        if "Email" not in header:
+            data = rows # All rows are data
+            header = expected_header
+        else:
+            # Header exists but might be different, let's force update it if needed?
+            # Or just keep it. Let's keep it but ensure we use our expected header for new sheet if we rewrite.
+            pass
+
     seen_emails = set()
     unique_rows = []
     
     # Keep header
-    unique_rows.append(header)
+    unique_rows.append(expected_header) # Enforce standard header
     
     for row in data:
         # Assuming Email is in column 2 (index 1)
@@ -90,18 +57,17 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
                 seen_emails.add(email)
                 unique_rows.append(row)
             elif not email:
-                # Keep rows without email? Maybe yes, maybe no. Let's keep them.
                 unique_rows.append(row)
         else:
             unique_rows.append(row)
             
-    if len(unique_rows) < len(rows):
-        logger.info(f"Removed {len(rows) - len(unique_rows)} duplicate rows.")
-        clear_and_write_sheet(sheets_service, sheet_id, unique_rows, sheet_name)
-    else:
-        logger.info("No duplicates found.")
+    # Always rewrite to ensure header is correct and formatted
+    clear_and_write_sheet(sheets_service, sheet_id, unique_rows, sheet_name)
+    format_header_row(sheets_service, sheet_id, sheet_name)
+    logger.info(f"Deduplication complete. Total rows: {len(unique_rows)}")
 
 def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
+    # ... (rest of function)
     """
     Downloads CVs from a Drive folder, extracts emails, and saves them to a Sheet.
     """

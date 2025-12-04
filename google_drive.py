@@ -243,3 +243,46 @@ def clear_and_write_sheet(service, sheet_id, values, sheet_name="Feuille 1"):
         valueInputOption="USER_ENTERED", body=body
     ).execute()
     print(f"Rewrote sheet with {len(values)} rows.")
+
+def format_header_row(service, sheet_id, sheet_name="Feuille 1"):
+    """
+    Formats the first row of the sheet to be bold.
+    """
+    # Get sheetId (integer) from sheetName (string)
+    sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+    sheets = sheet_metadata.get('sheets', '')
+    sheet_int_id = 0
+    for s in sheets:
+        if s.get("properties", {}).get("title") == sheet_name:
+            sheet_int_id = s.get("properties", {}).get("sheetId")
+            break
+            
+    requests = [
+        {
+            "repeatCell": {
+                "range": {
+                    "sheetId": sheet_int_id,
+                    "startRowIndex": 0,
+                    "endRowIndex": 1
+                },
+                "cell": {
+                    "userEnteredFormat": {
+                        "textFormat": {
+                            "bold": True
+                        }
+                    }
+                },
+                "fields": "userEnteredFormat.textFormat.bold"
+            }
+        }
+    ]
+    
+    body = {
+        'requests': requests
+    }
+    
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=sheet_id,
+        body=body
+    ).execute()
+    print("Formatted header row as bold.")
