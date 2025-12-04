@@ -117,7 +117,7 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
             row.append("")
             
         # Assuming Email is in column 2 (index 1)
-        email = row[1].lower().strip()
+        email = str(row[1]).lower().strip()
         
         if email and email != "not found":
             if email not in email_groups:
@@ -187,8 +187,8 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             
             existing_data_map[clean_filename] = {
                 'index': i,
-                'email': email.strip(),
-                'phone': phone.strip(),
+                'email': str(email).strip(),
+                'phone': str(phone).strip(),
                 'is_hyperlink': is_hyperlink,
                 'needs_fix': is_hyperlink and not uses_semicolon
             }
