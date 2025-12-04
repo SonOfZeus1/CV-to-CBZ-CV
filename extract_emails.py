@@ -153,7 +153,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     deduplicate_sheet(sheets_service, sheet_id, sheet_name)
     
     # Load existing data to check for duplicates AND missing info
-    # Map: filename -> {index: int, email: str, phone: str}
+    # Map: filename -> {index: int, email: str, phone: str, first: str, last: str, is_hyperlink: bool}
     existing_rows = get_sheet_values(sheets_service, sheet_id, sheet_name)
     existing_data_map = {}
     
@@ -161,21 +161,30 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         for i, row in enumerate(existing_rows):
             if i == 0: continue # Skip header
             # Row: [Filename, Email, Phone, First, Last]
-            # Filename might be a formula like =HYPERLINK("...", "name.pdf")
-            # We need to extract the name.
             raw_filename = row[0] if len(row) > 0 else ""
             
-            # Simple extraction if it's a formula
-            match = re.search(r'"([^"]+)"\)$', raw_filename)
-            clean_filename = match.group(1) if match else raw_filename
+            # Check if it's a hyperlink formula
+            is_hyperlink = raw_filename.startswith('=HYPERLINK')
+            
+            # Extract clean filename
+            if is_hyperlink:
+                match = re.search(r'"([^"]+)"\)$', raw_filename)
+                clean_filename = match.group(1) if match else raw_filename
+            else:
+                clean_filename = raw_filename
             
             email = row[1] if len(row) > 1 else ""
             phone = row[2] if len(row) > 2 else ""
+            first = row[3] if len(row) > 3 else ""
+            last = row[4] if len(row) > 4 else ""
             
             existing_data_map[clean_filename] = {
                 'index': i,
                 'email': email.strip(),
-                'phone': phone.strip()
+                'phone': phone.strip(),
+                'first': first.strip(),
+                'last': last.strip(),
+                'is_hyperlink': is_hyperlink
             }
 
     # 3. Create Temp Directory
@@ -197,80 +206,98 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             filename = file_data['name']
             file_link = file_data['link']
             
+            # Create Hyperlink Formula
+            filename_cell = f'=HYPERLINK("{file_link}", "{filename}")' if file_link else filename
+            
             # Check if we need to process this file
-            should_process = True
+            should_full_process = True
             row_index_to_update = -1
+            use_existing_data = False
+            existing_data = None
             
             if filename in existing_data_map:
                 data = existing_data_map[filename]
-                # Check if Email OR Phone is missing
+                row_index_to_update = data['index']
+                existing_data = data
+                
+                # Condition 1: Missing Email or Phone -> Full Process
                 if not data['email'] or not data['phone'] or data['email'] == "NOT FOUND":
                     logger.info(f"Reprocessing {filename}: Missing Email or Phone.")
-                    row_index_to_update = data['index']
+                    should_full_process = True
+                
+                # Condition 2: Missing Hyperlink but has Data -> Update Link Only (Skip OCR)
+                elif not data['is_hyperlink']:
+                    logger.info(f"Updating Link for {filename}: Data exists, adding hyperlink.")
+                    should_full_process = False
+                    use_existing_data = True
+                
+                # Condition 3: All Good -> Skip
                 else:
-                    logger.info(f"Skipping {filename}: Already complete.")
-                    should_process = False
+                    logger.info(f"Skipping {filename}: Already complete and linked.")
+                    should_full_process = False
+                    use_existing_data = False
+                    continue # Explicitly skip
             
-            if not should_process:
-                continue
-
-            logger.info(f"Processing: {filename}")
+            # If we are here, we either need full process or just update link
             
-            try:
-                # Extract Text
-                text = ""
-                _, ext = os.path.splitext(filename)
-                if ext.lower() == '.pdf':
-                    text, _ = extract_text_from_pdf(file_path)
-                elif ext.lower() == '.docx':
-                    text = extract_text_from_docx(file_path)
-                
-                # Create Hyperlink Formula
-                filename_cell = f'=HYPERLINK("{file_link}", "{filename}")' if file_link else filename
-                
-                if not text:
-                    logger.warning(f"Could not extract text from {filename}")
-                    continue
+            if use_existing_data and existing_data:
+                # Construct row with new link and existing data
+                row_data = [
+                    filename_cell, 
+                    existing_data['email'], 
+                    existing_data['phone'], 
+                    existing_data['first'], 
+                    existing_data['last']
+                ]
+                update_sheet_row(sheets_service, sheet_id, row_index_to_update, row_data, sheet_name=sheet_name)
+                continue # Done with this file
 
-                # Extract Email
-                # Limit to first 2000 characters (approx 1 page) to avoid Reference emails
-                text_head = text[:2000]
-                
-                # Find all emails using regex
-                email_pattern = r"[\w\.-]+@[\w\.-]+\.\w+"
-                emails = list(set(re.findall(email_pattern, text_head))) # unique
-                
-                email = select_best_email(emails, filename)
-                
-                # Extract other info
-                contact_info = heuristic_parse_contact(text_head)
-                phone = contact_info.get('phone', '')
-                full_name = contact_info.get('name', '')
-                
-                # Clean Phone
-                phone = clean_phone_number(phone)
-                
-                # If name is empty, try to use filename base
-                if not full_name:
-                        full_name = os.path.splitext(filename)[0].replace("_", " ").replace("-", " ")
-                
-                first_name, last_name = split_name(full_name)
-                
-                # Prepare Row Data
-                # If email not found, keep it empty or "NOT FOUND"
-                email_val = email if email else "NOT FOUND"
-                
-                row_data = [filename_cell, email_val, phone, first_name, last_name]
-                
-                if row_index_to_update != -1:
-                    # Update existing row
-                    update_sheet_row(sheets_service, sheet_id, row_index_to_update, row_data, sheet_name=sheet_name)
-                else:
-                    # Append new row
-                    append_to_sheet(sheets_service, sheet_id, row_data, sheet_name=sheet_name)
+            if should_full_process:
+                logger.info(f"Processing content: {filename}")
+                try:
+                    # Extract Text
+                    text = ""
+                    _, ext = os.path.splitext(filename)
+                    if ext.lower() == '.pdf':
+                        text, _ = extract_text_from_pdf(file_path)
+                    elif ext.lower() == '.docx':
+                        text = extract_text_from_docx(file_path)
                     
-            except Exception as e:
-                logger.error(f"Error processing {filename}: {e}")
+                    if not text:
+                        logger.warning(f"Could not extract text from {filename}")
+                        continue
+
+                    # Extract Email
+                    text_head = text[:2000]
+                    email_pattern = r"[\w\.-]+@[\w\.-]+\.\w+"
+                    emails = list(set(re.findall(email_pattern, text_head)))
+                    email = select_best_email(emails, filename)
+                    
+                    # Extract other info
+                    contact_info = heuristic_parse_contact(text_head)
+                    phone = contact_info.get('phone', '')
+                    full_name = contact_info.get('name', '')
+                    
+                    # Clean Phone
+                    phone = clean_phone_number(phone)
+                    
+                    if not full_name:
+                            full_name = os.path.splitext(filename)[0].replace("_", " ").replace("-", " ")
+                    
+                    first_name, last_name = split_name(full_name)
+                    
+                    # Prepare Row Data
+                    email_val = email if email else "NOT FOUND"
+                    
+                    row_data = [filename_cell, email_val, phone, first_name, last_name]
+                    
+                    if row_index_to_update != -1:
+                        update_sheet_row(sheets_service, sheet_id, row_index_to_update, row_data, sheet_name=sheet_name)
+                    else:
+                        append_to_sheet(sheets_service, sheet_id, row_data, sheet_name=sheet_name)
+                        
+                except Exception as e:
+                    logger.error(f"Error processing {filename}: {e}")
 
     finally:
         # 6. Cleanup
