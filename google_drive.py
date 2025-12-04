@@ -185,15 +185,35 @@ def reset_stuck_cvs(service, sheet_id, sheet_name="Feuille 1"):
         if not json_link and status != "EN_ATTENTE":
             update_cv_status(service, sheet_id, i, "EN_ATTENTE", sheet_name=sheet_name)
 
-def append_to_sheet(service, sheet_id, values, sheet_name="Feuille 1"):
+import time
+from googleapiclient.errors import HttpError
+
+def append_to_sheet(service, sheet_id, values, sheet_name="Feuille 1", retries=5):
     """
     Appends a list of values as a new row to the specified Google Sheet.
+    Includes exponential backoff for rate limiting (429 errors).
     """
     range_name = f"{sheet_name}!A:B" # Appending to columns A and B
     body = {'values': [values]}
     
-    service.spreadsheets().values().append(
-        spreadsheetId=sheet_id, range=range_name,
-        valueInputOption="USER_ENTERED", body=body
-    ).execute()
-    print(f"Appended to sheet: {values}")
+    attempt = 0
+    while attempt < retries:
+        try:
+            service.spreadsheets().values().append(
+                spreadsheetId=sheet_id, range=range_name,
+                valueInputOption="USER_ENTERED", body=body
+            ).execute()
+            print(f"Appended to sheet: {values}")
+            return
+        except HttpError as error:
+            if error.resp.status == 429:
+                sleep_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s, 8s, 16s
+                print(f"Quota exceeded (429). Retrying in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+                attempt += 1
+            else:
+                print(f"Error appending to sheet: {error}")
+                raise
+    
+    print(f"Failed to append to sheet after {retries} retries.")
+    raise Exception("Max retries exceeded for Google Sheets API write requests.")
