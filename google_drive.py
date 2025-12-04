@@ -28,17 +28,27 @@ def download_files_from_folder(service, folder_id, download_path):
     print(f"--- LOG DE DÉBOGAGE GOOGLE DRIVE ---")
     print(f"Requête API envoyée : q={query}")
     
-    results = service.files().list(
-        q=query,
-        fields="nextPageToken, files(id, name, webViewLink)",
-        supportsAllDrives=True,
-        includeItemsFromAllDrives=True
-    ).execute()
+    items = []
+    page_token = None
+    
+    while True:
+        results = service.files().list(
+            q=query,
+            pageSize=1000, # Maximize page size
+            fields="nextPageToken, files(id, name, webViewLink)",
+            pageToken=page_token,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute()
+        
+        items.extend(results.get('files', []))
+        page_token = results.get('nextPageToken')
+        
+        if not page_token:
+            break
 
-    print(f"Réponse BRUTE de l'API : {results}")
+    print(f"Nombre total de fichiers trouvés : {len(items)}")
     print(f"--- FIN DU LOG DE DÉBOGAGE ---")
-
-    items = results.get('files', [])
 
     downloaded_files = []
     for item in items:
