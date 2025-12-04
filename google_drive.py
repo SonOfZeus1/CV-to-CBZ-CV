@@ -217,3 +217,29 @@ def append_to_sheet(service, sheet_id, values, sheet_name="Feuille 1", retries=5
     
     print(f"Failed to append to sheet after {retries} retries.")
     raise Exception("Max retries exceeded for Google Sheets API write requests.")
+
+def get_sheet_values(service, sheet_id, sheet_name="Feuille 1"):
+    """
+    Returns all values from the specified sheet.
+    """
+    range_name = f"{sheet_name}!A:E" # Assuming columns A-E (Filename, Email, Phone, First, Last)
+    result = service.spreadsheets().values().get(spreadsheetId=sheet_id, range=range_name).execute()
+    return result.get('values', [])
+
+def clear_and_write_sheet(service, sheet_id, values, sheet_name="Feuille 1"):
+    """
+    Clears the sheet and writes new values.
+    Used for deduplication.
+    """
+    # 1. Clear
+    service.spreadsheets().values().clear(
+        spreadsheetId=sheet_id, range=f"{sheet_name}!A:Z"
+    ).execute()
+    
+    # 2. Write
+    body = {'values': values}
+    service.spreadsheets().values().update(
+        spreadsheetId=sheet_id, range=f"{sheet_name}!A1",
+        valueInputOption="USER_ENTERED", body=body
+    ).execute()
+    print(f"Rewrote sheet with {len(values)} rows.")
