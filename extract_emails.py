@@ -52,18 +52,6 @@ def select_best_email(emails, filename):
             
     return best_email
 
-def split_name(full_name):
-    """
-    Splits a full name into First Name and Last Name.
-    Simple heuristic: Last word is Last Name, rest is First Name.
-    """
-    if not full_name:
-        return "", ""
-    parts = full_name.strip().split()
-    if len(parts) == 1:
-        return parts[0], ""
-    return " ".join(parts[:-1]), parts[-1]
-
 def clean_phone_number(phone):
     """
     Formats phone number to (xxx) xxx-xxxx and prepends ' to force text format in Excel.
@@ -94,7 +82,7 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     logger.info("Running deduplication...")
     rows = get_sheet_values(sheets_service, sheet_id, sheet_name)
     
-    expected_header = ["Filename", "Email", "Phone", "First Name", "Last Name"]
+    expected_header = ["Filename", "Email", "Phone"]
     
     if not rows:
         # Sheet is empty, write header
@@ -107,14 +95,10 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     
     # Check if header matches expected (loose check)
     if header != expected_header:
-        # If first row looks like data (e.g. contains email), prepend header
-        # Simple check: "Email" not in header
         if "Email" not in header:
             data = rows # All rows are data
             header = expected_header
         else:
-            # Header exists but might be different, let's force update it if needed?
-            # Or just keep it. Let's keep it but ensure we use our expected header for new sheet if we rewrite.
             pass
 
     seen_emails = set()
@@ -129,9 +113,10 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
             email = row[1].lower().strip()
             if email and email not in seen_emails:
                 seen_emails.add(email)
-                unique_rows.append(row)
+                # Keep only first 3 columns if row is longer
+                unique_rows.append(row[:3])
             elif not email:
-                unique_rows.append(row)
+                unique_rows.append(row[:3])
         else:
             unique_rows.append(row)
             
@@ -153,14 +138,14 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     deduplicate_sheet(sheets_service, sheet_id, sheet_name)
     
     # Load existing data to check for duplicates AND missing info
-    # Map: filename -> {index: int, email: str, phone: str, first: str, last: str, is_hyperlink: bool}
+    # Map: filename -> {index: int, email: str, phone: str, is_hyperlink: bool}
     existing_rows = get_sheet_values(sheets_service, sheet_id, sheet_name)
     existing_data_map = {}
     
     if existing_rows:
         for i, row in enumerate(existing_rows):
             if i == 0: continue # Skip header
-            # Row: [Filename, Email, Phone, First, Last]
+            # Row: [Filename, Email, Phone]
             raw_filename = row[0] if len(row) > 0 else ""
             
             # Check if it's a hyperlink formula
@@ -175,15 +160,11 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             
             email = row[1] if len(row) > 1 else ""
             phone = row[2] if len(row) > 2 else ""
-            first = row[3] if len(row) > 3 else ""
-            last = row[4] if len(row) > 4 else ""
             
             existing_data_map[clean_filename] = {
                 'index': i,
                 'email': email.strip(),
                 'phone': phone.strip(),
-                'first': first.strip(),
-                'last': last.strip(),
                 'is_hyperlink': is_hyperlink
             }
 
@@ -248,9 +229,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 row_data = [
                     filename_cell, 
                     existing_data['email'], 
-                    existing_data['phone'], 
-                    existing_data['first'], 
-                    existing_data['last']
+                    existing_data['phone']
                 ]
                 update_sheet_row(sheets_service, sheet_id, row_index_to_update, row_data, sheet_name=sheet_name)
                 continue # Done with this file
@@ -279,20 +258,14 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     # Extract other info
                     contact_info = heuristic_parse_contact(text_head)
                     phone = contact_info.get('phone', '')
-                    full_name = contact_info.get('name', '')
                     
                     # Clean Phone
                     phone = clean_phone_number(phone)
                     
-                    if not full_name:
-                            full_name = os.path.splitext(filename)[0].replace("_", " ").replace("-", " ")
-                    
-                    first_name, last_name = split_name(full_name)
-                    
                     # Prepare Row Data
                     email_val = email if email else "NOT FOUND"
                     
-                    row_data = [filename_cell, email_val, phone, first_name, last_name]
+                    row_data = [filename_cell, email_val, phone]
                     
                     if row_index_to_update != -1:
                         update_sheet_row(sheets_service, sheet_id, row_index_to_update, row_data, sheet_name=sheet_name)

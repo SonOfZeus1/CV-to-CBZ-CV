@@ -240,7 +240,7 @@ def get_sheet_values(service, sheet_id, sheet_name="Feuille 1"):
     """
     Returns all values from the specified sheet.
     """
-    range_name = f"{sheet_name}!A:E" # Assuming columns A-E (Filename, Email, Phone, First, Last)
+    range_name = f"{sheet_name}!A:C" # Columns A-C (Filename, Email, Phone)
     result = service.spreadsheets().values().get(spreadsheetId=sheet_id, range=range_name).execute()
     return result.get('values', [])
 
