@@ -1,0 +1,46 @@
+name: Pipeline - Extract Emails
+
+on:
+  workflow_dispatch:
+
+jobs:
+  extract-emails:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Authenticate to Google Cloud
+      id: auth
+      uses: 'google-github-actions/auth@v2'
+      with:
+        workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+        service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+        audience: ${{ secrets.GCP_AUDIENCE }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y tesseract-ocr
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        python -m nltk.downloader stopwords punkt averaged_perceptron_tagger
+
+    - name: Run Email Extraction
+      env:
+        EMAIL_SHEET_ID: ${{ secrets.EMAIL_SHEET_ID }}
+        EMAIL_SOURCE_FOLDER_ID: ${{ secrets.EMAIL_SOURCE_FOLDER_ID }}
+        EMAIL_SHEET_NAME: ${{ secrets.EMAIL_SHEET_NAME }}
+      run: |
+        # Use default "Feuille 1" if EMAIL_SHEET_NAME is not set
+        SHEET_NAME="${EMAIL_SHEET_NAME:-Feuille 1}"
+        python extract_emails.py --folder_id "$EMAIL_SOURCE_FOLDER_ID" --sheet_id "$EMAIL_SHEET_ID" --sheet_name "$SHEET_NAME"

@@ -183,5 +183,17 @@ def reset_stuck_cvs(service, sheet_id, sheet_name="Feuille 1"):
         status = row[4] if len(row) > 4 else ""
         
         if not json_link and status != "EN_ATTENTE":
-            print(f"Resetting Row {i} (Status: {status}) to EN_ATTENTE because JSON Link is empty.")
             update_cv_status(service, sheet_id, i, "EN_ATTENTE", sheet_name=sheet_name)
+
+def append_to_sheet(service, sheet_id, values, sheet_name="Feuille 1"):
+    """
+    Appends a list of values as a new row to the specified Google Sheet.
+    """
+    range_name = f"{sheet_name}!A:B" # Appending to columns A and B
+    body = {'values': [values]}
+    
+    service.spreadsheets().values().append(
+        spreadsheetId=sheet_id, range=range_name,
+        valueInputOption="USER_ENTERED", body=body
+    ).execute()
+    print(f"Appended to sheet: {values}")
