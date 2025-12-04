@@ -5,7 +5,7 @@ import logging
 from google_drive import get_drive_service, get_sheets_service, download_files_from_folder, append_to_sheet
 import re
 import difflib
-from google_drive import get_drive_service, get_sheets_service, download_files_from_folder, append_to_sheet, get_sheet_values, clear_and_write_sheet, format_header_row
+from google_drive import get_drive_service, get_sheets_service, download_files_from_folder, append_to_sheet, get_sheet_values, clear_and_write_sheet, format_header_row, update_sheet_row
 from parsers import extract_text_from_pdf, extract_text_from_docx, heuristic_parse_contact
 
 # Configure logging
@@ -64,6 +64,28 @@ def split_name(full_name):
         return parts[0], ""
     return " ".join(parts[:-1]), parts[-1]
 
+def clean_phone_number(phone):
+    """
+    Formats phone number to (xxx) xxx-xxxx and prepends ' to force text format in Excel.
+    """
+    if not phone:
+        return ""
+    
+    # Remove non-digits
+    digits = re.sub(r'\D', '', phone)
+    
+    if len(digits) == 10:
+        formatted = f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+        return f"'{formatted}"
+    elif len(digits) == 11 and digits.startswith('1'):
+        formatted = f"({digits[1:4]}) {digits[4:7]}-{digits[7:]}"
+        return f"'{formatted}"
+    else:
+        # Return original with ' prepended if it has digits
+        if digits:
+            return f"'{phone}"
+        return phone
+
 def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     """
     Reads the sheet, removes rows with duplicate emails, and rewrites it.
@@ -119,7 +141,6 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     logger.info(f"Deduplication complete. Total rows: {len(unique_rows)}")
 
 def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
-    # ... (rest of function)
     """
     Downloads CVs from a Drive folder, extracts emails, and saves them to a Sheet.
     """
@@ -128,16 +149,34 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     drive_service = get_drive_service()
     sheets_service = get_sheets_service()
 
-    # 2. Deduplicate existing data first (optional, but good practice)
+    # 2. Deduplicate existing data first
     deduplicate_sheet(sheets_service, sheet_id, sheet_name)
     
-    # Load existing emails to prevent adding new duplicates
+    # Load existing data to check for duplicates AND missing info
+    # Map: filename -> {index: int, email: str, phone: str}
     existing_rows = get_sheet_values(sheets_service, sheet_id, sheet_name)
-    existing_emails = set()
+    existing_data_map = {}
+    
     if existing_rows:
-        for row in existing_rows[1:]: # Skip header
-             if len(row) > 1:
-                 existing_emails.add(row[1].lower().strip())
+        for i, row in enumerate(existing_rows):
+            if i == 0: continue # Skip header
+            # Row: [Filename, Email, Phone, First, Last]
+            # Filename might be a formula like =HYPERLINK("...", "name.pdf")
+            # We need to extract the name.
+            raw_filename = row[0] if len(row) > 0 else ""
+            
+            # Simple extraction if it's a formula
+            match = re.search(r'"([^"]+)"\)$', raw_filename)
+            clean_filename = match.group(1) if match else raw_filename
+            
+            email = row[1] if len(row) > 1 else ""
+            phone = row[2] if len(row) > 2 else ""
+            
+            existing_data_map[clean_filename] = {
+                'index': i,
+                'email': email.strip(),
+                'phone': phone.strip()
+            }
 
     # 3. Create Temp Directory
     if not os.path.exists(TEMP_DIR):
@@ -158,6 +197,23 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             filename = file_data['name']
             file_link = file_data['link']
             
+            # Check if we need to process this file
+            should_process = True
+            row_index_to_update = -1
+            
+            if filename in existing_data_map:
+                data = existing_data_map[filename]
+                # Check if Email OR Phone is missing
+                if not data['email'] or not data['phone'] or data['email'] == "NOT FOUND":
+                    logger.info(f"Reprocessing {filename}: Missing Email or Phone.")
+                    row_index_to_update = data['index']
+                else:
+                    logger.info(f"Skipping {filename}: Already complete.")
+                    should_process = False
+            
+            if not should_process:
+                continue
+
             logger.info(f"Processing: {filename}")
             
             try:
@@ -174,7 +230,6 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 
                 if not text:
                     logger.warning(f"Could not extract text from {filename}")
-                    # append_to_sheet(sheets_service, sheet_id, [filename_cell, "ERROR: No text extracted"], sheet_name=sheet_name)
                     continue
 
                 # Extract Email
@@ -187,39 +242,35 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 
                 email = select_best_email(emails, filename)
                 
-                if email:
-                    # Check for duplicates
-                    if email.lower().strip() in existing_emails:
-                        logger.info(f"Email {email} already exists in sheet. Skipping.")
-                        continue
-                        
-                    logger.info(f"Found email: {email}")
-                    
-                    # Extract other info
-                    contact_info = heuristic_parse_contact(text_head)
-                    phone = contact_info.get('phone', '')
-                    full_name = contact_info.get('name', '')
-                    
-                    # If name is empty, try to use filename base
-                    if not full_name:
-                         full_name = os.path.splitext(filename)[0].replace("_", " ").replace("-", " ")
-                    
-                    first_name, last_name = split_name(full_name)
-                    
-                    # Append: [Filename (Link), Email, Phone, FirstName, LastName]
-                    row_data = [filename_cell, email, phone, first_name, last_name]
+                # Extract other info
+                contact_info = heuristic_parse_contact(text_head)
+                phone = contact_info.get('phone', '')
+                full_name = contact_info.get('name', '')
+                
+                # Clean Phone
+                phone = clean_phone_number(phone)
+                
+                # If name is empty, try to use filename base
+                if not full_name:
+                        full_name = os.path.splitext(filename)[0].replace("_", " ").replace("-", " ")
+                
+                first_name, last_name = split_name(full_name)
+                
+                # Prepare Row Data
+                # If email not found, keep it empty or "NOT FOUND"
+                email_val = email if email else "NOT FOUND"
+                
+                row_data = [filename_cell, email_val, phone, first_name, last_name]
+                
+                if row_index_to_update != -1:
+                    # Update existing row
+                    update_sheet_row(sheets_service, sheet_id, row_index_to_update, row_data, sheet_name=sheet_name)
+                else:
+                    # Append new row
                     append_to_sheet(sheets_service, sheet_id, row_data, sheet_name=sheet_name)
                     
-                    # Add to local set
-                    existing_emails.add(email.lower().strip())
-                    
-                else:
-                    logger.warning(f"No email found in {filename}")
-                    # append_to_sheet(sheets_service, sheet_id, [filename_cell, "NOT FOUND"], sheet_name=sheet_name)
-
             except Exception as e:
                 logger.error(f"Error processing {filename}: {e}")
-                # append_to_sheet(sheets_service, sheet_id, [filename_cell, f"ERROR: {str(e)}"], sheet_name=sheet_name)
 
     finally:
         # 6. Cleanup
