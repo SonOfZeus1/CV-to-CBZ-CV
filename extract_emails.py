@@ -230,8 +230,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 existing_data = data
                 
                 # Condition 1: Missing Email or Phone -> Full Process
-                if not data['email'] or not data['phone'] or data['email'] == "NOT FOUND":
-                    logger.info(f"Reprocessing {filename}: Missing Email or Phone.")
+                # Check for "NOT FOUND" case-insensitively
+                if not data['email'] or not data['phone'] or data['email'].upper() == "NOT FOUND":
+                    logger.info(f"Reprocessing {filename}: Missing Email/Phone or Email is 'NOT FOUND'.")
                     should_full_process = True
                 
                 # Condition 2: Missing Hyperlink OR Broken Formula -> Update Link Only
