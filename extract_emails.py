@@ -77,10 +77,15 @@ def clean_phone_number(phone):
 def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     """
     Reads the sheet, removes rows with duplicate emails, and rewrites it.
-    Ensures header exists.
+    Strategy:
+    1. Group rows by Email.
+    2. If multiple rows have the same email, keep the one with the SHORTEST filename (Column A).
+       (Assumption: Longer filenames are often copies like "CV (1).pdf").
+    3. Rows without email are preserved.
     """
     logger.info("Running deduplication...")
-    rows = get_sheet_values(sheets_service, sheet_id, sheet_name)
+    # Use FORMULA render option to get the raw hyperlink formula for length comparison
+    rows = get_sheet_values(sheets_service, sheet_id, sheet_name, value_render_option='FORMULA')
     
     expected_header = ["Filename", "Email", "Phone"]
     
@@ -101,29 +106,45 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
         else:
             pass
 
-    seen_emails = set()
-    unique_rows = []
-    
-    # Keep header
-    unique_rows.append(expected_header) # Enforce standard header
-    
+    email_groups = {} # email -> list of rows
+    rows_without_email = []
+
     for row in data:
-        # Assuming Email is in column 2 (index 1)
-        if len(row) > 1:
-            email = row[1].lower().strip()
-            if email and email not in seen_emails:
-                seen_emails.add(email)
-                # Keep only first 3 columns if row is longer
-                unique_rows.append(row[:3])
-            elif not email:
-                unique_rows.append(row[:3])
-        else:
-            unique_rows.append(row)
+        # Ensure row has at least 3 columns (pad if needed)
+        while len(row) < 3:
+            row.append("")
             
+        # Assuming Email is in column 2 (index 1)
+        email = row[1].lower().strip()
+        
+        if email and email != "not found":
+            if email not in email_groups:
+                email_groups[email] = []
+            email_groups[email].append(row)
+        else:
+            rows_without_email.append(row)
+            
+    unique_data = []
+    
+    # Process groups
+    for email, group in email_groups.items():
+        if len(group) == 1:
+            unique_data.append(group[0])
+        else:
+            # Sort by length of filename (row[0]), ascending.
+            # We keep the shortest one.
+            # Example: "CV.pdf" (shorter) vs "CV (1).pdf" (longer) -> Keep "CV.pdf"
+            group.sort(key=lambda r: len(r[0]))
+            unique_data.append(group[0])
+            
+    # Combine: Header + Rows without Email + Unique Rows
+    # We keep rows without email first (or last, doesn't matter much)
+    final_rows = [expected_header] + rows_without_email + unique_data
+    
     # Always rewrite to ensure header is correct and formatted
-    clear_and_write_sheet(sheets_service, sheet_id, unique_rows, sheet_name)
+    clear_and_write_sheet(sheets_service, sheet_id, final_rows, sheet_name)
     format_header_row(sheets_service, sheet_id, sheet_name)
-    logger.info(f"Deduplication complete. Total rows: {len(unique_rows)}")
+    logger.info(f"Deduplication complete. Reduced from {len(data)} to {len(final_rows)-1} rows.")
 
 def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     """
@@ -138,8 +159,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     deduplicate_sheet(sheets_service, sheet_id, sheet_name)
     
     # Load existing data to check for duplicates AND missing info
-    # Map: filename -> {index: int, email: str, phone: str, is_hyperlink: bool}
-    existing_rows = get_sheet_values(sheets_service, sheet_id, sheet_name)
+    # Map: filename -> {index: int, email: str, phone: str, is_hyperlink: bool, needs_fix: bool}
+    # Use value_render_option='FORMULA' to see the actual formula even if it errors
+    existing_rows = get_sheet_values(sheets_service, sheet_id, sheet_name, value_render_option='FORMULA')
     existing_data_map = {}
     
     if existing_rows:
@@ -150,6 +172,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             
             # Check if it's a hyperlink formula
             is_hyperlink = raw_filename.startswith('=HYPERLINK')
+            
+            # Check if it uses the correct separator (semicolon for French)
+            # If it uses comma, it's likely broken in this locale
+            uses_semicolon = ';' in raw_filename if is_hyperlink else False
             
             # Extract clean filename
             if is_hyperlink:
@@ -165,7 +191,8 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 'index': i,
                 'email': email.strip(),
                 'phone': phone.strip(),
-                'is_hyperlink': is_hyperlink
+                'is_hyperlink': is_hyperlink,
+                'needs_fix': is_hyperlink and not uses_semicolon # Fix if it's a link but uses wrong separator
             }
 
     # 3. Create Temp Directory
@@ -190,6 +217,8 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             file_link = file_data['link']
             
             # Create Hyperlink Formula
+            # Use semicolon ; for French locale compatibility
+            # Escape double quotes in filename by doubling them
             safe_filename = filename.replace('"', '""')
             filename_cell = f'=HYPERLINK("{file_link}"; "{safe_filename}")' if file_link else filename
             
@@ -209,9 +238,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     logger.info(f"Reprocessing {filename}: Missing Email or Phone.")
                     should_full_process = True
                 
-                # Condition 2: Missing Hyperlink but has Data -> Update Link Only (Skip OCR)
-                elif not data['is_hyperlink']:
-                    logger.info(f"Updating Link for {filename}: Data exists, adding hyperlink.")
+                # Condition 2: Missing Hyperlink OR Broken Formula -> Update Link Only
+                elif not data['is_hyperlink'] or data['needs_fix']:
+                    reason = "Missing hyperlink" if not data['is_hyperlink'] else "Broken formula (wrong separator)"
+                    logger.info(f"Updating Link for {filename}: {reason}.")
                     should_full_process = False
                     use_existing_data = True
                 

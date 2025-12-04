@@ -237,12 +237,15 @@ def append_to_sheet(service, sheet_id, values, sheet_name="Feuille 1", retries=1
     print(f"Failed to append to sheet after {retries} retries.")
     raise Exception("Max retries exceeded for Google Sheets API write requests.")
 
-def get_sheet_values(service, sheet_id, sheet_name="Feuille 1"):
+def get_sheet_values(service, sheet_id, sheet_name="Feuille 1", value_render_option="FORMATTED_VALUE"):
     """
     Returns all values from the specified sheet.
+    value_render_option: 'FORMATTED_VALUE' (default), 'UNFORMATTED_VALUE', or 'FORMULA'
     """
     range_name = f"{sheet_name}!A:C" # Columns A-C (Filename, Email, Phone)
-    result = service.spreadsheets().values().get(spreadsheetId=sheet_id, range=range_name).execute()
+    result = service.spreadsheets().values().get(
+        spreadsheetId=sheet_id, range=range_name, valueRenderOption=value_render_option
+    ).execute()
     return result.get('values', [])
 
 def clear_and_write_sheet(service, sheet_id, values, sheet_name="Feuille 1", retries=10):
