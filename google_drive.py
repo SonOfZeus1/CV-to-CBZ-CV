@@ -402,3 +402,55 @@ def fetch_actionable_cvs(service, sheet_id, sheet_name="Feuille 1", target_statu
                     print(f"Warning: Could not extract File ID from row {i}: {raw_filename}")
                     
     return actionable_cvs
+
+def set_column_validation(service, sheet_id, sheet_name, col_index, options):
+    """
+    Sets data validation (dropdown) for a specific column.
+    col_index: 0-based index (e.g., 3 for Column D).
+    options: List of strings for the dropdown.
+    """
+    # Get sheetId
+    sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+    sheets = sheet_metadata.get('sheets', '')
+    sheet_int_id = 0
+    for s in sheets:
+        if s.get("properties", {}).get("title") == sheet_name:
+            sheet_int_id = s.get("properties", {}).get("sheetId")
+            break
+            
+    # Define range (Skip header row 0, go to end of sheet)
+    # col_index 3 = Column D
+    
+    requests = [
+        {
+            "setDataValidation": {
+                "range": {
+                    "sheetId": sheet_int_id,
+                    "startRowIndex": 1, # Skip header
+                    "startColumnIndex": col_index,
+                    "endColumnIndex": col_index + 1
+                },
+                "rule": {
+                    "condition": {
+                        "type": "ONE_OF_LIST",
+                        "values": [{"userEnteredValue": opt} for opt in options]
+                    },
+                    "showCustomUi": True,
+                    "strict": False # Allow other values like "EXTRACTION_EN_COURS"
+                }
+            }
+        }
+    ]
+    
+    body = {
+        'requests': requests
+    }
+    
+    try:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=sheet_id,
+            body=body
+        ).execute()
+        print(f"Set validation for column index {col_index} with options {options}")
+    except HttpError as error:
+        print(f"Warning: Failed to set validation: {error}")

@@ -231,11 +231,16 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 
                 # Condition 1: Missing Email or Phone -> Full Process
                 # Check for "NOT FOUND" case-insensitively
+                # Also checks if email is empty/null
                 if not data['email'] or not data['phone'] or data['email'].upper() == "NOT FOUND":
                     logger.info(f"Reprocessing {filename}: Missing Email/Phone or Email is 'NOT FOUND'.")
                     should_full_process = True
                 
                 # Condition 2: Missing Hyperlink OR Broken Formula -> Update Link Only
+                # This covers:
+                # - Empty Filename cells (is_hyperlink=False)
+                # - Text-only Filename cells (is_hyperlink=False)
+                # - Broken Formulas (needs_fix=True)
                 elif not data['is_hyperlink'] or data['needs_fix']:
                     reason = "Missing hyperlink" if not data['is_hyperlink'] else "Broken formula (wrong separator)"
                     logger.info(f"Updating Link for {filename}: {reason}.")
@@ -334,6 +339,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         if os.path.exists(TEMP_DIR):
             shutil.rmtree(TEMP_DIR)
             logger.info("Temporary directory cleaned up.")
+            
+        # 7. Set Data Validation for Status Column (Column D, index 3)
+        logger.info("Setting data validation for Status column...")
+        set_column_validation(sheets_service, sheet_id, sheet_name, 3, ["Oui", "Non", "Delete"])
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract emails from CVs in a Google Drive folder.")
