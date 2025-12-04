@@ -30,7 +30,7 @@ def download_files_from_folder(service, folder_id, download_path):
     
     results = service.files().list(
         q=query,
-        fields="nextPageToken, files(id, name)",
+        fields="nextPageToken, files(id, name, webViewLink)",
         supportsAllDrives=True,
         includeItemsFromAllDrives=True
     ).execute()
@@ -44,6 +44,7 @@ def download_files_from_folder(service, folder_id, download_path):
     for item in items:
         file_id = item['id']
         file_name = item['name']
+        file_link = item.get('webViewLink', '')
         file_path = os.path.join(download_path, file_name)
 
         request = service.files().get_media(fileId=file_id)
@@ -58,7 +59,14 @@ def download_files_from_folder(service, folder_id, download_path):
         with open(file_path, 'wb') as f:
             f.write(fh.getvalue())
         print(f"Downloaded '{file_name}' to '{file_path}'")
-        downloaded_files.append(file_path)
+        
+        # Return dict with metadata
+        downloaded_files.append({
+            'path': file_path,
+            'name': file_name,
+            'id': file_id,
+            'link': file_link
+        })
     
     return downloaded_files
 
@@ -286,3 +294,24 @@ def format_header_row(service, sheet_id, sheet_name="Feuille 1"):
         body=body
     ).execute()
     print("Formatted header row as bold.")
+
+def update_sheet_row(service, sheet_id, row_index, values, sheet_name="Feuille 1"):
+    """
+    Updates a specific row in the sheet.
+    row_index is 0-based (but Sheets API uses 1-based for A1 notation).
+    """
+    # Sheets A1 notation is 1-based. Python list index is 0-based.
+    # If row_index comes from enumerate(rows), it's 0-based relative to the list.
+    # If the list includes header, row 0 is header (Sheet row 1).
+    # So Sheet Row = row_index + 1.
+    
+    sheet_row_num = row_index + 1
+    range_name = f"{sheet_name}!A{sheet_row_num}:E{sheet_row_num}"
+    
+    body = {'values': [values]}
+    
+    service.spreadsheets().values().update(
+        spreadsheetId=sheet_id, range=range_name,
+        valueInputOption="USER_ENTERED", body=body
+    ).execute()
+    print(f"Updated row {sheet_row_num}: {values}")

@@ -153,8 +153,11 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             return
 
         # 5. Process Each File
-        for file_path in downloaded_files:
-            filename = os.path.basename(file_path)
+        for file_data in downloaded_files:
+            file_path = file_data['path']
+            filename = file_data['name']
+            file_link = file_data['link']
+            
             logger.info(f"Processing: {filename}")
             
             try:
@@ -166,9 +169,12 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 elif ext.lower() == '.docx':
                     text = extract_text_from_docx(file_path)
                 
+                # Create Hyperlink Formula
+                filename_cell = f'=HYPERLINK("{file_link}", "{filename}")' if file_link else filename
+                
                 if not text:
                     logger.warning(f"Could not extract text from {filename}")
-                    # append_to_sheet(sheets_service, sheet_id, [filename, "ERROR: No text extracted"], sheet_name=sheet_name)
+                    # append_to_sheet(sheets_service, sheet_id, [filename_cell, "ERROR: No text extracted"], sheet_name=sheet_name)
                     continue
 
                 # Extract Email
@@ -200,8 +206,8 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     
                     first_name, last_name = split_name(full_name)
                     
-                    # Append: [Filename, Email, Phone, FirstName, LastName]
-                    row_data = [filename, email, phone, first_name, last_name]
+                    # Append: [Filename (Link), Email, Phone, FirstName, LastName]
+                    row_data = [filename_cell, email, phone, first_name, last_name]
                     append_to_sheet(sheets_service, sheet_id, row_data, sheet_name=sheet_name)
                     
                     # Add to local set
@@ -209,11 +215,11 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     
                 else:
                     logger.warning(f"No email found in {filename}")
-                    # append_to_sheet(sheets_service, sheet_id, [filename, "NOT FOUND"], sheet_name=sheet_name)
+                    # append_to_sheet(sheets_service, sheet_id, [filename_cell, "NOT FOUND"], sheet_name=sheet_name)
 
             except Exception as e:
                 logger.error(f"Error processing {filename}: {e}")
-                # append_to_sheet(sheets_service, sheet_id, [filename, f"ERROR: {str(e)}"], sheet_name=sheet_name)
+                # append_to_sheet(sheets_service, sheet_id, [filename_cell, f"ERROR: {str(e)}"], sheet_name=sheet_name)
 
     finally:
         # 6. Cleanup
