@@ -206,7 +206,7 @@ def reset_stuck_cvs(service, sheet_id, sheet_name="Feuille 1"):
 import time
 from googleapiclient.errors import HttpError
 
-def append_to_sheet(service, sheet_id, values, sheet_name="Feuille 1", retries=5):
+def append_to_sheet(service, sheet_id, values, sheet_name="Feuille 1", retries=10):
     """
     Appends a list of values as a new row to the specified Google Sheet.
     Includes exponential backoff for rate limiting (429 errors).
@@ -225,8 +225,8 @@ def append_to_sheet(service, sheet_id, values, sheet_name="Feuille 1", retries=5
             return
         except HttpError as error:
             if error.resp.status == 429:
-                sleep_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s, 8s, 16s
-                print(f"Quota exceeded (429). Retrying in {sleep_time} seconds...")
+                sleep_time = (2 ** attempt) + 1 # Exponential backoff + 1s buffer
+                print(f"Quota exceeded (429) in append. Retrying in {sleep_time} seconds...")
                 time.sleep(sleep_time)
                 attempt += 1
             else:
@@ -244,23 +244,40 @@ def get_sheet_values(service, sheet_id, sheet_name="Feuille 1"):
     result = service.spreadsheets().values().get(spreadsheetId=sheet_id, range=range_name).execute()
     return result.get('values', [])
 
-def clear_and_write_sheet(service, sheet_id, values, sheet_name="Feuille 1"):
+def clear_and_write_sheet(service, sheet_id, values, sheet_name="Feuille 1", retries=10):
     """
     Clears the sheet and writes new values.
     Used for deduplication.
     """
-    # 1. Clear
-    service.spreadsheets().values().clear(
-        spreadsheetId=sheet_id, range=f"{sheet_name}!A:Z"
-    ).execute()
-    
-    # 2. Write
+    # 1. Clear (usually fast, but let's be safe)
+    try:
+        service.spreadsheets().values().clear(
+            spreadsheetId=sheet_id, range=f"{sheet_name}!A:Z"
+        ).execute()
+    except HttpError as error:
+        print(f"Warning: Failed to clear sheet: {error}")
+
+    # 2. Write with retry
     body = {'values': values}
-    service.spreadsheets().values().update(
-        spreadsheetId=sheet_id, range=f"{sheet_name}!A1",
-        valueInputOption="USER_ENTERED", body=body
-    ).execute()
-    print(f"Rewrote sheet with {len(values)} rows.")
+    
+    attempt = 0
+    while attempt < retries:
+        try:
+            service.spreadsheets().values().update(
+                spreadsheetId=sheet_id, range=f"{sheet_name}!A1",
+                valueInputOption="USER_ENTERED", body=body
+            ).execute()
+            print(f"Rewrote sheet with {len(values)} rows.")
+            return
+        except HttpError as error:
+            if error.resp.status == 429:
+                sleep_time = (2 ** attempt) + 1
+                print(f"Quota exceeded (429) in rewrite. Retrying in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+                attempt += 1
+            else:
+                raise
+    raise Exception("Max retries exceeded for clear_and_write_sheet")
 
 def format_header_row(service, sheet_id, sheet_name="Feuille 1"):
     """
@@ -305,23 +322,31 @@ def format_header_row(service, sheet_id, sheet_name="Feuille 1"):
     ).execute()
     print("Formatted header row as bold.")
 
-def update_sheet_row(service, sheet_id, row_index, values, sheet_name="Feuille 1"):
+def update_sheet_row(service, sheet_id, row_index, values, sheet_name="Feuille 1", retries=10):
     """
     Updates a specific row in the sheet.
     row_index is 0-based (but Sheets API uses 1-based for A1 notation).
     """
-    # Sheets A1 notation is 1-based. Python list index is 0-based.
-    # If row_index comes from enumerate(rows), it's 0-based relative to the list.
-    # If the list includes header, row 0 is header (Sheet row 1).
-    # So Sheet Row = row_index + 1.
-    
     sheet_row_num = row_index + 1
     range_name = f"{sheet_name}!A{sheet_row_num}:E{sheet_row_num}"
     
     body = {'values': [values]}
     
-    service.spreadsheets().values().update(
-        spreadsheetId=sheet_id, range=range_name,
-        valueInputOption="USER_ENTERED", body=body
-    ).execute()
-    print(f"Updated row {sheet_row_num}: {values}")
+    attempt = 0
+    while attempt < retries:
+        try:
+            service.spreadsheets().values().update(
+                spreadsheetId=sheet_id, range=range_name,
+                valueInputOption="USER_ENTERED", body=body
+            ).execute()
+            print(f"Updated row {sheet_row_num}: {values}")
+            return
+        except HttpError as error:
+            if error.resp.status == 429:
+                sleep_time = (2 ** attempt) + 1
+                print(f"Quota exceeded (429) in update_row. Retrying in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+                attempt += 1
+            else:
+                raise
+    raise Exception("Max retries exceeded for update_sheet_row")

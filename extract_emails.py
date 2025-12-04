@@ -207,7 +207,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             file_link = file_data['link']
             
             # Create Hyperlink Formula
-            filename_cell = f'=HYPERLINK("{file_link}", "{filename}")' if file_link else filename
+            # Use semicolon ; for French locale compatibility
+            # Escape double quotes in filename by doubling them
+            safe_filename = filename.replace('"', '""')
+            filename_cell = f'=HYPERLINK("{file_link}"; "{safe_filename}")' if file_link else filename
             
             # Check if we need to process this file
             should_full_process = True
