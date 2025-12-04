@@ -12,13 +12,12 @@ def get_drive_service():
     creds, _ = google.auth.default(scopes=SCOPES)
     return build('drive', 'v3', credentials=creds)
 
-def download_files_from_folder(service, folder_id, download_path):
-    """Downloads all .pdf and .docx files from a Google Drive folder."""
-    if not os.path.exists(download_path):
-        os.makedirs(download_path)
-
+def list_files_in_folder(service, folder_id):
+    """
+    Lists all .pdf and .docx files in a Google Drive folder.
+    Returns a list of dicts: {'id': str, 'name': str, 'link': str}
+    """
     # Correction Bug : Exclusion explicite des fichiers générés (_processed)
-    # La clause "not name contains '_processed'" empêche la boucle infinie.
     query = (
         f"'{folder_id}' in parents "
         f"and (mimeType='application/pdf' or mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document') "
@@ -49,36 +48,38 @@ def download_files_from_folder(service, folder_id, download_path):
 
     print(f"Nombre total de fichiers trouvés : {len(items)}")
     print(f"--- FIN DU LOG DE DÉBOGAGE ---")
-
-    downloaded_files = []
-    for item in items:
-        file_id = item['id']
-        file_name = item['name']
-        file_link = item.get('webViewLink', '')
-        file_path = os.path.join(download_path, file_name)
-
-        request = service.files().get_media(fileId=file_id)
-        fh = io.BytesIO()
-        downloader = MediaIoBaseDownload(fh, request)
-        
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-            print(f"Downloading {file_name}: {int(status.progress() * 100)}%")
-
-        with open(file_path, 'wb') as f:
-            f.write(fh.getvalue())
-        print(f"Downloaded '{file_name}' to '{file_path}'")
-        
-        # Return dict with metadata
-        downloaded_files.append({
-            'path': file_path,
-            'name': file_name,
-            'id': file_id,
-            'link': file_link
-        })
     
-    return downloaded_files
+    file_list = []
+    for item in items:
+        file_list.append({
+            'id': item['id'],
+            'name': item['name'],
+            'link': item.get('webViewLink', '')
+        })
+        
+    return file_list
+
+def download_file(service, file_id, file_name, download_path):
+    """Downloads a single file from Google Drive."""
+    if not os.path.exists(download_path):
+        os.makedirs(download_path)
+        
+    file_path = os.path.join(download_path, file_name)
+    
+    request = service.files().get_media(fileId=file_id)
+    fh = io.BytesIO()
+    downloader = MediaIoBaseDownload(fh, request)
+    
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+        # print(f"Downloading {file_name}: {int(status.progress() * 100)}%")
+
+    with open(file_path, 'wb') as f:
+        f.write(fh.getvalue())
+    # print(f"Downloaded '{file_name}' to '{file_path}'")
+    
+    return file_path
 
 def upload_file_to_folder(service, file_path, folder_id):
     """Uploads a file to a specific Google Drive folder."""

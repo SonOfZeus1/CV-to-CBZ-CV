@@ -173,23 +173,23 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         os.makedirs(TEMP_DIR)
 
     try:
-        # 4. Download Files
-        logger.info(f"Downloading files from folder ID: {folder_id}")
-        downloaded_files = download_files_from_folder(drive_service, folder_id, TEMP_DIR)
+        # 4. List Files (Metadata only)
+        logger.info(f"Listing files from folder ID: {folder_id}")
+        all_files = list_files_in_folder(drive_service, folder_id)
         
-        if not downloaded_files:
-            logger.warning("No files found or downloaded.")
+        if not all_files:
+            logger.warning("No files found in Drive folder.")
             return
 
+        logger.info(f"Found {len(all_files)} files in Drive.")
+
         # 5. Process Each File
-        for file_data in downloaded_files:
-            file_path = file_data['path']
+        for file_data in all_files:
+            file_id = file_data['id']
             filename = file_data['name']
             file_link = file_data['link']
             
             # Create Hyperlink Formula
-            # Use semicolon ; for French locale compatibility
-            # Escape double quotes in filename by doubling them
             safe_filename = filename.replace('"', '""')
             filename_cell = f'=HYPERLINK("{file_link}"; "{safe_filename}")' if file_link else filename
             
@@ -217,7 +217,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 
                 # Condition 3: All Good -> Skip
                 else:
-                    logger.info(f"Skipping {filename}: Already complete and linked.")
+                    # logger.info(f"Skipping {filename}: Already complete and linked.")
                     should_full_process = False
                     use_existing_data = False
                     continue # Explicitly skip
@@ -237,6 +237,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             if should_full_process:
                 logger.info(f"Processing content: {filename}")
                 try:
+                    # DOWNLOAD FILE ON DEMAND
+                    file_path = download_file(drive_service, file_id, filename, TEMP_DIR)
+                    
                     # Extract Text
                     text = ""
                     _, ext = os.path.splitext(filename)
@@ -245,8 +248,18 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     elif ext.lower() == '.docx':
                         text = extract_text_from_docx(file_path)
                     
+                    # Remove file after processing to save space
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    
                     if not text:
                         logger.warning(f"Could not extract text from {filename}")
+                        # Still add to sheet with empty data so we have the link!
+                        row_data = [filename_cell, "NOT FOUND", ""]
+                        if row_index_to_update != -1:
+                            update_sheet_row(sheets_service, sheet_id, row_index_to_update, row_data, sheet_name=sheet_name)
+                        else:
+                            append_to_sheet(sheets_service, sheet_id, row_data, sheet_name=sheet_name)
                         continue
 
                     # Extract Email
