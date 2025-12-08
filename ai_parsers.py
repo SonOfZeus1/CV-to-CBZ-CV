@@ -148,46 +148,124 @@ Texte du CV :
 """
 
 EXPERIENCE_SYSTEM_PROMPT = """
-You are an expert CV parser. Your goal is to extract experience details from the provided text segment with extreme precision.
-Return a JSON object with the following fields:
-- job_title: The job title (normalized).
-- company: The company name.
-- localisation: The location (City, Country).
-- start_date: The start date (e.g., "Jan 2020").
-- end_date: The end date (e.g., "Present" or "Dec 2021").
-- resume: A brief summary of the role (optional).
-- taches: A list of key tasks/responsibilities.
-- competences: A list of skills used in this role.
+Tu es un assistant spécialisé dans l’extraction structurée de CV vers du JSON propre, cohérent et sans doublons.
+On te fournit le texte brut complet d’un CV. Tu dois en extraire en priorité la section expériences professionnelles dans un tableau experience[] avec le schéma suivant :
+
+{
+  "job_title": "",
+  "company": "",
+  "location": "",
+  "dates": "",        // texte lisible, exactement comme dans le CV (ex: "Octobre 2018 — Août 2020")
+  "date_start": "",   // optionnel, ISO "YYYY-MM" si déductible
+  "date_end": "",     // optionnel, ISO "YYYY-MM" ou "" / null si "Aujourd'hui" / "Maintenant"
+  "is_current": false,
+  "duration": "",     // laisse vide si tu n'es pas CERTAIN. La durée sera recalculée par le code.
+  "summary": "",
+  "tasks": [],
+  "skills": [],
+  "full_text": ""
+}
+
+1. Règles générales
+
+Respecte strictement les informations du CV.
+
+Si une information n’est pas clairement présente, ne l’invente pas. Laisse le champ vide ou omets-le.
+
+Reconstitue chaque expérience à partir d’un bloc cohérent : titre + entreprise + lieu + dates + description/bullets.
+
+2. Gestion des dates (cause d’erreur majeure à éviter)
+
+Ne remplace JAMAIS une date de fin explicite par “Aujourd’hui” ou “Maintenant”.
+
+Si le CV indique Octobre 2018 — Août 2020, tu dois garder exactement cette plage dans dates.
+
+date_end doit être dérivée de la vraie date de fin (2020-08), pas de la date actuelle.
+
+“Aujourd’hui”, “Maintenant”, “Présent”, “Present” ne s’appliquent que si le CV l’écrit explicitement pour ce poste.
+
+Ne propage pas ce statut aux autres expériences plus anciennes.
+
+Ne réutilise pas la date d’un poste précédent sur un autre poste.
+
+Chaque bloc de dates appartient au poste auquel il est visuellement associé dans le CV.
+
+date_start / date_end
+
+Si le mois et l’année sont présents, convertis en YYYY-MM (ex: Octobre 2018 → "2018-10").
+
+Si seule l’année est donnée, tu peux mettre YYYY-01 ou laisser vide si tu n’es pas sûr.
+
+3. Durée des expériences (nouvelle stratégie)
+
+Ne fais PLUS de “best guess” flou.
+
+Si tu peux calculer la durée de façon arithmétique et cohérente à partir de date_start / date_end, tu peux renseigner duration (ex: "3 ans 2 mois").
+
+Si tu n’es pas sûr à 100 % de la durée, laisse duration vide ("").
+
+Il vaut mieux une durée absente qu’une durée fausse (le code en aval recalculera la durée précisément à partir de date_start / date_end et de la date actuelle fournie).
+
+4. Éviter les doublons (autre cause d’erreur majeure)
+
+Ne duplique pas la même expérience plusieurs fois.
+
+Deux expériences sont considérées identiques si tous les éléments suivants correspondent fortement :
+
+job_title
+
+company
+
+location
+
+dates
+
+le texte principal dans full_text
+
+Si tu retrouves la même expérience dans plusieurs parties du texte (par exemple à cause de répétitions ou de chunks), ne l’ajoute qu’une seule fois dans le tableau experience.
+
+5. Résumé / profil
+
+Si tu génères un résumé global (summary), ne réécris pas l’historique de manière trompeuse.
+
+Ne transforme pas des années d’expérience générales en “années d’Angular” ou d’une techno spécifique, sauf si le CV le dit explicitement.
+
+Exemple d’erreur à éviter (tiré d’un CV réel) :
+
+CV : “Expérience de 10 ans comme analyste développeur, près de 2 ans comme architecte.”
+
+Mauvais résumé généré : “plus de 14 années d’expérience en développement Angular” (faux).
+
+6. Exemple d’erreurs à NE PAS reproduire (cas réel "Marc Plante")
+
+Ne pas transformer :
+
+Août 2020 – Octobre 2023 en Août 2020 – Aujourd’hui avec une durée de 5 ans 3 mois.
+
+Octobre 2018 – Août 2020 en Octobre 2018 – Aujourd’hui avec 7 ans 1 mois.
+
+Avril 2016 – Septembre 2017 en Avril 2016 – Aujourd’hui avec 9 ans 7 mois.
+
+Janvier 2013 – Avril 2016 en Janvier 2013 – Aujourd’hui avec 12 ans 10 mois.
+
+Octobre 2009 – Janvier 2013 en Octobre 2009 – Aujourd’hui avec 16 ans 1 mois.
+
+Ne pas répéter 3 fois la même séquence d’expériences (Angular / Architecte APEX / Analyste APEX / SharePoint / Scrum Master / Analyste télécom / Ingénieur logiciel/analyste).
+
+7. Sortie attendue
+
+Retourne un objet JSON valide avec au minimum :
+
+experience: tableau d’expériences propres, dédupliquées et alignées sur le texte.
+
+Tu peux ajouter d’autres sections (éducation, langues, etc.) si elles sont simples à extraire, mais la priorité est la qualité de experience[].
 """
 
 EXPERIENCE_USER_PROMPT = """
-Voici le texte brut d'une seule expérience professionnelle.
-Tu dois produire un JSON structuré avec une précision chirurgicale.
+Voici le texte brut d'une expérience professionnelle (ou d'un bloc d'expériences).
+Analyse-le et extrait les informations selon les règles strictes définies ci-dessus.
 
-Contraintes CRITIQUES :
-1.  **DATES** : Extrait `start_date` et `end_date` séparément. Copie EXACTEMENT le texte du CV pour chaque date.
-    - Si "Aujourd'hui", "Présent", "Current" -> met "Aujourd'hui".
-2.  **LOCALISATION** : Format strict "Ville, Pays" (ex: "Paris, France"). Si le pays n'est pas précisé mais évident (Paris), ajoute-le.
-3.  **TITRE** : Garde le titre original mais corrige les majuscules (Title Case).
-4.  **TACHES** :
-    - Maximum 5 tâches les plus importantes.
-    - Sois précis sur les technologies (ex: "Spring Boot" au lieu de "Java").
-    - Verbes d'action à l'infinitif ou au passé composé selon le contexte, mais cohérent.
-5.  **COMPETENCES** : Liste les technologies explicites trouvées dans ce bloc.
-
-Retourne un JSON strict :
-{{
-  "job_title": "...",
-  "company": "...",
-  "localisation": "Ville, Pays",
-  "start_date": "...",
-  "end_date": "...",
-  "resume": "...",
-  "taches": ["..."],
-  "competences": ["..."]
-}}
-
-Bloc expérience :
+Texte à analyser :
 \"\"\"{text}\"\"\"
 """
 

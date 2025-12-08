@@ -603,59 +603,80 @@ def parse_cv(file_path: str) -> Optional[dict]:
             idx, exp_data, exp_text = process_single_experience(txt, i)
             results.append((idx, exp_data, exp_text))
                 
-            # Sort by original index to maintain order
-            results.sort(key=lambda x: x[0])
+        # Sort by original index to maintain order
+        results.sort(key=lambda x: x[0])
+        
+        # Deduplication set
+        seen_experiences = set()
+        
+        for _, exp_data, exp_text in results:
+            if not exp_data:
+                continue
+                
+            # Handle structured dates
+            start_date = exp_data.get("start_date", "")
+            end_date = exp_data.get("end_date", "")
             
-            for _, exp_data, exp_text in results:
-                if not exp_data:
-                    continue
-                    
-                # Handle structured dates
-                start_date = exp_data.get("start_date", "")
-                end_date = exp_data.get("end_date", "")
+            # Construct legacy dates string for display
+            dates_str = f"{start_date} - {end_date}" if start_date and end_date else exp_data.get("dates", "")
+            
+            # Calculate duration using structured dates
+            if not exp_data.get("duration"):
+                exp_data["duration"] = calculate_duration_string(start_date, end_date)
+
+            # Fallback parsing if AI failed to extract key fields
+            if not exp_data.get("job_title") and not exp_data.get("company"):
+                logger.warning("AI failed to extract experience details, trying heuristic fallback...")
+                heuristic_data = heuristic_parse_experience(exp_text)
+                # Merge heuristic data
+                for k, v in heuristic_data.items():
+                    if not exp_data.get(k):
+                        exp_data[k] = v
                 
-                # Construct legacy dates string for display
-                dates_str = f"{start_date} - {end_date}" if start_date and end_date else exp_data.get("dates", "")
+                # If we fell back to heuristic, we might have a single 'dates' string
+                # Try to split it for duration calculation if needed
+                if not exp_data.get("duration") and exp_data.get("dates"):
+                    # Heuristic returns "Start - End"
+                    d_str = exp_data.get("dates")
+                    # We can try to reuse our calc function by splitting loosely
+                    parts = re.split(r'\s+(?:-|–|—|to|à)\s+', d_str)
+                    if len(parts) == 2:
+                        exp_data["duration"] = calculate_duration_string(parts[0], parts[1])
+
+            # Map various possible keys for job title
+            job_title = exp_data.get("job_title") or exp_data.get("titre_poste") or exp_data.get("titre") or "Poste inconnu"
+            company = exp_data.get("company", "") or exp_data.get("entreprise", "")
+            location = exp_data.get("localisation", "") or exp_data.get("location", "")
+            
+            # Deduplication Check
+            # Create a signature based on key fields
+            # We normalize strings to avoid minor differences (case, whitespace)
+            def normalize_key(s): return str(s).strip().lower()
+            
+            sig = (
+                normalize_key(job_title),
+                normalize_key(company),
+                normalize_key(dates_str)
+            )
+            
+            if sig in seen_experiences:
+                logger.info(f"Skipping duplicate experience: {job_title} at {company} ({dates_str})")
+                continue
                 
-                # Calculate duration using structured dates
-                if not exp_data.get("duration"):
-                    exp_data["duration"] = calculate_duration_string(start_date, end_date)
+            seen_experiences.add(sig)
 
-                # Fallback parsing if AI failed to extract key fields
-                if not exp_data.get("job_title") and not exp_data.get("company"):
-                    logger.warning("AI failed to extract experience details, trying heuristic fallback...")
-                    heuristic_data = heuristic_parse_experience(exp_text)
-                    # Merge heuristic data
-                    for k, v in heuristic_data.items():
-                        if not exp_data.get(k):
-                            exp_data[k] = v
-                    
-                    # If we fell back to heuristic, we might have a single 'dates' string
-                    # Try to split it for duration calculation if needed
-                    if not exp_data.get("duration") and exp_data.get("dates"):
-                        # Heuristic returns "Start - End"
-                        d_str = exp_data.get("dates")
-                        # We can try to reuse our calc function by splitting loosely
-                        parts = re.split(r'\s+(?:-|–|—|to|à)\s+', d_str)
-                        if len(parts) == 2:
-                            exp_data["duration"] = calculate_duration_string(parts[0], parts[1])
-
-                # Map various possible keys for job title
-                job_title = exp_data.get("job_title") or exp_data.get("titre_poste") or exp_data.get("titre") or "Poste inconnu"
-
-                entry = ExperienceEntry(
-                    job_title=job_title,
-                    company=exp_data.get("company", "") or exp_data.get("entreprise", ""),
-                    location=exp_data.get("localisation", "") or exp_data.get("location", ""),
-                    dates=dates_str,
-                    duration=exp_data.get("duration", "") or exp_data.get("duree", ""),
-                    summary=exp_data.get("resume", "") or exp_data.get("summary", ""),
-                    tasks=exp_data.get("taches", []) or exp_data.get("tasks", []),
-                    skills=exp_data.get("competences", []) or exp_data.get("skills", []),
-                    full_text=exp_text
-                )
-                structured_experiences.append(entry)
-
+            entry = ExperienceEntry(
+                job_title=job_title,
+                company=company,
+                location=location,
+                dates=dates_str,
+                duration=exp_data.get("duration", "") or exp_data.get("duree", ""),
+                summary=exp_data.get("resume", "") or exp_data.get("summary", ""),
+                tasks=exp_data.get("taches", []) or exp_data.get("tasks", []),
+                skills=exp_data.get("competences", []) or exp_data.get("skills", []),
+                full_text=exp_text
+            )
+            structured_experiences.append(entry)
     # 5b. Generate Dynamic Summary
     logger.info("Step 3b: Generating Dynamic Summary...")
     generated_summary = ""
