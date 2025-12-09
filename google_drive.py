@@ -139,7 +139,7 @@ def fetch_pending_cvs(service, sheet_id, sheet_name="Feuille 1", target_status="
     Fetches rows where Status (Column E, index 4) matches target_status.
     Returns a list of dicts: {'row': int, 'file_id': str, 'file_name': str, 'json_link': str}
     """
-    sheet_range = f"{sheet_name}!A:H"
+    sheet_range = f"'{sheet_name}'!A:H"
     sheet = service.spreadsheets()
     result = sheet.values().get(spreadsheetId=sheet_id, range=sheet_range).execute()
     values = result.get('values', [])
@@ -170,7 +170,7 @@ def update_cv_status(service, sheet_id, row_number, status, sheet_name="Feuille 
     Columns: E=Status, F=JSON Link, G=PDF Link, H=Summary
     """
     # We update range E{row}:H{row}
-    range_name = f"{sheet_name}!E{row_number}:H{row_number}"
+    range_name = f"'{sheet_name}'!E{row_number}:H{row_number}"
     
     values = [[status, json_link, pdf_link, summary]]
     body = {'values': values}
@@ -186,7 +186,7 @@ def reset_stuck_cvs(service, sheet_id, sheet_name="Feuille 1"):
     Resets status to 'EN_ATTENTE' for rows where JSON Link is empty.
     This ensures that stuck or failed CVs are retried.
     """
-    sheet_range = f"{sheet_name}!A:H"
+    sheet_range = f"'{sheet_name}'!A:H"
     sheet = service.spreadsheets()
     result = sheet.values().get(spreadsheetId=sheet_id, range=sheet_range).execute()
     values = result.get('values', [])
@@ -212,7 +212,7 @@ def append_to_sheet(service, sheet_id, values, sheet_name="Feuille 1", retries=1
     Appends a list of values as a new row to the specified Google Sheet.
     Includes exponential backoff for rate limiting (429 errors).
     """
-    range_name = f"{sheet_name}!A:B" # Appending to columns A and B
+    range_name = f"'{sheet_name}'!A:B" # Appending to columns A and B
     body = {'values': [values]}
     
     attempt = 0
@@ -242,7 +242,7 @@ def get_sheet_values(service, sheet_id, sheet_name="Feuille 1", value_render_opt
     Returns all values from the specified sheet.
     value_render_option: 'FORMATTED_VALUE' (default), 'UNFORMATTED_VALUE', or 'FORMULA'
     """
-    range_name = f"{sheet_name}!A:E" # Columns A-E (Filename, Email, Phone, Status, JSON Link)
+    range_name = f"'{sheet_name}'!A:E" # Columns A-E (Filename, Email, Phone, Status, JSON Link)
     result = service.spreadsheets().values().get(
         spreadsheetId=sheet_id, range=range_name, valueRenderOption=value_render_option
     ).execute()
@@ -256,7 +256,7 @@ def clear_and_write_sheet(service, sheet_id, values, sheet_name="Feuille 1", ret
     # 1. Clear (usually fast, but let's be safe)
     try:
         service.spreadsheets().values().clear(
-            spreadsheetId=sheet_id, range=f"{sheet_name}!A:Z"
+            spreadsheetId=sheet_id, range=f"'{sheet_name}'!A:Z"
         ).execute()
     except HttpError as error:
         print(f"Warning: Failed to clear sheet: {error}")
@@ -268,7 +268,7 @@ def clear_and_write_sheet(service, sheet_id, values, sheet_name="Feuille 1", ret
     while attempt < retries:
         try:
             service.spreadsheets().values().update(
-                spreadsheetId=sheet_id, range=f"{sheet_name}!A1",
+                spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1",
                 valueInputOption="USER_ENTERED", body=body
             ).execute()
             print(f"Rewrote sheet with {len(values)} rows.")
@@ -335,7 +335,7 @@ def update_sheet_row(service, sheet_id, row_index, values, sheet_name="Feuille 1
     # Determine range based on length of values
     # A=1, B=2, C=3, D=4, E=5
     end_col_char = chr(ord('A') + len(values) - 1)
-    range_name = f"{sheet_name}!A{sheet_row_num}:{end_col_char}{sheet_row_num}"
+    range_name = f"'{sheet_name}'!A{sheet_row_num}:{end_col_char}{sheet_row_num}"
     
     body = {'values': [values]}
     

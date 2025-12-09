@@ -38,7 +38,7 @@ def process_extract_row(row_data, drive_service, sheets_service, sheet_id, outpu
     def update_cell(r_idx, c_idx, val):
         # c_idx: 0=A, 1=B, 2=C, 3=D, 4=E
         col_char = chr(ord('A') + c_idx)
-        range_name = f"{sheet_name}!{col_char}{row_num}"
+        range_name = f"'{sheet_name}'!{col_char}{row_num}"
         body = {'values': [[val]]}
         sheets_service.spreadsheets().values().update(
             spreadsheetId=sheet_id, range=range_name,
@@ -76,7 +76,7 @@ def process_extract_row(row_data, drive_service, sheets_service, sheet_id, outpu
         
         # 5. Update Sheet -> FAIT + JSON Link
         # Update Status (Col D) and JSON Link (Col E)
-        range_name = f"{sheet_name}!D{row_num}:E{row_num}"
+        range_name = f"'{sheet_name}'!D{row_num}:E{row_num}"
         body = {'values': [["FAIT", json_link]]}
         sheets_service.spreadsheets().values().update(
             spreadsheetId=sheet_id, range=range_name,
