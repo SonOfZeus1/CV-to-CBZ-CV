@@ -63,15 +63,15 @@ def main():
     load_dotenv()
     logger.info("--- Starting Pipeline 1: EXTRACTION (Folder -> Folder) ---")
 
-    source_folder_id = os.environ.get('SOURCE_FOLDER_ID')
+    source_folder_id = os.environ.get('CV_TO_JSON_FOLDER_ID')
     json_output_folder_id = os.environ.get('JSON_OUTPUT_FOLDER_ID')
     
     if not source_folder_id:
-        logger.error("Missing SOURCE_FOLDER_ID in .env")
+        logger.error("Missing CV_TO_JSON_FOLDER_ID in .env")
         return
 
     if not json_output_folder_id:
-        logger.warning("JSON_OUTPUT_FOLDER_ID not set. Using SOURCE_FOLDER_ID as fallback.")
+        logger.warning("JSON_OUTPUT_FOLDER_ID not set. Using CV_TO_JSON_FOLDER_ID as fallback.")
         json_output_folder_id = source_folder_id
 
     try:
