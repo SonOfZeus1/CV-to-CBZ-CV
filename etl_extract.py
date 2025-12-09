@@ -5,6 +5,9 @@ import io
 from dotenv import load_dotenv
 from googleapiclient.http import MediaIoBaseDownload
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 from google_drive import get_drive_service, get_sheets_service, fetch_actionable_cvs, update_sheet_row, upload_file_to_folder
 
 # ... (imports and logging config remain same)
