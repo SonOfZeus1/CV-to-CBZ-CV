@@ -21,7 +21,8 @@ def list_files_in_folder(service, folder_id):
     query = (
         f"'{folder_id}' in parents "
         f"and (mimeType='application/pdf' or mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document') "
-        f"and not name contains '_processed'"
+        f"and not name contains '_processed' "
+        f"and trashed=false"
     )
     
     print(f"--- LOG DE DÉBOGAGE GOOGLE DRIVE ---")
