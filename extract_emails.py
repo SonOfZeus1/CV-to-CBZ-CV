@@ -80,6 +80,30 @@ def clean_phone_number(phone):
             return f"'{phone}"
         return phone
 
+def detect_language(text):
+    """
+    Detects if the text is English or French based on keywords.
+    Returns 'EN', 'FR', or 'Unknown'.
+    """
+    if not text:
+        return "Unknown"
+        
+    text_lower = text.lower()
+    
+    # Keywords
+    fr_keywords = ['expérience', 'formation', 'compétences', 'langues', 'résumé', 'profil', 'éducation', 'janvier', 'février', 'août', 'décembre']
+    en_keywords = ['experience', 'education', 'skills', 'languages', 'summary', 'profile', 'january', 'february', 'august', 'december']
+    
+    fr_score = sum(1 for k in fr_keywords if k in text_lower)
+    en_score = sum(1 for k in en_keywords if k in text_lower)
+    
+    if fr_score > en_score:
+        return "FR"
+    elif en_score > fr_score:
+        return "EN"
+    else:
+        return "Unknown"
+
 def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     """
     Reads the sheet, removes rows with duplicate emails, and rewrites it.
@@ -93,7 +117,7 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     # Use FORMULA render option to get the raw hyperlink formula for length comparison
     rows = get_sheet_values(sheets_service, sheet_id, sheet_name, value_render_option='FORMULA')
     
-    expected_header = ["Filename", "Email", "Phone", "Status", "JSON Link"]
+    expected_header = ["Filename", "Email", "Phone", "Status", "JSON Link", "Language"]
     
     if not rows:
         # Sheet is empty, write header
@@ -118,8 +142,8 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     rows_without_email = []
 
     for row in data:
-        # Ensure row has at least 5 columns (pad if needed)
-        while len(row) < 5:
+        # Ensure row has at least 6 columns (pad if needed)
+        while len(row) < 6:
             row.append("")
             
         # Assuming Email is in column 2 (index 1)
@@ -163,9 +187,10 @@ def process_single_file(file_data, existing_data_map):
     filename = file_data['name']
     file_link = file_data['link']
     
-    # Create Hyperlink Formula
+    # Create Hyperlink Formula (French Locale)
     safe_filename = filename.replace('"', '""')
-    filename_cell = f'=HYPERLINK("{file_link}", "{safe_filename}")' if file_link else filename
+    # Use LIEN_HYPERTEXTE and semicolon for French locale
+    filename_cell = f'=LIEN_HYPERTEXTE("{file_link}"; "{safe_filename}")' if file_link else filename
     
     # Check if we need to process this file
     should_full_process = True
@@ -199,7 +224,10 @@ def process_single_file(file_data, existing_data_map):
         row_data = [
             filename_cell, 
             existing_data['email'], 
-            existing_data['phone']
+            existing_data['phone'],
+            "", # Status
+            "", # JSON Link
+            existing_data.get('language', '') # Language
         ]
         return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': filename}
 
@@ -224,12 +252,15 @@ def process_single_file(file_data, existing_data_map):
             
             if not text:
                 logger.warning(f"Could not extract text from {filename}")
-                row_data = [filename_cell, "NOT FOUND", "", "", ""]
+                row_data = [filename_cell, "NOT FOUND", "", "", "", "Unknown"]
                 if row_index_to_update != -1:
                     return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': filename}
                 else:
                     return {'action': 'APPEND', 'data': row_data, 'filename': filename}
 
+            # Detect Language
+            language = detect_language(text)
+            
             # Extract Email
             text_head = text[:2000]
             email_pattern = r"[\w\.-]+@[\w\.-]+\.\w+"
@@ -246,8 +277,8 @@ def process_single_file(file_data, existing_data_map):
             # Prepare Row Data
             email_val = email if email else "NOT FOUND"
             
-            # Add empty Status and JSON Link
-            row_data = [filename_cell, email_val, phone, "", ""]
+            # Add empty Status and JSON Link, and Language
+            row_data = [filename_cell, email_val, phone, "", "", language]
             
             if row_index_to_update != -1:
                 return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': filename}
@@ -282,14 +313,15 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             if i == 0: continue # Skip header
             raw_filename = row[0] if len(row) > 0 else ""
             
-            # Check if it's a hyperlink formula
-            is_hyperlink = raw_filename.startswith('=HYPERLINK')
+            # Check if it's a hyperlink formula (English or French)
+            is_hyperlink = raw_filename.startswith('=HYPERLINK') or raw_filename.startswith('=LIEN_HYPERTEXTE')
             
-            # Check if it uses the correct separator (comma for standard locale)
-            uses_comma = ',' in raw_filename if is_hyperlink else False
+            # Check if it uses the correct French format
+            is_correct_format = raw_filename.startswith('=LIEN_HYPERTEXTE') and ';' in raw_filename
             
             # Extract clean filename
             if is_hyperlink:
+                # Match both formats: HYPERLINK("url", "name") or LIEN_HYPERTEXTE("url"; "name")
                 match = re.search(r'"([^"]+)"\)$', raw_filename)
                 clean_filename = match.group(1) if match else raw_filename
             else:
@@ -297,13 +329,15 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             
             email = row[1] if len(row) > 1 else ""
             phone = row[2] if len(row) > 2 else ""
+            language = row[5] if len(row) > 5 else ""
             
             existing_data_map[clean_filename] = {
                 'index': i,
                 'email': str(email).strip(),
                 'phone': str(phone).strip(),
+                'language': str(language).strip(),
                 'is_hyperlink': is_hyperlink,
-                'needs_fix': is_hyperlink and not uses_comma
+                'needs_fix': is_hyperlink and not is_correct_format
             }
 
     # 3. Create Temp Directory

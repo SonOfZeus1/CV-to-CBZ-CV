@@ -491,7 +491,7 @@ def append_batch_to_sheet(service, sheet_id, rows, sheet_name="Feuille 1", retri
     if not rows:
         return
 
-    range_name = f"'{sheet_name}'!A:E"
+    range_name = f"'{sheet_name}'!A:F"
     body = {'values': rows}
     
     attempt = 0
