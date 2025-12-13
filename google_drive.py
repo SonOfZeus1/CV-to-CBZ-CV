@@ -146,6 +146,11 @@ def move_file(service, file_id, current_folder_id, new_folder_id):
             supportsAllDrives=True
         ).execute()
         # print(f"Moved file {file_id} to folder {new_folder_id}")
+    except HttpError as error:
+        if error.resp.status == 404:
+            print(f"Warning: File {file_id} not found during move (likely already moved).")
+        else:
+            print(f"Error moving file {file_id}: {error}")
     except Exception as e:
         print(f"Error moving file {file_id}: {e}")
 
