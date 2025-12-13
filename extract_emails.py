@@ -151,11 +151,14 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     format_header_row(sheets_service, sheet_id, sheet_name)
     logger.info(f"Deduplication complete. Reduced from {len(data)} to {len(final_rows)-1} rows.")
 
-def process_single_file(file_data, existing_data_map, drive_service):
+def process_single_file(file_data, existing_data_map):
     """
     Processes a single file: checks if it needs processing, downloads, extracts info.
     Returns a dict with action ('APPEND', 'UPDATE', 'SKIP') and data.
     """
+    # Create a thread-local Drive service to avoid SSL/Memory corruption
+    drive_service = get_drive_service()
+    
     file_id = file_data['id']
     filename = file_data['name']
     file_link = file_data['link']
@@ -331,7 +334,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             # Submit all tasks
             future_to_file = {
-                executor.submit(process_single_file, file_data, existing_data_map, drive_service): file_data 
+                executor.submit(process_single_file, file_data, existing_data_map): file_data 
                 for file_data in all_files
             }
             
