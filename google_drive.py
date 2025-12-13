@@ -128,6 +128,28 @@ def get_or_create_folder(service, folder_name, parent_id=None):
         folder = service.files().create(body=file_metadata, fields='id', supportsAllDrives=True).execute()
         return folder.get('id')
 
+def move_file(service, file_id, current_folder_id, new_folder_id):
+    """
+    Moves a file from one folder to another.
+    """
+    try:
+        # Retrieve the existing parents to remove
+        file = service.files().get(fileId=file_id, fields='parents').execute()
+        previous_parents = ",".join(file.get('parents'))
+        
+        # Move the file by adding the new parent and removing the old one
+        service.files().update(
+            fileId=file_id,
+            addParents=new_folder_id,
+            removeParents=previous_parents,
+            fields='id, parents',
+            supportsAllDrives=True
+        ).execute()
+        # print(f"Moved file {file_id} to folder {new_folder_id}")
+    except Exception as e:
+        print(f"Error moving file {file_id}: {e}")
+
+
 # --- SHEETS API ---
 
 def get_sheets_service():
@@ -455,3 +477,100 @@ def set_column_validation(service, sheet_id, sheet_name, col_index, options):
         print(f"Set validation for column index {col_index} with options {options}")
     except HttpError as error:
         print(f"Warning: Failed to set validation: {error}")
+
+def append_batch_to_sheet(service, sheet_id, rows, sheet_name="Feuille 1", retries=10):
+    """
+    Appends multiple rows to the sheet in one API call.
+    rows: List of lists (e.g., [[val1, val2], [val3, val4]])
+    """
+    if not rows:
+        return
+
+    range_name = f"'{sheet_name}'!A:E"
+    body = {'values': rows}
+    
+    attempt = 0
+    while attempt < retries:
+        try:
+            service.spreadsheets().values().append(
+                spreadsheetId=sheet_id, range=range_name,
+                valueInputOption="USER_ENTERED", body=body
+            ).execute()
+            print(f"Appended {len(rows)} rows to sheet.")
+            return
+        except HttpError as error:
+            if error.resp.status == 429:
+                sleep_time = (2 ** attempt) + 1
+                print(f"Quota exceeded (429) in batch append. Retrying in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+                attempt += 1
+            else:
+                print(f"Error appending batch: {error}")
+                raise
+    
+    raise Exception("Max retries exceeded for append_batch_to_sheet")
+
+def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", retries=10):
+    """
+    Updates multiple rows in one batchUpdate call.
+    updates: List of tuples (row_index_0_based, values_list)
+    """
+    if not updates:
+        return
+
+    # Get sheetId
+    sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+    sheets = sheet_metadata.get('sheets', '')
+    sheet_int_id = 0
+    for s in sheets:
+        if s.get("properties", {}).get("title") == sheet_name:
+            sheet_int_id = s.get("properties", {}).get("sheetId")
+            break
+            
+    requests = []
+    for row_idx, values in updates:
+        # Create a PasteDataRequest or UpdateCellsRequest?
+        # UpdateCells is better for specific ranges, but requires constructing RowData.
+        # easier to use value ranges with batchUpdate? No, values.batchUpdate exists!
+        pass
+    
+    # Actually, spreadsheets.values.batchUpdate is easier for multiple ranges!
+    # But wait, values.batchUpdate takes a list of ValueRanges.
+    # Each ValueRange has a range and values.
+    
+    data = []
+    for row_idx, values in updates:
+        sheet_row_num = row_idx + 1
+        end_col_char = chr(ord('A') + len(values) - 1)
+        range_name = f"'{sheet_name}'!A{sheet_row_num}:{end_col_char}{sheet_row_num}"
+        data.append({
+            'range': range_name,
+            'values': [values]
+        })
+        
+    body = {
+        'valueInputOption': 'USER_ENTERED',
+        'data': data
+    }
+    
+    attempt = 0
+    while attempt < retries:
+        try:
+            service.spreadsheets().values().batchUpdate(
+                spreadsheetId=sheet_id,
+                body=body
+            ).execute()
+            print(f"Batch updated {len(updates)} rows.")
+            return
+        except HttpError as error:
+            if error.resp.status == 429:
+                sleep_time = (2 ** attempt) + 1
+                print(f"Quota exceeded (429) in batch update. Retrying in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+                attempt += 1
+            else:
+                print(f"Error batch updating: {error}")
+                raise
+    
+    raise Exception("Max retries exceeded for batch_update_rows")
+

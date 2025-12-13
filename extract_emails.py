@@ -5,8 +5,14 @@ import logging
 from google_drive import get_drive_service, get_sheets_service, list_files_in_folder, download_file, append_to_sheet
 import re
 import difflib
-from google_drive import get_drive_service, get_sheets_service, list_files_in_folder, download_file, append_to_sheet, get_sheet_values, clear_and_write_sheet, format_header_row, update_sheet_row
+    get_drive_service, get_sheets_service, list_files_in_folder, 
+    download_file, append_to_sheet, get_sheet_values, 
+    clear_and_write_sheet, format_header_row, update_sheet_row,
+    append_batch_to_sheet, batch_update_rows, set_column_validation,
+    get_or_create_folder, move_file
+)
 from parsers import extract_text_from_pdf, extract_text_from_docx, heuristic_parse_contact
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -145,9 +151,116 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     format_header_row(sheets_service, sheet_id, sheet_name)
     logger.info(f"Deduplication complete. Reduced from {len(data)} to {len(final_rows)-1} rows.")
 
+def process_single_file(file_data, existing_data_map, drive_service):
+    """
+    Processes a single file: checks if it needs processing, downloads, extracts info.
+    Returns a dict with action ('APPEND', 'UPDATE', 'SKIP') and data.
+    """
+    file_id = file_data['id']
+    filename = file_data['name']
+    file_link = file_data['link']
+    
+    # Create Hyperlink Formula
+    safe_filename = filename.replace('"', '""')
+    filename_cell = f'=HYPERLINK("{file_link}", "{safe_filename}")' if file_link else filename
+    
+    # Check if we need to process this file
+    should_full_process = True
+    row_index_to_update = -1
+    use_existing_data = False
+    existing_data = None
+    
+    if filename in existing_data_map:
+        data = existing_data_map[filename]
+        row_index_to_update = data['index']
+        existing_data = data
+        
+        # Condition 1: Missing Email or Phone -> Full Process
+        if not data['email'] or not data['phone'] or data['email'].upper() == "NOT FOUND":
+            # logger.info(f"Reprocessing {filename}: Missing Email/Phone.")
+            should_full_process = True
+        
+        # Condition 2: Missing Hyperlink OR Broken Formula -> Update Link Only
+        elif not data['is_hyperlink'] or data['needs_fix']:
+            # logger.info(f"Updating Link for {filename}.")
+            should_full_process = False
+            use_existing_data = True
+        
+        # Condition 3: All Good -> Skip
+        else:
+            return {'action': 'SKIP', 'filename': filename}
+    
+    # If we are here, we either need full process or just update link
+    
+    if use_existing_data and existing_data:
+        row_data = [
+            filename_cell, 
+            existing_data['email'], 
+            existing_data['phone']
+        ]
+        return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': filename}
+
+    if should_full_process:
+        try:
+            # DOWNLOAD FILE ON DEMAND
+            # Use unique filename to avoid collision in threads
+            temp_filename = f"{file_id}_{filename}"
+            file_path = download_file(drive_service, file_id, temp_filename, TEMP_DIR)
+            
+            # Extract Text
+            text = ""
+            _, ext = os.path.splitext(filename)
+            if ext.lower() == '.pdf':
+                text, _ = extract_text_from_pdf(file_path)
+            elif ext.lower() == '.docx':
+                text = extract_text_from_docx(file_path)
+            
+            # Remove file after processing
+            if os.path.exists(file_path):
+                os.remove(file_path)
+            
+            if not text:
+                logger.warning(f"Could not extract text from {filename}")
+                row_data = [filename_cell, "NOT FOUND", "", "", ""]
+                if row_index_to_update != -1:
+                    return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': filename}
+                else:
+                    return {'action': 'APPEND', 'data': row_data, 'filename': filename}
+
+            # Extract Email
+            text_head = text[:2000]
+            email_pattern = r"[\w\.-]+@[\w\.-]+\.\w+"
+            emails = list(set(re.findall(email_pattern, text_head)))
+            email = select_best_email(emails, filename)
+            
+            # Extract other info
+            contact_info = heuristic_parse_contact(text_head)
+            phone = contact_info.get('phone', '')
+            
+            # Clean Phone
+            phone = clean_phone_number(phone)
+            
+            # Prepare Row Data
+            email_val = email if email else "NOT FOUND"
+            
+            # Add empty Status and JSON Link
+            row_data = [filename_cell, email_val, phone, "", ""]
+            
+            if row_index_to_update != -1:
+                return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': filename}
+            else:
+                return {'action': 'APPEND', 'data': row_data, 'filename': filename}
+                
+        except Exception as e:
+            logger.error(f"Error processing {filename}: {e}")
+            return {'action': 'ERROR', 'filename': filename, 'error': str(e)}
+
+    return {'action': 'SKIP', 'filename': filename}
+
 def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     """
     Downloads CVs from a Drive folder, extracts emails, and saves them to a Sheet.
+    Uses Parallel Processing and Batch Writing.
     """
     # 1. Authenticate
     logger.info("Authenticating with Google Services...")
@@ -157,23 +270,20 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     # 2. Deduplicate existing data first
     deduplicate_sheet(sheets_service, sheet_id, sheet_name)
     
-    # Load existing data to check for duplicates AND missing info
-    # Map: filename -> {index: int, email: str, phone: str, is_hyperlink: bool, needs_fix: bool}
-    # Use value_render_option='FORMULA' to see the actual formula even if it errors
+    # Load existing data
     existing_rows = get_sheet_values(sheets_service, sheet_id, sheet_name, value_render_option='FORMULA')
     existing_data_map = {}
     
     if existing_rows:
         for i, row in enumerate(existing_rows):
             if i == 0: continue # Skip header
-            # Row: [Filename, Email, Phone, Status, JSON Link]
             raw_filename = row[0] if len(row) > 0 else ""
             
             # Check if it's a hyperlink formula
             is_hyperlink = raw_filename.startswith('=HYPERLINK')
             
-            # Check if it uses the correct separator (semicolon for French)
-            uses_semicolon = ';' in raw_filename if is_hyperlink else False
+            # Check if it uses the correct separator (comma for standard locale)
+            uses_comma = ',' in raw_filename if is_hyperlink else False
             
             # Extract clean filename
             if is_hyperlink:
@@ -190,7 +300,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 'email': str(email).strip(),
                 'phone': str(phone).strip(),
                 'is_hyperlink': is_hyperlink,
-                'needs_fix': is_hyperlink and not uses_semicolon
+                'needs_fix': is_hyperlink and not uses_comma
             }
 
     # 3. Create Temp Directory
@@ -206,133 +316,75 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             logger.warning("No files found in Drive folder.")
             return
 
-        logger.info(f"Found {len(all_files)} files in Drive.")
+        logger.info(f"Found {len(all_files)} files in Drive. Starting parallel processing...")
 
-        # 5. Process Each File
-        for file_data in all_files:
-            file_id = file_data['id']
-            filename = file_data['name']
-            file_link = file_data['link']
-            
-            # Create Hyperlink Formula
-            safe_filename = filename.replace('"', '""')
-            filename_cell = f'=HYPERLINK("{file_link}"; "{safe_filename}")' if file_link else filename
-            
-            # Check if we need to process this file
-            should_full_process = True
-            row_index_to_update = -1
-            use_existing_data = False
-            existing_data = None
-            
-            if filename in existing_data_map:
-                data = existing_data_map[filename]
-                row_index_to_update = data['index']
-                existing_data = data
-                
-                # Condition 1: Missing Email or Phone -> Full Process
-                # Check for "NOT FOUND" case-insensitively
-                # Also checks if email is empty/null
-                if not data['email'] or not data['phone'] or data['email'].upper() == "NOT FOUND":
-                    logger.info(f"Reprocessing {filename}: Missing Email/Phone or Email is 'NOT FOUND'.")
-                    should_full_process = True
-                
-                # Condition 2: Missing Hyperlink OR Broken Formula -> Update Link Only
-                # This covers:
-                # - Empty Filename cells (is_hyperlink=False)
-                # - Text-only Filename cells (is_hyperlink=False)
-                # - Broken Formulas (needs_fix=True)
-                elif not data['is_hyperlink'] or data['needs_fix']:
-                    reason = "Missing hyperlink" if not data['is_hyperlink'] else "Broken formula (wrong separator)"
-                    logger.info(f"Updating Link for {filename}: {reason}.")
-                    should_full_process = False
-                    use_existing_data = True
-                
-                # Condition 3: All Good -> Skip
-                else:
-                    should_full_process = False
-                    use_existing_data = False
-                    continue # Explicitly skip
-            
-            # If we are here, we either need full process or just update link
-            
-            if use_existing_data and existing_data:
-                # Construct row with new link and existing data
-                # Preserve existing Status and JSON Link if they exist (need to fetch them from sheet? 
-                # Actually existing_data_map doesn't store them. 
-                # But since we are updating the row, we should probably preserve them.
-                # However, update_sheet_row overwrites the range.
-                # Let's just write empty strings for now or fetch the full row?
-                # Optimization: For now, just write the first 3 columns. 
-                # update_sheet_row takes values. If we pass 3 values, does it clear the rest?
-                # No, update overwrites only the cells provided in the range.
-                # So if we update A:C, D and E are safe.
-                
-                row_data = [
-                    filename_cell, 
-                    existing_data['email'], 
-                    existing_data['phone']
-                ]
-                # We need to make sure update_sheet_row uses A:C range.
-                update_sheet_row(sheets_service, sheet_id, row_index_to_update, row_data, sheet_name=sheet_name)
-                continue # Done with this file
+        # 5b. Create/Get Processed Folder
+        processed_folder_id = get_or_create_folder(drive_service, "_processed", parent_id=folder_id)
+        logger.info(f"Processed files will be moved to folder ID: {processed_folder_id}")
 
-            if should_full_process:
-                logger.info(f"Processing content: {filename}")
-                try:
-                    # DOWNLOAD FILE ON DEMAND
-                    file_path = download_file(drive_service, file_id, filename, TEMP_DIR)
-                    
-                    # Extract Text
-                    text = ""
-                    _, ext = os.path.splitext(filename)
-                    if ext.lower() == '.pdf':
-                        text, _ = extract_text_from_pdf(file_path)
-                    elif ext.lower() == '.docx':
-                        text = extract_text_from_docx(file_path)
-                    
-                    # Remove file after processing to save space
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                    
-                    if not text:
-                        logger.warning(f"Could not extract text from {filename}")
-                        # Still add to sheet with empty data
-                        row_data = [filename_cell, "NOT FOUND", "", "", ""]
-                        if row_index_to_update != -1:
-                            update_sheet_row(sheets_service, sheet_id, row_index_to_update, row_data, sheet_name=sheet_name)
-                        else:
-                            append_to_sheet(sheets_service, sheet_id, row_data, sheet_name=sheet_name)
-                        continue
+        # 5. Process Files in Parallel
+        append_buffer = []
+        update_buffer = []
+        BATCH_SIZE = 50
+        MAX_WORKERS = 10
+        
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            # Submit all tasks
+            future_to_file = {
+                executor.submit(process_single_file, file_data, existing_data_map, drive_service): file_data 
+                for file_data in all_files
+            }
+            
+            processed_count = 0
+            for future in as_completed(future_to_file):
+                file_data = future_to_file[future]
+                file_id = file_data['id']
+                result = future.result()
+                processed_count += 1
+                
+                should_move = False
+                
+                if result['action'] == 'APPEND':
+                    append_buffer.append(result['data'])
+                    logger.info(f"[{processed_count}/{len(all_files)}] Processed (New): {result['filename']}")
+                    should_move = True
+                elif result['action'] == 'UPDATE':
+                    update_buffer.append((result['row_index'], result['data']))
+                    logger.info(f"[{processed_count}/{len(all_files)}] Processed (Update): {result['filename']}")
+                    should_move = True
+                elif result['action'] == 'SKIP':
+                    # logger.info(f"[{processed_count}/{len(all_files)}] Skipped (Already Valid): {result['filename']}")
+                    should_move = True
+                elif result['action'] == 'ERROR':
+                    logger.error(f"Failed: {result['filename']} - {result.get('error')}")
+                    should_move = False
 
-                    # Extract Email
-                    text_head = text[:2000]
-                    email_pattern = r"[\w\.-]+@[\w\.-]+\.\w+"
-                    emails = list(set(re.findall(email_pattern, text_head)))
-                    email = select_best_email(emails, filename)
-                    
-                    # Extract other info
-                    contact_info = heuristic_parse_contact(text_head)
-                    phone = contact_info.get('phone', '')
-                    
-                    # Clean Phone
-                    phone = clean_phone_number(phone)
-                    
-                    # Prepare Row Data
-                    email_val = email if email else "NOT FOUND"
-                    
-                    # Add empty Status and JSON Link
-                    row_data = [filename_cell, email_val, phone, "", ""]
-                    
-                    if row_index_to_update != -1:
-                        # If updating, we might want to preserve status? 
-                        # If we are reprocessing, maybe reset status?
-                        # Let's assume if we reprocess, we keep status empty or reset it.
-                        update_sheet_row(sheets_service, sheet_id, row_index_to_update, row_data, sheet_name=sheet_name)
-                    else:
-                        append_to_sheet(sheets_service, sheet_id, row_data, sheet_name=sheet_name)
-                        
-                except Exception as e:
-                    logger.error(f"Error processing {filename}: {e}")
+                # Move to _processed if successful or skipped
+                if should_move:
+                    try:
+                        move_file(drive_service, file_id, folder_id, processed_folder_id)
+                    except Exception as e:
+                        logger.error(f"Failed to move {result['filename']}: {e}")
+
+                # Batch Write
+                if len(append_buffer) >= BATCH_SIZE:
+                    logger.info(f"Flushing {len(append_buffer)} new rows to Sheet...")
+                    append_batch_to_sheet(sheets_service, sheet_id, append_buffer, sheet_name)
+                    append_buffer = []
+
+                if len(update_buffer) >= BATCH_SIZE:
+                    logger.info(f"Flushing {len(update_buffer)} updates to Sheet...")
+                    batch_update_rows(sheets_service, sheet_id, update_buffer, sheet_name)
+                    update_buffer = []
+        
+        # Flush remaining
+        if append_buffer:
+            logger.info(f"Flushing remaining {len(append_buffer)} new rows...")
+            append_batch_to_sheet(sheets_service, sheet_id, append_buffer, sheet_name)
+            
+        if update_buffer:
+            logger.info(f"Flushing remaining {len(update_buffer)} updates...")
+            batch_update_rows(sheets_service, sheet_id, update_buffer, sheet_name)
 
     finally:
         # 6. Cleanup

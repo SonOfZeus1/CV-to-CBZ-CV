@@ -149,7 +149,9 @@ def extract_text_from_pdf(file_path: str) -> tuple[str, bool]:
             for page in doc:
                 text += page.get_text()
             avg_chars_per_page = len(text.strip()) / len(doc) if len(doc) > 0 else 0
+            
             if avg_chars_per_page < 50:
+                logger.info(f"Low text content ({avg_chars_per_page:.1f} chars/page). Applying OCR...")
                 text = ""
                 ocr_applied = True
                 for page_num in range(len(doc)):
@@ -157,7 +159,10 @@ def extract_text_from_pdf(file_path: str) -> tuple[str, bool]:
                     pix = page.get_pixmap(dpi=150)
                     img_bytes = pix.tobytes("png")
                     image = Image.open(io.BytesIO(img_bytes))
-                    text += pytesseract.image_to_string(image) + "\\n"
+                    text += pytesseract.image_to_string(image) + "\n"
+            else:
+                logger.info(f"Native text found ({avg_chars_per_page:.1f} chars/page). Skipping OCR.")
+                
     except Exception as exc:
         logger.error("PDF extraction failed (%s): %s", file_path, exc)
     return text, ocr_applied
