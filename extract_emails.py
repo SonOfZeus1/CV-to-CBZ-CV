@@ -2,15 +2,15 @@ import os
 import argparse
 import shutil
 import logging
-from google_drive import get_drive_service, get_sheets_service, list_files_in_folder, download_file, append_to_sheet
-import re
-import difflib
+from google_drive import (
     get_drive_service, get_sheets_service, list_files_in_folder, 
     download_file, append_to_sheet, get_sheet_values, 
     clear_and_write_sheet, format_header_row, update_sheet_row,
     append_batch_to_sheet, batch_update_rows, set_column_validation,
     get_or_create_folder, move_file
 )
+import re
+import difflib
 from parsers import extract_text_from_pdf, extract_text_from_docx, heuristic_parse_contact
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
