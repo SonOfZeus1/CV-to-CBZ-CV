@@ -311,19 +311,31 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         os.makedirs(TEMP_DIR)
 
     try:
-        # 4. List Files (Metadata only)
-        logger.info(f"Listing files from folder ID: {folder_id}")
-        all_files = list_files_in_folder(drive_service, folder_id)
-        
-        if not all_files:
-            logger.warning("No files found in Drive folder.")
-            return
-
-        logger.info(f"Found {len(all_files)} files in Drive. Starting parallel processing...")
-
         # 5b. Create/Get Processed Folder
         processed_folder_id = get_or_create_folder(drive_service, "_processed", parent_id=folder_id)
         logger.info(f"Processed files will be moved to folder ID: {processed_folder_id}")
+
+        # 4. List Files (Metadata only) - FROM BOTH SOURCE AND PROCESSED
+        logger.info(f"Listing files from Source Folder ID: {folder_id}")
+        source_files = list_files_in_folder(drive_service, folder_id)
+        
+        logger.info(f"Listing files from Processed Folder ID: {processed_folder_id}")
+        processed_files = list_files_in_folder(drive_service, processed_folder_id)
+        
+        # Mark files from processed folder so we don't try to move them again
+        for f in processed_files:
+            f['is_processed'] = True
+            
+        for f in source_files:
+            f['is_processed'] = False
+            
+        all_files = source_files + processed_files
+        
+        if not all_files:
+            logger.warning("No files found in Drive (Source or Processed).")
+            return
+
+        logger.info(f"Found {len(all_files)} total files ({len(source_files)} new, {len(processed_files)} processed). Starting parallel processing...")
 
         # 5. Process Files in Parallel
         append_buffer = []
@@ -362,8 +374,8 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     logger.error(f"Failed: {result['filename']} - {result.get('error')}")
                     should_move = False
 
-                # Move to _processed if successful or skipped
-                if should_move:
+                # Move to _processed if successful or skipped AND NOT ALREADY PROCESSED
+                if should_move and not file_data.get('is_processed', False):
                     try:
                         move_file(drive_service, file_id, folder_id, processed_folder_id)
                     except Exception as e:
