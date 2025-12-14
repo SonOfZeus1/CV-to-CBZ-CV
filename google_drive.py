@@ -137,15 +137,35 @@ def move_file(service, file_id, current_folder_id, new_folder_id):
         file = service.files().get(fileId=file_id, fields='parents').execute()
         previous_parents = ",".join(file.get('parents'))
         
-        # Move the file by adding the new parent and removing the old one
-        service.files().update(
-            fileId=file_id,
-            addParents=new_folder_id,
-            removeParents=previous_parents,
-            fields='id, parents',
-            supportsAllDrives=True
-        ).execute()
-        # print(f"Moved file {file_id} to folder {new_folder_id}")
+        # Move the file by adding the new parent
+        attempt = 0
+        retries = 5
+        while attempt < retries:
+            try:
+                # 2. Add new parent
+                service.files().update(
+                    fileId=file_id,
+                    addParents=new_folder_id,
+                    removeParents=previous_parents,
+                    fields='id, parents',
+                    supportsAllDrives=True
+                ).execute()
+                # print(f"Moved file {file_id} to folder {new_folder_id}")
+                return
+            except HttpError as error:
+                if error.resp.status == 404:
+                    print(f"Warning: File {file_id} not found during move (likely already moved).")
+                    return
+                else:
+                    print(f"Error moving file {file_id} (attempt {attempt+1}/{retries}): {error}")
+                    time.sleep((2 ** attempt) + 1)
+                    attempt += 1
+            except Exception as e:
+                print(f"Error moving file {file_id} (attempt {attempt+1}/{retries}): {e}")
+                time.sleep((2 ** attempt) + 1)
+                attempt += 1
+                
+        print(f"Failed to move file {file_id} after {retries} attempts.")
     except HttpError as error:
         if error.resp.status == 404:
             print(f"Warning: File {file_id} not found during move (likely already moved).")
@@ -474,14 +494,20 @@ def set_column_validation(service, sheet_id, sheet_name, col_index, options):
         'requests': requests
     }
     
-    try:
-        service.spreadsheets().batchUpdate(
-            spreadsheetId=sheet_id,
-            body=body
-        ).execute()
-        print(f"Set validation for column index {col_index} with options {options}")
-    except HttpError as error:
-        print(f"Warning: Failed to set validation: {error}")
+    # Retry logic for set_column_validation
+    attempt = 0
+    while attempt < 5:
+        try:
+            service.spreadsheets().batchUpdate(
+                spreadsheetId=sheet_id,
+                body=body
+            ).execute()
+            print(f"Set validation for column index {col_index} with options {options}")
+            return
+        except Exception as e:
+            print(f"Warning: Failed to set validation (attempt {attempt+1}/5): {e}")
+            time.sleep((2 ** attempt) + 1)
+            attempt += 1
 
 def append_batch_to_sheet(service, sheet_id, rows, sheet_name="Feuille 1", retries=10):
     """
@@ -523,14 +549,25 @@ def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", retrie
     if not updates:
         return
 
-    # Get sheetId
-    sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
-    sheets = sheet_metadata.get('sheets', '')
+    # Get sheetId with retry
     sheet_int_id = 0
-    for s in sheets:
-        if s.get("properties", {}).get("title") == sheet_name:
-            sheet_int_id = s.get("properties", {}).get("sheetId")
-            break
+    attempt = 0
+    while attempt < retries:
+        try:
+            sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+            sheets = sheet_metadata.get('sheets', '')
+            for s in sheets:
+                if s.get("properties", {}).get("title") == sheet_name:
+                    sheet_int_id = s.get("properties", {}).get("sheetId")
+                    break
+            break # Success
+        except Exception as e:
+            print(f"Error getting sheet metadata (attempt {attempt+1}/{retries}): {e}")
+            time.sleep((2 ** attempt) + 1)
+            attempt += 1
+            if attempt == retries:
+                print("Failed to get sheet metadata after retries.")
+                return
             
     requests = []
     for row_idx, values in updates:
@@ -576,6 +613,10 @@ def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", retrie
             else:
                 print(f"Error batch updating: {error}")
                 raise
+        except Exception as e:
+            print(f"Error batch updating (attempt {attempt+1}/{retries}): {e}")
+            time.sleep((2 ** attempt) + 1)
+            attempt += 1
     
     raise Exception("Max retries exceeded for batch_update_rows")
 
