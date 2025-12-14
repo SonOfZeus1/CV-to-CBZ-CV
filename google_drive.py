@@ -51,12 +51,7 @@ def list_files_in_folder(service, folder_id, order_by=None, page_size=1000):
             
         if not page_token:
             break
-            'id': item['id'],
-            'name': item['name'],
-            'link': item.get('webViewLink', '')
-        })
-        
-    return file_list
+    return files
 
 def download_file(service, file_id, file_name, download_path):
     """Downloads a single file from Google Drive."""
