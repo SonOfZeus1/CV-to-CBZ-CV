@@ -12,9 +12,6 @@ def get_drive_service():
     creds, _ = google.auth.default(scopes=SCOPES)
     return build('drive', 'v3', credentials=creds)
 
-def list_files_in_folder(service, folder_id):
-    """
-    Lists all .pdf and .docx files in a Google Drive folder.
 def list_files_in_folder(service, folder_id, order_by=None, page_size=1000):
     """
     Lists files in a specific Google Drive folder.
@@ -621,4 +618,3 @@ def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", retrie
             attempt += 1
     
     raise Exception("Max retries exceeded for batch_update_rows")
-
