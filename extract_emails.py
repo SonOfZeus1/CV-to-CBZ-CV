@@ -386,6 +386,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         # --- PRE-FLIGHT CHECK: Move files already in Excel to _processed ---
         logger.info("Running Pre-flight Check: Moving files already in Excel to _processed...")
         files_to_process = []
+        moved_file_ids = set()
         
         for file_data in source_files:
             filename = file_data['name']
@@ -397,6 +398,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 try:
                     move_file(drive_service, file_id, folder_id, processed_folder_id)
                     file_data['is_processed'] = True
+                    moved_file_ids.add(file_id)
                 except Exception as e:
                     logger.error(f"Pre-flight move failed for {filename}: {e}")
             else:
@@ -478,24 +480,13 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     should_move = True
                 elif result['action'] == 'ERROR':
                     logger.error(f"Failed: {result['filename']} - {result.get('error')}")
-                    should_move = False
-
                 # Move to _processed if successful or skipped AND NOT ALREADY PROCESSED
-                # Check if file was already moved during Pre-flight (is_processed=True)
-                # Also check if file was ALREADY in _processed to begin with (we don't need to move it)
+                # Check global moved_file_ids set to prevent double moves
                 
-                already_moved = file_data.get('is_processed', False)
-                # If the file came from processed_files list, it's already in _processed.
-                # We can check parents, but we don't have them here easily.
-                # But we know 'processed_files' are in _processed.
-                # 'source_files' are in Source.
-                # If Pre-flight moved it, 'is_processed' is True.
-                
-                if should_move and not already_moved:
+                if should_move and file_id not in moved_file_ids:
                     try:
                         move_file(drive_service, file_id, folder_id, processed_folder_id)
-                        # Mark as processed so we don't try again if loop continues
-                        file_data['is_processed'] = True
+                        moved_file_ids.add(file_id)
                     except Exception as e:
                         logger.error(f"Failed to move {result['filename']}: {e}")
 
