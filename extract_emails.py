@@ -146,6 +146,11 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
         while len(row) < 6:
             row.append("")
             
+        # Check for "Delete" status (Column 4, index 3)
+        status = str(row[3]).strip()
+        if status.lower() == "delete":
+            continue
+
         # Assuming Email is in column 2 (index 1)
         email = str(row[1]).lower().strip()
         
