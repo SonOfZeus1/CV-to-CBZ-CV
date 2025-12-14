@@ -481,9 +481,21 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     should_move = False
 
                 # Move to _processed if successful or skipped AND NOT ALREADY PROCESSED
-                if should_move and not file_data.get('is_processed', False):
+                # Check if file was already moved during Pre-flight (is_processed=True)
+                # Also check if file was ALREADY in _processed to begin with (we don't need to move it)
+                
+                already_moved = file_data.get('is_processed', False)
+                # If the file came from processed_files list, it's already in _processed.
+                # We can check parents, but we don't have them here easily.
+                # But we know 'processed_files' are in _processed.
+                # 'source_files' are in Source.
+                # If Pre-flight moved it, 'is_processed' is True.
+                
+                if should_move and not already_moved:
                     try:
                         move_file(drive_service, file_id, folder_id, processed_folder_id)
+                        # Mark as processed so we don't try again if loop continues
+                        file_data['is_processed'] = True
                     except Exception as e:
                         logger.error(f"Failed to move {result['filename']}: {e}")
 
