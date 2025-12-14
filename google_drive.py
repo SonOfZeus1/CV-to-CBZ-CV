@@ -15,44 +15,45 @@ def get_drive_service():
 def list_files_in_folder(service, folder_id):
     """
     Lists all .pdf and .docx files in a Google Drive folder.
-    Returns a list of dicts: {'id': str, 'name': str, 'link': str}
+def list_files_in_folder(service, folder_id, order_by=None, page_size=1000):
     """
-    # Correction Bug : Exclusion explicite des fichiers générés (_processed)
-    query = (
-        f"'{folder_id}' in parents "
-        f"and (mimeType='application/pdf' or mimeType='application/vnd.openxmlformats-officedocument.wordprocessingml.document') "
-        f"and not name contains '_processed' "
-        f"and trashed=false"
-    )
-    
-    print(f"--- LOG DE DÉBOGAGE GOOGLE DRIVE ---")
-    print(f"Requête API envoyée : q={query}")
-    
-    items = []
+    Lists files in a specific Google Drive folder.
+    Returns a list of file metadata (id, name, webViewLink, modifiedTime).
+    """
+    query = f"'{folder_id}' in parents and trashed = false"
+    files = []
     page_token = None
     
     while True:
-        results = service.files().list(
-            q=query,
-            pageSize=1000, # Maximize page size
-            fields="nextPageToken, files(id, name, webViewLink)",
-            pageToken=page_token,
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True
-        ).execute()
-        
-        items.extend(results.get('files', []))
-        page_token = results.get('nextPageToken')
-        
-        if not page_token:
+        try:
+            results = service.files().list(
+                q=query,
+                pageSize=page_size,
+                orderBy=order_by,
+                fields="nextPageToken, files(id, name, webViewLink, modifiedTime)",
+                pageToken=page_token,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
+            ).execute()
+        except HttpError as error:
+            print(f"An error occurred: {error}")
             break
 
-    print(f"Nombre total de fichiers trouvés : {len(items)}")
-    print(f"--- FIN DU LOG DE DÉBOGAGE ---")
-    
-    file_list = []
-    for item in items:
-        file_list.append({
+        files.extend(results.get('files', []))
+        page_token = results.get('nextPageToken')
+        
+        # If we have a limit (page_size < 1000) and we reached it, stop.
+        # Note: pageSize in API is per page. If we want a hard limit on total files, 
+        # we should check len(files). But for now, let's assume page_size is the batch we want 
+        # if we are doing one page. 
+        # Actually, if order_by is set, we usually want just the top N.
+        # So if we have enough files, break.
+        if len(files) >= page_size:
+            files = files[:page_size]
+            break
+            
+        if not page_token:
+            break
             'id': item['id'],
             'name': item['name'],
             'link': item.get('webViewLink', '')
@@ -139,7 +140,8 @@ def move_file(service, file_id, current_folder_id, new_folder_id):
         
         # Move the file by adding the new parent
         attempt = 0
-        retries = 5
+        attempt = 0
+        retries = 10
         while attempt < retries:
             try:
                 # 2. Add new parent
@@ -496,7 +498,7 @@ def set_column_validation(service, sheet_id, sheet_name, col_index, options):
     
     # Retry logic for set_column_validation
     attempt = 0
-    while attempt < 5:
+    while attempt < 10:
         try:
             service.spreadsheets().batchUpdate(
                 spreadsheetId=sheet_id,

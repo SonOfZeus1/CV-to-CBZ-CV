@@ -164,7 +164,8 @@ def extract_text_from_pdf(file_path: str) -> tuple[str, bool]:
                 logger.info(f"Native text found ({avg_chars_per_page:.1f} chars/page). Skipping OCR.")
                 
     except Exception as exc:
-        logger.error("PDF extraction failed (%s): %s", file_path, exc)
+        logger.warning(f"PDF extraction failed/corrupted ({file_path}): {exc}")
+        return "", False
     return text, ocr_applied
 
 # --- CORE PIPELINE ---
