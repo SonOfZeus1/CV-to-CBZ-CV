@@ -187,7 +187,7 @@ def process_single_file(file_data, existing_data_map):
     
     file_id = file_data['id']
     filename = file_data['name']
-    file_link = file_data['link']
+    file_link = file_data.get('link', '')
     
     # Create Hyperlink Formula (French Locale)
     safe_filename = filename.replace('"', '""')
