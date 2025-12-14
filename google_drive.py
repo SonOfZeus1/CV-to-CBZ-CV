@@ -17,7 +17,12 @@ def list_files_in_folder(service, folder_id, order_by=None, page_size=1000):
     Lists files in a specific Google Drive folder.
     Returns a list of file metadata (id, name, webViewLink, modifiedTime).
     """
-    query = f"'{folder_id}' in parents and trashed = false"
+    # Filter for only PDF and DOCX files to avoid "fileNotDownloadable" 403 errors on Google Docs/Sheets
+    query = (
+        f"'{folder_id}' in parents "
+        f"and (mimeType = 'application/pdf' or mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') "
+        f"and trashed = false"
+    )
     files = []
     page_token = None
     
@@ -138,10 +143,15 @@ def move_file(service, file_id, current_folder_id, new_folder_id):
     try:
         # Retrieve the existing parents to remove
         file = service.files().get(fileId=file_id, fields='parents').execute()
-        previous_parents = ",".join(file.get('parents'))
+        # Check if already in new_folder_id
+        current_parents_list = file.get('parents', [])
+        if new_folder_id in current_parents_list:
+            print(f"File {file_id} is already in folder {new_folder_id}. Skipping move.")
+            return
+
+        previous_parents = ",".join(current_parents_list)
         
         # Move the file by adding the new parent
-        attempt = 0
         attempt = 0
         retries = 10
         while attempt < retries:
