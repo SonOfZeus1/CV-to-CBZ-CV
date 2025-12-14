@@ -143,8 +143,12 @@ def move_file(service, file_id, current_folder_id, new_folder_id):
     try:
         # Retrieve the existing parents to remove
         file = service.files().get(fileId=file_id, fields='parents').execute()
-        # Check if already in new_folder_id
         current_parents_list = file.get('parents', [])
+        
+        # Debug logging
+        # print(f"DEBUG: Checking move for {file_id}. Current parents: {current_parents_list}, Target: {new_folder_id}")
+        
+        # Check if already in new_folder_id
         if new_folder_id in current_parents_list:
             print(f"File {file_id} is already in folder {new_folder_id}. Skipping move.")
             return

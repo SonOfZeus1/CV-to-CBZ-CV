@@ -388,6 +388,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         files_to_process = []
         moved_file_ids = set()
         
+        # Add already processed files to moved_file_ids to prevent re-moving them
+        for f in processed_files:
+            moved_file_ids.add(f['id'])
+        
         for file_data in source_files:
             filename = file_data['name']
             file_id = file_data['id']
