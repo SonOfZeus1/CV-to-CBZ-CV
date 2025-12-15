@@ -135,21 +135,10 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
             header = expected_header
         else:
             # If header exists but is missing columns, we might want to update it?
-            # For now, let's assume it's fine or user will fix.
-            pass
-
     # 1. Identify rows to delete
     rows_to_delete = []
     
-    # Keep track of emails we've seen to identify duplicates
-    # We want to keep the one with the shortest filename.
-    # So we need to group by email first.
-    
-    email_groups = {} # email -> list of (row_index, row_data)
-    
-    # Iterate backwards to make deletion easier? No, we collect indices and sort them later.
-    # But wait, we need to know WHICH one to keep.
-    
+    # Iterate through data to find rows marked for deletion
     for i, row in enumerate(data):
         row_index = i + 1 # 0-based index in sheet (skipping header)
         
@@ -163,33 +152,14 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
             rows_to_delete.append(row_index)
             continue
             
-        # Check for Email
-        if len(row) > 1:
-            email = str(row[1]).lower().strip()
-            if email and email != "not found":
-                if email not in email_groups:
-                    email_groups[email] = []
-                email_groups[email].append((row_index, row))
-    
-    # Process duplicates
-    for email, group in email_groups.items():
-        if len(group) > 1:
-            # Sort by length of filename (row[0]), ascending.
-            # Keep the first one (shortest), delete the rest.
-            group.sort(key=lambda x: len(x[1][0]))
-            
-            # Add indices of duplicates to delete list
-            for i in range(1, len(group)):
-                rows_to_delete.append(group[i][0])
-                
     if rows_to_delete:
-        logger.info(f"Deleting {len(rows_to_delete)} rows (duplicates or marked 'Delete')...")
+        logger.info(f"Deleting {len(rows_to_delete)} rows marked 'Delete'...")
         delete_rows(sheets_service, sheet_id, rows_to_delete, sheet_name)
     else:
-        logger.info("No rows to delete.")
+        logger.info("No rows marked for deletion.")
         
     # format_header_row(sheets_service, sheet_id, sheet_name) # Optional, but good practice
-    logger.info("Deduplication complete.")
+    logger.info("Cleanup complete.")
 
 def process_single_file(file_data, existing_data_map):
     """
