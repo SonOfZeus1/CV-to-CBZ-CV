@@ -194,6 +194,7 @@ def process_single_file(file_data, existing_data_map):
     # Check if we have existing data for this file
     use_existing_data = False
     existing_data = None
+    should_full_process = True # Default to True for new files
     
     # Use File ID as key
     if file_id in existing_data_map:
