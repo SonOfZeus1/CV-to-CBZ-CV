@@ -713,6 +713,8 @@ def audit_and_repair_hyperlinks(drive_service, sheets_service, spreadsheet_id, s
     """
     logger.info("Running Optimized Audit & Repair on Hyperlinks...")
     
+    fatal_errors = [] # Initialize to prevent NameError in reporting block
+    
     # 1. Build Cache
     # We search in Source AND Processed folders
     folder_ids = [source_folder_id]
