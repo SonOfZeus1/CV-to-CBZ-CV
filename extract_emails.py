@@ -184,7 +184,8 @@ def process_single_file(file_data, existing_data_map):
     # Construct Hyperlink Formula for Filename
     # =HYPERLINK("link", "name")
     if file_link:
-        filename_cell = f'=HYPERLINK("{file_link}", "{clean_filename}")'
+        # Use LIEN_HYPERTEXTE and semicolon for French locale
+        filename_cell = f'=LIEN_HYPERTEXTE("{file_link}"; "{clean_filename}")'
     else:
         # This should rarely happen now with the fallback
         logger.error(f"Could not generate link for {clean_filename}. Excel link will be broken.")
@@ -305,6 +306,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     # Load existing data
     existing_rows = get_sheet_values(sheets_service, sheet_id, sheet_name, value_render_option='FORMULA')
     existing_data_map = {}
+    missing_id_map = {} # Store rows with missing IDs (Broken Links)
     
     if existing_rows:
         for i, row in enumerate(existing_rows):
@@ -357,9 +359,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 # So we need a separate list of "rows to fix by name".
                 
                 # Let's store it in a separate dict
-                if not hasattr(process_folder, "missing_id_map"):
-                     process_folder.missing_id_map = {}
-                process_folder.missing_id_map[clean_filename] = {
+                missing_id_map[clean_filename] = {
                     'index': i,
                     'email': str(email).strip(),
                     'phone': str(phone).strip(),
@@ -379,8 +379,8 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         logger.info(f"Processed files will be moved to folder ID: {processed_folder_id}")
 
         # 4. List Files (Metadata only) - FROM SOURCE ONLY
-        logger.info(f"Listing top 50 most recent files from Source Folder ID: {folder_id}")
-        source_files = list_files_in_folder(drive_service, folder_id, order_by='modifiedTime desc', page_size=50)
+        logger.info(f"Listing top 10 most recent files from Source Folder ID: {folder_id}")
+        source_files = list_files_in_folder(drive_service, folder_id, order_by='modifiedTime desc', page_size=10)
         
         # Identify files needing update from Excel
         files_needing_update = []
@@ -410,9 +410,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 files_needing_update.append({'id': fid, 'priority': priority})
 
         # B. Check files WITHOUT IDs (Broken Links) - Search by Name
-        if hasattr(process_folder, "missing_id_map") and process_folder.missing_id_map:
-            logger.info(f"Found {len(process_folder.missing_id_map)} rows with missing IDs (Broken Links). Searching Drive...")
-            for name, data in process_folder.missing_id_map.items():
+        if missing_id_map:
+            logger.info(f"Found {len(missing_id_map)} rows with missing IDs (Broken Links). Searching Drive...")
+            for name, data in missing_id_map.items():
                 # Search for this file in Source OR Processed
                 # q = "name = 'NAME' and trashed = false"
                 # We need to be careful about quotes in names
@@ -471,7 +471,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         # So we should perhaps take them even before source_files?
         # Let's keep the mix but ensure high priority ones get in.
         
-        update_ids = update_ids[:50]
+        update_ids = update_ids[:10]
         
         for fid in update_ids:
             if fid not in source_ids:
