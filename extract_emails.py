@@ -632,6 +632,45 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         # 7. Set Data Validation for Status Column (Column D, index 3)
         logger.info("Setting data validation for Status column...")
         set_column_validation(sheets_service, sheet_id, sheet_name, 3, ["Oui", "Non", "Delete"])
+        
+        # 8. FINAL VALIDATION: Check for Broken Hyperlinks
+        logger.info("Running Final Validation on Hyperlinks...")
+        validate_hyperlinks(sheets_service, sheet_id, sheet_name)
+
+def validate_hyperlinks(service, spreadsheet_id, sheet_name):
+    """
+    Scans the Filename column (A) to ensure all cells are valid French Hyperlinks.
+    Raises an exception if any invalid cell is found.
+    """
+    rows = get_sheet_values(service, spreadsheet_id, sheet_name, value_render_option='FORMULA')
+    if not rows:
+        return
+
+    errors = []
+    for i, row in enumerate(rows):
+        if i == 0: continue # Skip header
+        
+        filename_cell = row[0] if len(row) > 0 else ""
+        
+        # Check format: =LIEN_HYPERTEXTE("url"; "name")
+        # We allow some flexibility but it MUST be a formula and MUST have LIEN_HYPERTEXTE
+        
+        if not filename_cell.startswith('=LIEN_HYPERTEXTE'):
+            errors.append(f"Row {i+1}: Not a LIEN_HYPERTEXTE formula. Content: '{filename_cell}'")
+            continue
+            
+        if ';' not in filename_cell:
+             errors.append(f"Row {i+1}: Missing semicolon separator (French format). Content: '{filename_cell}'")
+             continue
+             
+    if errors:
+        error_msg = f"VALIDATION FAILED: Found {len(errors)} rows with invalid hyperlinks:\n" + "\n".join(errors[:20])
+        if len(errors) > 20:
+            error_msg += f"\n... and {len(errors)-20} more."
+        logger.error(error_msg)
+        raise ValueError("Hyperlink Validation Failed. See logs for details.")
+    else:
+        logger.info("VALIDATION SUCCESS: All hyperlinks are correctly formatted.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract emails from CVs in a Google Drive folder.")
