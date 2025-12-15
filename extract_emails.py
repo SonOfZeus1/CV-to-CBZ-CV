@@ -195,6 +195,7 @@ def process_single_file(file_data, existing_data_map):
     use_existing_data = False
     existing_data = None
     should_full_process = True # Default to True for new files
+    row_index_to_update = -1 # Default to -1 (Append mode)
     
     # Use File ID as key
     if file_id in existing_data_map:
@@ -759,6 +760,70 @@ def audit_and_repair_hyperlinks(drive_service, sheets_service, spreadsheet_id, s
         # We DO NOT raise ValueError here. The job succeeds.
     else:
         logger.info("AUDIT SUCCESS: All hyperlinks are valid (or were successfully repaired).")
+
+def extract_file_id_from_hyperlink_formula(formula):
+    """
+    Extracts Google Drive File ID from a HYPERLINK formula.
+    Supports:
+    - English: =HYPERLINK("url", "name")
+    - French: =LIEN_HYPERTEXTE("url"; "name")
+    - Separators: comma (,) or semicolon (;)
+    """
+    if not formula:
+        return None
+        
+    # Regex to find the URL part: "https://drive.google.com/..."
+    # We look for /d/FILE_ID
+    match = re.search(r'/d/([a-zA-Z0-9_-]+)', formula)
+    if match:
+        return match.group(1)
+    return None
+
+def build_row_index_from_sheet_rows(rows):
+    """
+    Builds a map of {file_id: row_index} from sheet rows.
+    Returns:
+        index_map: {file_id: row_index}
+        data_map: {file_id: {full_row_data_dict}}
+    """
+    index_map = {}
+    data_map = {}
+    
+    if not rows:
+        return index_map, data_map
+        
+    for i, row in enumerate(rows):
+        if i == 0: continue # Skip header
+        
+        raw_filename = row[0] if len(row) > 0 else ""
+        file_id = extract_file_id_from_hyperlink_formula(raw_filename)
+        
+        if file_id:
+            index_map[file_id] = i
+            
+            # Extract other metadata
+            is_hyperlink = raw_filename.startswith('=')
+            is_correct_format = is_hyperlink and (
+                (raw_filename.startswith('=LIEN_HYPERTEXTE') and ';' in raw_filename) or 
+                (raw_filename.startswith('=HYPERLINK') and ',' in raw_filename)
+            )
+            
+            email = row[1] if len(row) > 1 else ""
+            phone = row[2] if len(row) > 2 else ""
+            status = row[3] if len(row) > 3 else ""
+            language = row[5] if len(row) > 5 else ""
+            
+            data_map[file_id] = {
+                'index': i,
+                'email': str(email).strip(),
+                'phone': str(phone).strip(),
+                'language': str(language).strip(),
+                'is_hyperlink': is_hyperlink,
+                'needs_fix': is_hyperlink and not is_correct_format,
+                'status': str(status).strip()
+            }
+            
+    return index_map, data_map
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract emails from CVs in a Google Drive folder.")
