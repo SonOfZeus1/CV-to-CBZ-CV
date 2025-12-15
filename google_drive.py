@@ -142,7 +142,8 @@ def move_file(service, file_id, current_folder_id, new_folder_id):
     """
     try:
         # Retrieve the existing parents to remove
-        file = service.files().get(fileId=file_id, fields='parents').execute()
+        # Retrieve the existing parents to remove
+        file = service.files().get(fileId=file_id, fields='parents', supportsAllDrives=True).execute()
         current_parents_list = file.get('parents', [])
         
         # Debug logging
