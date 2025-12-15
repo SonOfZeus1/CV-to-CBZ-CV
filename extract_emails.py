@@ -184,8 +184,8 @@ def process_single_file(file_data, existing_data_map):
     # Construct Hyperlink Formula for Filename
     # =HYPERLINK("link", "name")
     if file_link:
-        # Use LIEN_HYPERTEXTE and semicolon for French locale
-        filename_cell = f'=LIEN_HYPERTEXTE("{file_link}"; "{clean_filename}")'
+        # Use helper function
+        filename_cell = create_hyperlink_formula(file_link, clean_filename)
     else:
         # This should rarely happen now with the fallback
         logger.error(f"Could not generate link for {clean_filename}. Excel link will be broken.")
@@ -633,44 +633,118 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         logger.info("Setting data validation for Status column...")
         set_column_validation(sheets_service, sheet_id, sheet_name, 3, ["Oui", "Non", "Delete"])
         
-        # 8. FINAL VALIDATION: Check for Broken Hyperlinks
-        logger.info("Running Final Validation on Hyperlinks...")
-        validate_hyperlinks(sheets_service, sheet_id, sheet_name)
+        # 8. FINAL AUDIT & REPAIR
+        audit_and_repair_hyperlinks(drive_service, sheets_service, sheet_id, sheet_name)
+        
+def create_hyperlink_formula(url, name):
+    """
+    Generates a valid French Excel Hyperlink formula.
+    Format: =LIEN_HYPERTEXTE("url"; "name")
+    """
+    # Escape double quotes in name if necessary (though rare in filenames)
+    safe_name = name.replace('"', '""')
+    return f'=LIEN_HYPERTEXTE("{url}"; "{safe_name}")'
 
-def validate_hyperlinks(service, spreadsheet_id, sheet_name):
+def audit_and_repair_hyperlinks(drive_service, sheets_service, spreadsheet_id, sheet_name):
     """
-    Scans the Filename column (A) to ensure all cells are valid French Hyperlinks.
-    Raises an exception if any invalid cell is found.
+    Scans the Filename column. If a cell is invalid:
+    1. Attempts to find the file in Drive by name.
+    2. If found, REPAIRS the cell immediately.
+    3. If not found, reports a fatal error.
     """
-    rows = get_sheet_values(service, spreadsheet_id, sheet_name, value_render_option='FORMULA')
+    logger.info("Running Intelligent Audit & Repair on Hyperlinks...")
+    
+    rows = get_sheet_values(sheets_service, spreadsheet_id, sheet_name, value_render_option='FORMULA')
     if not rows:
         return
 
-    errors = []
+    updates = []
+    fatal_errors = []
+    
     for i, row in enumerate(rows):
         if i == 0: continue # Skip header
         
         filename_cell = row[0] if len(row) > 0 else ""
         
-        # Check format: =LIEN_HYPERTEXTE("url"; "name")
-        # We allow some flexibility but it MUST be a formula and MUST have LIEN_HYPERTEXTE
+        # Check validity
+        is_valid = filename_cell.startswith('=LIEN_HYPERTEXTE') and ';' in filename_cell
         
-        if not filename_cell.startswith('=LIEN_HYPERTEXTE'):
-            errors.append(f"Row {i+1}: Not a LIEN_HYPERTEXTE formula. Content: '{filename_cell}'")
-            continue
+        if not is_valid:
+            # It's broken (plain text or bad formula). Let's try to repair.
+            # Assume the cell content is the filename
+            clean_name = filename_cell
             
-        if ';' not in filename_cell:
-             errors.append(f"Row {i+1}: Missing semicolon separator (French format). Content: '{filename_cell}'")
-             continue
-             
-    if errors:
-        error_msg = f"VALIDATION FAILED: Found {len(errors)} rows with invalid hyperlinks:\n" + "\n".join(errors[:20])
-        if len(errors) > 20:
-            error_msg += f"\n... and {len(errors)-20} more."
-        logger.error(error_msg)
-        raise ValueError("Hyperlink Validation Failed. See logs for details.")
+            # If it looks like a formula but is broken, try to extract name
+            if filename_cell.startswith('='):
+                # Try to extract the name part if possible, otherwise use as is
+                match = re.search(r'"([^"]+)"\)$', filename_cell)
+                if match:
+                    clean_name = match.group(1)
+            
+            logger.warning(f"Row {i+1}: Invalid Hyperlink '{filename_cell}'. Attempting repair for '{clean_name}'...")
+            
+            # Search Drive
+            try:
+                safe_name = clean_name.replace("'", "\\'")
+                query = f"name = '{safe_name}' and trashed = false"
+                results = drive_service.files().list(
+                    q=query,
+                    fields="files(id, name, webViewLink)",
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True,
+                    pageSize=1
+                ).execute()
+                
+                files = results.get('files', [])
+                if files:
+                    f = files[0]
+                    file_link = f.get('webViewLink')
+                    if not file_link:
+                         file_link = f"https://drive.google.com/file/d/{f['id']}/view"
+                    
+                    # Generate correct formula
+                    new_formula = create_hyperlink_formula(file_link, clean_name)
+                    
+                    # Queue update
+                    # Column A is index 0. Range is A{i+1}
+                    range_name = f"{sheet_name}!A{i+1}"
+                    updates.append({
+                        'range': range_name,
+                        'values': [[new_formula]]
+                    })
+                    logger.info(f" -> REPAIRED: Found file {f['id']}. Will update Excel.")
+                else:
+                    msg = f"Row {i+1}: Could not find file '{clean_name}' in Drive. Cannot repair."
+                    logger.error(f" -> FAILED: {msg}")
+                    fatal_errors.append(msg)
+                    
+            except Exception as e:
+                msg = f"Row {i+1}: Error searching for '{clean_name}': {e}"
+                logger.error(f" -> ERROR: {msg}")
+                fatal_errors.append(msg)
+
+    # Apply Repairs
+    if updates:
+        logger.info(f"Applying {len(updates)} repairs to Excel...")
+        data = [{
+            'range': u['range'],
+            'values': u['values']
+        } for u in updates]
+        
+        body = {
+            'valueInputOption': 'USER_ENTERED',
+            'data': data
+        }
+        sheets_service.spreadsheets().values().batchUpdate(
+            spreadsheetId=spreadsheet_id, body=body).execute()
+        logger.info("Repairs applied successfully.")
+
+    # Raise Error if there were unfixable rows
+    if fatal_errors:
+        error_msg = f"AUDIT FAILED: {len(fatal_errors)} rows could not be repaired:\n" + "\n".join(fatal_errors[:20])
+        raise ValueError(error_msg)
     else:
-        logger.info("VALIDATION SUCCESS: All hyperlinks are correctly formatted.")
+        logger.info("AUDIT SUCCESS: All hyperlinks are valid (or were successfully repaired).")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract emails from CVs in a Google Drive folder.")
