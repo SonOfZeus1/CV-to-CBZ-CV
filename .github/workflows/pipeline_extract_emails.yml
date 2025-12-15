@@ -3,7 +3,6 @@ name: Pipeline - Extract Emails
 on:
   workflow_dispatch:
   schedule:
-  schedule:
     - cron: '*/5 * * * *'
 
 concurrency:
