@@ -135,6 +135,7 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
             header = expected_header
         else:
             # If header exists but is missing columns, we might want to update it?
+            pass
     # 1. Identify rows to delete
     rows_to_delete = []
     
