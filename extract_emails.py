@@ -381,8 +381,8 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         logger.info(f"Processed files will be moved to folder ID: {processed_folder_id}")
 
         # 4. List Files (Metadata only) - FROM SOURCE ONLY
-        logger.info(f"Listing top 10 most recent files from Source Folder ID: {folder_id}")
-        source_files = list_files_in_folder(drive_service, folder_id, order_by='modifiedTime desc', page_size=10)
+        logger.info(f"Listing top 25 most recent files from Source Folder ID: {folder_id}")
+        source_files = list_files_in_folder(drive_service, folder_id, order_by='modifiedTime desc', page_size=25)
         
         # Identify files needing update from Excel
         files_needing_update = []
@@ -473,7 +473,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         # So we should perhaps take them even before source_files?
         # Let's keep the mix but ensure high priority ones get in.
         
-        update_ids = update_ids[:10]
+        update_ids = update_ids[:25]
         
         for fid in update_ids:
             if fid not in source_ids:
@@ -555,14 +555,14 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         # Priority 2 (Empty Status) > Priority 1 (Retry) > Priority 0 (New)
         files_to_process.sort(key=lambda x: (x.get('priority', 0), x.get('modifiedTime', '')), reverse=True)
         
-        # Take top 50
-        files_to_process = files_to_process[:50]
+        # Take top 25
+        files_to_process = files_to_process[:25]
         logger.info(f"Selected top {len(files_to_process)} files for processing (Prioritizing Empty Status).")
         
         # 5. Process Files in Parallel
         append_buffer = []
         update_buffer = []
-        BATCH_SIZE = 50
+        BATCH_SIZE = 25
         MAX_WORKERS = 5
         
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:

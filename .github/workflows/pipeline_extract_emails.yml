@@ -2,6 +2,8 @@ name: Pipeline - Extract Emails
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
 
 jobs:
   extract-emails:
@@ -11,6 +13,17 @@ jobs:
       id-token: 'write'
 
     steps:
+    - name: Check previous run status
+      if: github.event_name == 'schedule'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        LAST_STATUS=$(gh run list --workflow pipeline_extract_emails.yml --status completed --limit 1 --json conclusion --jq '.[0].conclusion')
+        if [ "$LAST_STATUS" == "failure" ]; then
+          echo "Previous run failed. Stopping automatic execution to prevent loop."
+          exit 1
+        fi
+
     - name: Checkout repository
       uses: actions/checkout@v3
 
