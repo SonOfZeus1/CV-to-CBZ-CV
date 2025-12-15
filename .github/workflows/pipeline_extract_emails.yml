@@ -229,8 +229,11 @@ jobs:
     - name: Install dependencies
       if: steps.check_schedule.outputs.skip != 'true'
       run: |
+        sudo apt-get update
+        sudo apt-get install -y tesseract-ocr
         python -m pip install --upgrade pip
-        pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib PyMuPDF python-docx
+        pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib PyMuPDF python-docx pytesseract nltk Pillow
+        python -m nltk.downloader stopwords punkt averaged_perceptron_tagger
 
     - name: Run script
       if: steps.check_schedule.outputs.skip != 'true'
