@@ -5,12 +5,17 @@ on:
   schedule:
     - cron: '*/15 * * * *'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   extract-emails:
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
       id-token: 'write'
+      actions: 'read'
 
     steps:
     - name: Check previous run status
