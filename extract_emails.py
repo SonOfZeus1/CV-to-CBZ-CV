@@ -7,7 +7,7 @@ from google_drive import (
     download_file, append_to_sheet, get_sheet_values, 
     clear_and_write_sheet, format_header_row, update_sheet_row,
     append_batch_to_sheet, batch_update_rows, set_column_validation,
-    get_or_create_folder, move_file
+    get_or_create_folder, move_file, delete_rows
 )
 import re
 import difflib
