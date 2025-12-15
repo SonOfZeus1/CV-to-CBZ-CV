@@ -138,49 +138,58 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
             # For now, let's assume it's fine or user will fix.
             pass
 
-    email_groups = {} # email -> list of rows
-    rows_without_email = []
-
-    for row in data:
-        # Ensure row has at least 6 columns (pad if needed)
-        while len(row) < 6:
-            row.append("")
+    # 1. Identify rows to delete
+    rows_to_delete = []
+    
+    # Keep track of emails we've seen to identify duplicates
+    # We want to keep the one with the shortest filename.
+    # So we need to group by email first.
+    
+    email_groups = {} # email -> list of (row_index, row_data)
+    
+    # Iterate backwards to make deletion easier? No, we collect indices and sort them later.
+    # But wait, we need to know WHICH one to keep.
+    
+    for i, row in enumerate(data):
+        row_index = i + 1 # 0-based index in sheet (skipping header)
+        
+        # Ensure row has enough columns
+        if len(row) < 4:
+            continue
             
-        # Check for "Delete" status (Column 4, index 3)
+        # Check for "Delete" status
         status = str(row[3]).strip()
         if status.lower() == "delete":
+            rows_to_delete.append(row_index)
             continue
-
-        # Assuming Email is in column 2 (index 1)
-        email = str(row[1]).lower().strip()
-        
-        if email and email != "not found":
-            if email not in email_groups:
-                email_groups[email] = []
-            email_groups[email].append(row)
-        else:
-            # Only keep rows without email if they have a filename
-            if row[0].strip():
-                rows_without_email.append(row)
             
-    unique_data = []
+        # Check for Email
+        if len(row) > 1:
+            email = str(row[1]).lower().strip()
+            if email and email != "not found":
+                if email not in email_groups:
+                    email_groups[email] = []
+                email_groups[email].append((row_index, row))
     
-    # Process groups
+    # Process duplicates
     for email, group in email_groups.items():
-        if len(group) == 1:
-            unique_data.append(group[0])
-        else:
+        if len(group) > 1:
             # Sort by length of filename (row[0]), ascending.
-            group.sort(key=lambda r: len(r[0]))
-            unique_data.append(group[0])
+            # Keep the first one (shortest), delete the rest.
+            group.sort(key=lambda x: len(x[1][0]))
             
-    # Combine: Header + Rows without Email + Unique Rows
-    final_rows = [expected_header] + rows_without_email + unique_data
-    
-    # Always rewrite to ensure header is correct and formatted
-    clear_and_write_sheet(sheets_service, sheet_id, final_rows, sheet_name)
-    format_header_row(sheets_service, sheet_id, sheet_name)
-    logger.info(f"Deduplication complete. Reduced from {len(data)} to {len(final_rows)-1} rows.")
+            # Add indices of duplicates to delete list
+            for i in range(1, len(group)):
+                rows_to_delete.append(group[i][0])
+                
+    if rows_to_delete:
+        logger.info(f"Deleting {len(rows_to_delete)} rows (duplicates or marked 'Delete')...")
+        delete_rows(sheets_service, sheet_id, rows_to_delete, sheet_name)
+    else:
+        logger.info("No rows to delete.")
+        
+    # format_header_row(sheets_service, sheet_id, sheet_name) # Optional, but good practice
+    logger.info("Deduplication complete.")
 
 def process_single_file(file_data, existing_data_map):
     """
@@ -205,8 +214,9 @@ def process_single_file(file_data, existing_data_map):
     use_existing_data = False
     existing_data = None
     
-    if filename in existing_data_map:
-        data = existing_data_map[filename]
+    # Use File ID as key
+    if file_id in existing_data_map:
+        data = existing_data_map[file_id]
         row_index_to_update = data['index']
         existing_data = data
         
@@ -339,14 +349,22 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             phone = row[2] if len(row) > 2 else ""
             language = row[5] if len(row) > 5 else ""
             
-            existing_data_map[clean_filename] = {
-                'index': i,
-                'email': str(email).strip(),
-                'phone': str(phone).strip(),
-                'language': str(language).strip(),
-                'is_hyperlink': is_hyperlink,
-                'needs_fix': is_hyperlink and not is_correct_format
-            }
+            # Extract File ID from HYPERLINK formula
+            # Format: =HYPERLINK("https://drive.google.com/file/d/FILE_ID/view...", "name")
+            # Regex for ID: /d/([a-zA-Z0-9_-]+)
+            file_id_match = re.search(r'/d/([a-zA-Z0-9_-]+)', raw_filename)
+            file_id_from_excel = file_id_match.group(1) if file_id_match else ""
+            
+            if file_id_from_excel:
+                existing_data_map[file_id_from_excel] = {
+                    'index': i,
+                    'email': str(email).strip(),
+                    'phone': str(phone).strip(),
+                    'language': str(language).strip(),
+                    'is_hyperlink': is_hyperlink,
+                    'needs_fix': is_hyperlink and not is_correct_format,
+                    'status': str(row[3]).strip() if len(row) > 3 else ""
+                }
 
     # 3. Create Temp Directory
     if not os.path.exists(TEMP_DIR):
@@ -357,97 +375,131 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         processed_folder_id = get_or_create_folder(drive_service, "_processed", parent_id=folder_id)
         logger.info(f"Processed files will be moved to folder ID: {processed_folder_id}")
 
-        # 4. List Files (Metadata only) - FROM BOTH SOURCE AND PROCESSED
+        # 4. List Files (Metadata only) - FROM SOURCE ONLY
         # Use server-side sorting and limiting for Source to avoid listing 10,000 files
-        logger.info(f"Listing top 25 most recent files from Source Folder ID: {folder_id}")
-        source_files = list_files_in_folder(drive_service, folder_id, order_by='modifiedTime desc', page_size=25)
+        logger.info(f"Listing top 50 most recent files from Source Folder ID: {folder_id}")
+        source_files = list_files_in_folder(drive_service, folder_id, order_by='modifiedTime desc', page_size=50)
         
-        # For processed files, we might not need to list them all if we trust the "100 most recent" logic.
-        # But to be safe and handle the "Pre-flight Check" correctly (moving files back if needed?), 
-        # let's just list the top 25 processed files too, in case we want to re-process recent ones.
-        logger.info(f"Listing top 25 most recent files from Processed Folder ID: {processed_folder_id}")
-        processed_files = list_files_in_folder(drive_service, processed_folder_id, order_by='modifiedTime desc', page_size=25)
-        
-        # Mark files from processed folder so we don't try to move them again
-        for f in processed_files:
-            f['is_processed'] = True
+        # Identify files needing update from Excel
+        files_needing_update = []
+        for fid, data in existing_data_map.items():
+            # Check if needs update: Email/Phone missing/NOT FOUND, or Status="Non" (and not "Delete")
+            email = data['email'].upper()
+            phone = data['phone']
+            status = data['status'].upper()
             
+            if (email == "" or email == "NOT FOUND" or status == "NON") and status != "DELETE":
+                # We need to fetch metadata for this file to process it
+                # We can't just add ID, we need name and link for process_single_file
+                # But fetching one by one is slow. 
+                # Optimization: We will fetch them if they are NOT in source_files.
+                files_needing_update.append(fid)
+                
+        # Mark source files
         for f in source_files:
             f['is_processed'] = False
             
-        all_files = source_files + processed_files
+        # Combine: Source Files + Files Needing Update
+        # We need to fetch metadata for files_needing_update if they are not in source_files
+        source_ids = set(f['id'] for f in source_files)
+        
+        # Limit updates to top 25 to avoid explosion
+        files_needing_update = files_needing_update[:25]
+        
+        for fid in files_needing_update:
+            if fid not in source_ids:
+                try:
+                    f = drive_service.files().get(fileId=fid, fields="id, name, webViewLink, modifiedTime", supportsAllDrives=True).execute()
+                    f['is_processed'] = True # Mark as "processed" (conceptually, i.e. not new)
+                    f['needs_move'] = False # Already moved presumably
+                    # Add to source_files? No, add to a separate list or extend
+                    # Let's extend source_files but mark them.
+                    source_files.append({
+                        'id': f['id'],
+                        'name': f['name'],
+                        'link': f.get('webViewLink', ''),
+                        'modifiedTime': f.get('modifiedTime', ''),
+                        'is_processed': True, # It IS in Excel
+                        'needs_move': False # Don't move it again
+                    })
+                except Exception as e:
+                    logger.warning(f"Could not fetch metadata for update candidate {fid}: {e}")
+
+        all_files = source_files
         
         if not all_files:
-            logger.warning("No files found in Drive (Source or Processed).")
+            logger.warning("No files found in Drive (Source) and no updates needed.")
             return
 
-        logger.info(f"Found {len(all_files)} total files ({len(source_files)} new, {len(processed_files)} processed).")
+        logger.info(f"Found {len(all_files)} candidates ({len(source_ids)} new/recent, {len(files_needing_update)} updates).")
 
         # --- PRE-FLIGHT CHECK: Move files already in Excel to _processed ---
         logger.info("Running Pre-flight Check: Moving files already in Excel to _processed...")
         files_to_process = []
         moved_file_ids = set()
         
-        # Add already processed files to moved_file_ids to prevent re-moving them
-        for f in processed_files:
-            moved_file_ids.add(f['id'])
+        # Add already processed files (from Excel map) to moved_file_ids
+        # Actually, we should check if they are in _processed folder?
+        # No, we trust they are moved if they are in Excel.
+        # But wait, if we just uploaded a file that IS in Excel (re-upload), we want to move it.
         
-        for file_data in source_files:
+        for file_data in all_files:
             filename = file_data['name']
             file_id = file_data['id']
             
-            if filename in existing_data_map:
-                # File is already in Excel -> Move it immediately
-                # logger.info(f"Pre-flight: {filename} is already in Excel. Moving to _processed.")
-                try:
-                    move_file(drive_service, file_id, folder_id, processed_folder_id)
-                    file_data['is_processed'] = True
-                    moved_file_ids.add(file_id)
-                except Exception as e:
-                    logger.error(f"Pre-flight move failed for {filename}: {e}")
+            # Check by ID first
+            if file_id in existing_data_map:
+                # File is already in Excel -> Move it immediately if it's in Source
+                # How do we know if it's in Source? 
+                # If it came from list_files_in_folder(source), it needs move.
+                # If it came from our "files_needing_update" fetch, it might be in _processed.
+                
+                # Simple check: Try to move it. If it's already there, move_file handles it.
+                # But we only want to move if it's NOT marked as "needs_move=False" (our update candidates)
+                
+                if file_data.get('needs_move', True): # Default True for source files
+                     try:
+                        move_file(drive_service, file_id, folder_id, processed_folder_id)
+                        file_data['is_processed'] = True
+                        moved_file_ids.add(file_id)
+                     except Exception as e:
+                        logger.error(f"Pre-flight move failed for {filename}: {e}")
             else:
                 # File is NOT in Excel -> Needs processing
                 files_to_process.append(file_data)
                 
-        # Add back processed files if they need updates (logic handled in process_single_file)
-        # Actually, process_single_file checks existing_data_map. 
-        # If a file is in _processed, we should still check if it needs update.
-        
-        # Combine: New files (not in Excel) + Processed files (might need update)
-        # But wait, we also want to process files that ARE in Excel but need updates (e.g. broken links)
-        # If they were in Source, we just moved them. Now they are effectively "in processed".
-        # So we need to re-list or just track them?
-        
-        # Simpler approach:
-        # 1. We moved "Source files that are in Excel" to _processed.
-        # 2. Now "files_to_process" contains ONLY Source files that are NOT in Excel (New).
-        # 3. We also need to check "Processed files" (which now includes the ones we just moved, conceptually).
-        
-        # Let's re-construct the list of candidates.
+        # Add back files that are in Excel but need update (they were skipped above or added to moved_file_ids)
+        # We iterate all_files again? No.
         # We want to process:
-        # A. New files (Source files NOT in Excel)
-        # B. Existing files (Source or Processed) that need updates (broken link, missing email)
+        # 1. files_to_process (New)
+        # 2. Files in Excel that need update (we added them to all_files)
         
-        # The "files_to_process" list currently has (A).
-        # We need to add (B).
+        # Let's rebuild files_to_process correctly.
+        files_to_process = []
+        for file_data in all_files:
+            file_id = file_data['id']
+            if file_id not in existing_data_map:
+                 files_to_process.append(file_data)
+            else:
+                # In Excel. Check if needs update.
+                # We already filtered files_needing_update.
+                # So if it's in all_files, it's either New or an Update Candidate.
+                # But wait, source_files might contain files that are in Excel and DON'T need update.
+                # We should skip those.
+                
+                data = existing_data_map[file_id]
+                email = data['email'].upper()
+                status = data['status'].upper()
+                
+                if (email == "" or email == "NOT FOUND" or status == "NON") and status != "DELETE":
+                    files_to_process.append(file_data)
         
-        # But wait, the user wants "100 most recent files".
-        # So we should look at ALL files (Source + Processed), sort them, take top 100.
-        # AND ensure that if any of those top 100 are in Source but "Done", they get moved.
+        # Sort by modifiedTime descending
+        files_to_process.sort(key=lambda x: x.get('modifiedTime', ''), reverse=True)
         
-        # Let's refine the strategy:
-        # 1. Sort ALL files (Source + Processed) by modifiedTime.
-        # 2. Take top 100.
-        # 3. For each of these 100:
-        #    - If it's in Source AND (In Excel OR Successfully Processed), MOVE IT.
-        #    - Process it.
-        
-        # Sort all_files by modifiedTime descending (again, to be sure)
-        all_files.sort(key=lambda x: x.get('modifiedTime', ''), reverse=True)
-        
-        # Take top 25 (if we have more than 25 total from both sources)
-        files_to_process = all_files[:25]
-        logger.info(f"Selected top {len(files_to_process)} most recent files for processing.")
+        # Take top 25
+        files_to_process = files_to_process[:25]
+        logger.info(f"Selected top {len(files_to_process)} files for processing.")
         
         # 5. Process Files in Parallel
         append_buffer = []

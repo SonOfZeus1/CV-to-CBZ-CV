@@ -638,3 +638,68 @@ def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", retrie
             attempt += 1
     
     raise Exception("Max retries exceeded for batch_update_rows")
+
+def delete_rows(service, sheet_id, row_indices, sheet_name="Feuille 1", retries=10):
+    """
+    Deletes specific rows from the sheet.
+    row_indices: List of 0-based row indices to delete.
+    IMPORTANT: Indices must be processed in descending order to avoid shifting issues,
+    but the API handles batch requests atomically. However, defining ranges is easier if we group them.
+    Actually, deleteDimension takes a range.
+    """
+    if not row_indices:
+        return
+
+    # Get sheetId
+    sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+    sheets = sheet_metadata.get('sheets', '')
+    sheet_int_id = 0
+    for s in sheets:
+        if s.get("properties", {}).get("title") == sheet_name:
+            sheet_int_id = s.get("properties", {}).get("sheetId")
+            break
+            
+    # Sort indices descending to be safe, though batchUpdate handles it if we specify ranges correctly.
+    # But wait, if we delete row 10 and row 11.
+    # If we send delete row 10, then row 11 becomes row 10.
+    # So we MUST delete from bottom up if we send separate requests.
+    # OR we can group contiguous ranges.
+    
+    row_indices = sorted(list(set(row_indices)), reverse=True)
+    
+    requests = []
+    for row_idx in row_indices:
+        requests.append({
+            "deleteDimension": {
+                "range": {
+                    "sheetId": sheet_int_id,
+                    "dimension": "ROWS",
+                    "startIndex": row_idx,
+                    "endIndex": row_idx + 1
+                }
+            }
+        })
+        
+    body = {'requests': requests}
+    
+    attempt = 0
+    while attempt < retries:
+        try:
+            service.spreadsheets().batchUpdate(
+                spreadsheetId=sheet_id,
+                body=body
+            ).execute()
+            print(f"Deleted {len(row_indices)} rows.")
+            return
+        except HttpError as error:
+            if error.resp.status == 429:
+                sleep_time = (2 ** attempt) + 1
+                print(f"Quota exceeded (429) in delete_rows. Retrying in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+                attempt += 1
+            else:
+                print(f"Error deleting rows: {error}")
+                raise
+        except Exception as e:
+            print(f"Error deleting rows: {e}")
+            raise
