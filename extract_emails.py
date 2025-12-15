@@ -248,12 +248,12 @@ def process_single_file(file_data, existing_data_map):
                 os.remove(file_path)
             
             if not text:
-                logger.warning(f"Could not extract text from {filename}")
+                logger.warning(f"Could not extract text from {clean_filename}")
                 row_data = [filename_cell, "NOT FOUND", "", "", "", "Unknown"]
                 if row_index_to_update != -1:
-                    return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': filename}
+                    return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename}
                 else:
-                    return {'action': 'APPEND', 'data': row_data, 'filename': filename}
+                    return {'action': 'APPEND', 'data': row_data, 'filename': clean_filename}
 
             # Detect Language
             language = detect_language(text)
@@ -262,7 +262,7 @@ def process_single_file(file_data, existing_data_map):
             text_head = text[:2000]
             email_pattern = r"[\w\.-]+@[\w\.-]+\.\w+"
             emails = list(set(re.findall(email_pattern, text_head)))
-            email = select_best_email(emails, filename)
+            email = select_best_email(emails, clean_filename)
             
             # Extract other info
             contact_info = heuristic_parse_contact(text_head)
@@ -279,15 +279,15 @@ def process_single_file(file_data, existing_data_map):
             row_data = [filename_cell, email_val, phone, status_val, "", language]
             
             if row_index_to_update != -1:
-                return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': filename}
+                return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename}
             else:
-                return {'action': 'APPEND', 'data': row_data, 'filename': filename}
+                return {'action': 'APPEND', 'data': row_data, 'filename': clean_filename}
                 
         except Exception as e:
-            logger.error(f"Error processing {filename}: {e}")
-            return {'action': 'ERROR', 'filename': filename, 'error': str(e)}
+            logger.error(f"Error processing {clean_filename}: {e}")
+            return {'action': 'ERROR', 'filename': clean_filename, 'error': str(e)}
 
-    return {'action': 'SKIP', 'filename': filename}
+    return {'action': 'SKIP', 'filename': clean_filename}
 
 def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     """
