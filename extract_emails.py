@@ -396,7 +396,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         # So we should perhaps take them even before source_files?
         # Let's keep the mix but ensure high priority ones get in.
         
-        update_ids = update_ids[:25]
+        update_ids = update_ids[:50]
         
         for fid in update_ids:
             if fid not in source_ids:
@@ -478,8 +478,8 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         # Priority 2 (Empty Status) > Priority 1 (Retry) > Priority 0 (New)
         files_to_process.sort(key=lambda x: (x.get('priority', 0), x.get('modifiedTime', '')), reverse=True)
         
-        # Take top 25
-        files_to_process = files_to_process[:25]
+        # Take top 50
+        files_to_process = files_to_process[:50]
         logger.info(f"Selected top {len(files_to_process)} files for processing (Prioritizing Empty Status).")
         
         # 5. Process Files in Parallel
