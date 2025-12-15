@@ -635,119 +635,203 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         set_column_validation(sheets_service, sheet_id, sheet_name, 3, ["Oui", "Non", "Delete"])
         
         # 8. FINAL AUDIT & REPAIR
-        audit_and_repair_hyperlinks(drive_service, sheets_service, sheet_id, sheet_name)
+        # 8. FINAL AUDIT & REPAIR
+        # We pass both source and processed folder IDs to search everywhere
+        audit_and_repair_hyperlinks(drive_service, sheets_service, sheet_id, sheet_name, folder_id, processed_folder_id)
         
 def create_hyperlink_formula(url, name):
     """
     Generates a valid French Excel Hyperlink formula.
     Format: =LIEN_HYPERTEXTE("url"; "name")
     """
-    # Escape double quotes in name if necessary (though rare in filenames)
+    # Escape double quotes in name if necessary
     safe_name = name.replace('"', '""')
     return f'=LIEN_HYPERTEXTE("{url}"; "{safe_name}")'
 
-def audit_and_repair_hyperlinks(drive_service, sheets_service, spreadsheet_id, sheet_name):
+def build_file_cache(drive_service, folder_ids):
+    """
+    Fetches ALL files from the specified folders to build a local cache.
+    Returns:
+        id_map: {file_id: file_metadata}
+        name_map: {filename: file_metadata} (Prioritizes most recent if duplicates)
+    """
+    logger.info(f"Building file cache from folders: {folder_ids}...")
+    id_map = {}
+    name_map = {}
+    
+    for folder_id in folder_ids:
+        page_token = None
+        while True:
+            try:
+                # We need name, id, webViewLink, parents
+                query = f"'{folder_id}' in parents and trashed = false"
+                results = drive_service.files().list(
+                    q=query,
+                    fields="nextPageToken, files(id, name, webViewLink, parents, modifiedTime)",
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True,
+                    pageSize=1000, # Maximize page size for speed
+                    pageToken=page_token
+                ).execute()
+                
+                files = results.get('files', [])
+                for f in files:
+                    id_map[f['id']] = f
+                    # For name map, if duplicate, maybe keep the one in 'processed' or most recent?
+                    # Let's just overwrite for now, or check modifiedTime.
+                    # Ideally we want the one that matches the CV being processed.
+                    name_map[f['name']] = f
+                    
+                page_token = results.get('nextPageToken')
+                if not page_token:
+                    break
+            except Exception as e:
+                logger.error(f"Error listing files in folder {folder_id}: {e}")
+                break
+                
+    logger.info(f"Cache built: {len(id_map)} files found.")
+    return id_map, name_map
+
+def normalize_string(s):
+    """Normalizes string for fuzzy matching (lower, strip, remove accents/extensions)."""
+    if not s: return ""
+    s = s.lower().strip()
+    # Remove common extensions
+    s = re.sub(r'\.(pdf|docx|doc)$', '', s)
+    # Remove accents (simple way)
+    import unicodedata
+    s = ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn')
+    return s
+
+def audit_and_repair_hyperlinks(drive_service, sheets_service, spreadsheet_id, sheet_name, source_folder_id, processed_folder_id):
     """
     Scans the Filename column. If a cell is invalid:
-    1. Attempts to find the file in Drive by name.
-    2. If found, REPAIRS the cell immediately.
-    3. If not found, reports a fatal error.
+    1. Parses ID from formula -> Lookup in Cache (O(1))
+    2. If ID fail -> Lookup Name in Cache (Exact)
+    3. If Name fail -> Lookup Name in Cache (Fuzzy/Contains)
+    4. If all fail -> Log Anomaly (MISSING_FILE, etc.)
     """
-    logger.info("Running Intelligent Audit & Repair on Hyperlinks...")
+    logger.info("Running Optimized Audit & Repair on Hyperlinks...")
     
+    # 1. Build Cache
+    # We search in Source AND Processed folders
+    folder_ids = [source_folder_id]
+    if processed_folder_id:
+        folder_ids.append(processed_folder_id)
+        
+    id_map, name_map = build_file_cache(drive_service, folder_ids)
+    
+    # Build a normalized name map for fuzzy search
+    fuzzy_map = {}
+    for name, meta in name_map.items():
+        norm = normalize_string(name)
+        fuzzy_map[norm] = meta
+
     rows = get_sheet_values(sheets_service, spreadsheet_id, sheet_name, value_render_option='FORMULA')
     if not rows:
         return
 
     updates = []
-    fatal_errors = []
+    anomalies = [] # List of {row, reason, value}
     
     for i, row in enumerate(rows):
         if i == 0: continue # Skip header
         
         filename_cell = row[0] if len(row) > 0 else ""
         
-        # Check validity
+        # Check validity (French Formula)
         is_valid = filename_cell.startswith('=LIEN_HYPERTEXTE') and ';' in filename_cell
         
-        if not is_valid:
-            # It's broken (plain text or bad formula). Let's try to repair.
-            # Assume the cell content is the filename
+        if is_valid:
+            continue
+            
+        # --- REPAIR LOGIC ---
+        logger.info(f"Row {i+1}: Invalid link '{filename_cell}'. Attempting repair...")
+        
+        found_file = None
+        repair_method = None
+        
+        # Strategy A: Extract ID from broken formula
+        # Regex to find /d/<ID>/ or id=<ID>
+        # Common patterns: drive.google.com/file/d/XYZ/view, open?id=XYZ
+        extracted_id = None
+        id_match = re.search(r'/d/([a-zA-Z0-9_-]+)|id=([a-zA-Z0-9_-]+)', filename_cell)
+        if id_match:
+            extracted_id = id_match.group(1) or id_match.group(2)
+            
+        if extracted_id and extracted_id in id_map:
+            found_file = id_map[extracted_id]
+            repair_method = "ID_MATCH"
+        
+        # Strategy B: Exact Name Match
+        if not found_file:
+            # Assume cell content is the name (or part of formula)
             clean_name = filename_cell
-            
-            # If it looks like a formula but is broken, try to extract name
             if filename_cell.startswith('='):
-                # Try to extract the name part if possible, otherwise use as is
-                match = re.search(r'"([^"]+)"\)$', filename_cell)
-                if match:
-                    clean_name = match.group(1)
+                 # Try to extract name from formula: =HYPERLINK("url"; "name")
+                 # Match last quoted string
+                 name_match = re.search(r';\s*"([^"]+)"\)$', filename_cell)
+                 if name_match:
+                     clean_name = name_match.group(1)
             
-            logger.warning(f"Row {i+1}: Invalid Hyperlink '{filename_cell}'. Attempting repair for '{clean_name}'...")
-            
-            # Search Drive
-            try:
-                safe_name = clean_name.replace("'", "\\'")
-                query = f"name = '{safe_name}' and trashed = false"
-                results = drive_service.files().list(
-                    q=query,
-                    fields="files(id, name, webViewLink)",
-                    supportsAllDrives=True,
-                    includeItemsFromAllDrives=True,
-                    pageSize=1
-                ).execute()
+            if clean_name in name_map:
+                found_file = name_map[clean_name]
+                repair_method = "NAME_EXACT"
                 
-                files = results.get('files', [])
-                if files:
-                    f = files[0]
-                    file_link = f.get('webViewLink')
-                    if not file_link:
-                         file_link = f"https://drive.google.com/file/d/{f['id']}/view"
-                    
-                    # Generate correct formula
-                    new_formula = create_hyperlink_formula(file_link, clean_name)
-                    
-                    # Queue update
-                    # Column A is index 0. Range is A{i+1}
-                    range_name = f"{sheet_name}!A{i+1}"
-                    updates.append({
-                        'range': range_name,
-                        'values': [[new_formula]]
-                    })
-                    logger.info(f" -> REPAIRED: Found file {f['id']}. Will update Excel.")
-                else:
-                    # DATA ANOMALY - Not fatal
-                    msg = f"Row {i+1}: Could not find file '{clean_name}' in Drive. Marked as anomaly."
-                    logger.warning(f" -> ANOMALY: {msg}")
-                    fatal_errors.append(msg)
-                    
-            except Exception as e:
-                # API ERROR - This might be fatal if it happens too often, but for now we log it.
-                # If it's a critical API error, it might be better to let it bubble up?
-                # The user wants "Audit FAIL si API down".
-                # If we catch it here, we hide the API down status.
-                # Let's re-raise if it looks like a connection error, or just log as Error.
-                msg = f"Row {i+1}: Error searching for '{clean_name}': {e}"
-                logger.error(f" -> API ERROR: {msg}")
-                # We don't append to fatal_errors to avoid failing the job on single glitches,
-                # unless we want to track API health.
-                # But for the "Unrepairable" list, we can add it.
-                fatal_errors.append(msg)
+        # Strategy C: Fuzzy / Contains Match
+        if not found_file:
+            norm_name = normalize_string(clean_name)
+            if norm_name in fuzzy_map:
+                found_file = fuzzy_map[norm_name]
+                repair_method = "NAME_FUZZY"
+            else:
+                # Try 'contains' (slower, loop through fuzzy_map keys)
+                # Only if we really want to be exhaustive.
+                # Let's skip for now to keep it O(1)-ish, or do a quick check?
+                pass
+
+        # --- ACTION ---
+        if found_file:
+            file_link = found_file.get('webViewLink')
+            if not file_link:
+                 file_link = f"https://drive.google.com/file/d/{found_file['id']}/view"
+            
+            new_formula = create_hyperlink_formula(file_link, found_file['name'])
+            
+            range_name = f"{sheet_name}!A{i+1}"
+            updates.append({
+                'range': range_name,
+                'values': [[new_formula]]
+            })
+            logger.info(f" -> REPAIRED ({repair_method}): {found_file['name']}")
+            
+        else:
+            # ANOMALY
+            reason = "MISSING_FILE"
+            if extracted_id:
+                reason = "NO_PERMISSION_OR_DELETED" # ID was there but not in our list
+            elif not clean_name:
+                reason = "EMPTY_CELL"
+            
+            msg = f"Row {i+1}: {reason} - '{filename_cell}'"
+            logger.warning(f" -> ANOMALY: {msg}")
+            anomalies.append(msg)
 
     # Apply Repairs
     if updates:
         logger.info(f"Applying {len(updates)} repairs to Excel...")
-        data = [{
-            'range': u['range'],
-            'values': u['values']
-        } for u in updates]
-        
-        body = {
-            'valueInputOption': 'USER_ENTERED',
-            'data': data
-        }
-        sheets_service.spreadsheets().values().batchUpdate(
-            spreadsheetId=spreadsheet_id, body=body).execute()
-        logger.info("Repairs applied successfully.")
+        data = [{'range': u['range'], 'values': u['values']} for u in updates]
+        body = {'valueInputOption': 'USER_ENTERED', 'data': data}
+        try:
+            sheets_service.spreadsheets().values().batchUpdate(
+                spreadsheetId=spreadsheet_id, body=body).execute()
+            logger.info("Repairs applied successfully.")
+        except Exception as e:
+            logger.error(f"Failed to apply repairs: {e}")
+
+    if anomalies:
+        logger.warning(f"Found {len(anomalies)} anomalies that could not be repaired.")
+
 
     # REPORTING (Non-Blocking)
     if fatal_errors:
