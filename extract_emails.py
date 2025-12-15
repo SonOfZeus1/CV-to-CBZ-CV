@@ -213,7 +213,7 @@ def process_single_file(file_data, existing_data_map):
         
         # Condition 3: All Good -> Skip
         else:
-            return {'action': 'SKIP', 'filename': filename}
+            return {'action': 'SKIP', 'filename': clean_filename}
     
     # If we are here, we either need full process or just update link
     
@@ -226,18 +226,18 @@ def process_single_file(file_data, existing_data_map):
             "", # JSON Link
             existing_data.get('language', '') # Language
         ]
-        return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': filename}
+        return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename}
 
     if should_full_process:
         try:
             # DOWNLOAD FILE ON DEMAND
             # Use unique filename to avoid collision in threads
-            temp_filename = f"{file_id}_{filename}"
+            temp_filename = f"{file_id}_{clean_filename}"
             file_path = download_file(drive_service, file_id, temp_filename, TEMP_DIR)
             
             # Extract Text
             text = ""
-            _, ext = os.path.splitext(filename)
+            _, ext = os.path.splitext(clean_filename)
             if ext.lower() == '.pdf':
                 text, _ = extract_text_from_pdf(file_path)
             elif ext.lower() == '.docx':
