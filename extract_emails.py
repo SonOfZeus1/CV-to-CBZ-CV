@@ -355,44 +355,59 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         files_needing_update = []
         for fid, data in existing_data_map.items():
             # Check if needs update: Email/Phone missing/NOT FOUND, or Status="Non" (and not "Delete")
+            # PRIORITIZE: Empty Status (Never processed)
             email = data['email'].upper()
             phone = data['phone']
             status = data['status'].upper()
             
-            if (email == "" or email == "NOT FOUND" or status == "NON") and status != "DELETE":
-                # We need to fetch metadata for this file to process it
-                # We can't just add ID, we need name and link for process_single_file
-                # But fetching one by one is slow. 
-                # Optimization: We will fetch them if they are NOT in source_files.
-                files_needing_update.append(fid)
+            if status == "DELETE":
+                continue
+                
+            needs_update = False
+            priority = 0 # Higher is better
+            
+            if status == "":
+                needs_update = True
+                priority = 2 # Highest priority: Never processed
+            elif email == "" or email == "NOT FOUND" or status == "NON":
+                needs_update = True
+                priority = 1 # Medium priority: Failed previously
+                
+            if needs_update:
+                files_needing_update.append({'id': fid, 'priority': priority})
+                
+        # Sort updates by priority (descending), then we'll fetch metadata
+        files_needing_update.sort(key=lambda x: x['priority'], reverse=True)
+        
+        # Extract just IDs
+        update_ids = [x['id'] for x in files_needing_update]
                 
         # Mark source files
         for f in source_files:
             f['is_processed'] = False
             
         # Combine: Source Files + Files Needing Update
-        # We need to fetch metadata for files_needing_update if they are not in source_files
+        # We need to fetch metadata for update_ids if they are not in source_files
         source_ids = set(f['id'] for f in source_files)
         
         # Limit updates to top 25 to avoid explosion
-        files_needing_update = files_needing_update[:25]
+        # But wait, if we have 100 empty status files, we want to do them ALL before new files?
+        # The user said "Prioritize files... with no status defined".
+        # So we should perhaps take them even before source_files?
+        # Let's keep the mix but ensure high priority ones get in.
         
-        for fid in files_needing_update:
+        update_ids = update_ids[:25]
+        
+        for fid in update_ids:
             if fid not in source_ids:
                 try:
                     f = drive_service.files().get(fileId=fid, fields="id, name, webViewLink, modifiedTime", supportsAllDrives=True).execute()
                     f['is_processed'] = True # Mark as "processed" (conceptually, i.e. not new)
                     f['needs_move'] = False # Already moved presumably
+                    f['priority'] = next((x['priority'] for x in files_needing_update if x['id'] == fid), 0)
+                    
                     # Add to source_files? No, add to a separate list or extend
-                    # Let's extend source_files but mark them.
-                    source_files.append({
-                        'id': f['id'],
-                        'name': f['name'],
-                        'link': f.get('webViewLink', ''),
-                        'modifiedTime': f.get('modifiedTime', ''),
-                        'is_processed': True, # It IS in Excel
-                        'needs_move': False # Don't move it again
-                    })
+                    source_files.append(f)
                 except Exception as e:
                     logger.warning(f"Could not fetch metadata for update candidate {fid}: {e}")
 
@@ -402,7 +417,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             logger.warning("No files found in Drive (Source) and no updates needed.")
             return
 
-        logger.info(f"Found {len(all_files)} candidates ({len(source_ids)} new/recent, {len(files_needing_update)} updates).")
+        logger.info(f"Found {len(all_files)} candidates.")
 
         # --- PRE-FLIGHT CHECK: Move files already in Excel to _processed ---
         logger.info("Running Pre-flight Check: Moving files already in Excel to _processed...")
@@ -410,24 +425,12 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         moved_file_ids = set()
         
         # Add already processed files (from Excel map) to moved_file_ids
-        # Actually, we should check if they are in _processed folder?
-        # No, we trust they are moved if they are in Excel.
-        # But wait, if we just uploaded a file that IS in Excel (re-upload), we want to move it.
-        
         for file_data in all_files:
             filename = file_data['name']
             file_id = file_data['id']
             
             # Check by ID first
             if file_id in existing_data_map:
-                # File is already in Excel -> Move it immediately if it's in Source
-                # How do we know if it's in Source? 
-                # If it came from list_files_in_folder(source), it needs move.
-                # If it came from our "files_needing_update" fetch, it might be in _processed.
-                
-                # Simple check: Try to move it. If it's already there, move_file handles it.
-                # But we only want to move if it's NOT marked as "needs_move=False" (our update candidates)
-                
                 if file_data.get('needs_move', True): # Default True for source files
                      try:
                         move_file(drive_service, file_id, folder_id, processed_folder_id)
@@ -437,40 +440,47 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                         logger.error(f"Pre-flight move failed for {filename}: {e}")
             else:
                 # File is NOT in Excel -> Needs processing
+                # Assign priority 0 (New file)
+                file_data['priority'] = 0
                 files_to_process.append(file_data)
                 
-        # Add back files that are in Excel but need update (they were skipped above or added to moved_file_ids)
-        # We iterate all_files again? No.
-        # We want to process:
-        # 1. files_to_process (New)
-        # 2. Files in Excel that need update (we added them to all_files)
-        
-        # Let's rebuild files_to_process correctly.
+        # Rebuild files_to_process to include updates
         files_to_process = []
         for file_data in all_files:
             file_id = file_data['id']
+            # If not in Excel, it's new.
             if file_id not in existing_data_map:
+                 file_data['priority'] = 0 # New files have base priority
                  files_to_process.append(file_data)
             else:
                 # In Excel. Check if needs update.
-                # We already filtered files_needing_update.
-                # So if it's in all_files, it's either New or an Update Candidate.
-                # But wait, source_files might contain files that are in Excel and DON'T need update.
-                # We should skip those.
+                # We already calculated priority for these.
+                # If it's in all_files, it was either in Source or in our update list.
                 
+                # If it was in Source but is also in Excel, we need to check if it needs update
                 data = existing_data_map[file_id]
                 email = data['email'].upper()
                 status = data['status'].upper()
                 
-                if (email == "" or email == "NOT FOUND" or status == "NON") and status != "DELETE":
+                priority = 0
+                if status == "DELETE":
+                    continue
+                elif status == "":
+                    priority = 2
+                elif email == "" or email == "NOT FOUND" or status == "NON":
+                    priority = 1
+                    
+                if priority > 0:
+                    file_data['priority'] = priority
                     files_to_process.append(file_data)
         
-        # Sort by modifiedTime descending
-        files_to_process.sort(key=lambda x: x.get('modifiedTime', ''), reverse=True)
+        # Sort by Priority (Desc), then ModifiedTime (Desc)
+        # Priority 2 (Empty Status) > Priority 1 (Retry) > Priority 0 (New)
+        files_to_process.sort(key=lambda x: (x.get('priority', 0), x.get('modifiedTime', '')), reverse=True)
         
         # Take top 25
         files_to_process = files_to_process[:25]
-        logger.info(f"Selected top {len(files_to_process)} files for processing.")
+        logger.info(f"Selected top {len(files_to_process)} files for processing (Prioritizing Empty Status).")
         
         # 5. Process Files in Parallel
         append_buffer = []
