@@ -171,17 +171,26 @@ def process_single_file(file_data, existing_data_map):
     drive_service = get_drive_service()
     
     file_id = file_data['id']
-    filename = file_data['name']
-    file_link = file_data.get('link', '')
+    clean_filename = file_data['name']
+    file_id = file_data['id']
+    file_link = file_data.get('webViewLink') or file_data.get('link')
     
-    # Create Hyperlink Formula (French Locale)
-    safe_filename = filename.replace('"', '""')
-    # Use LIEN_HYPERTEXTE and semicolon for French locale
-    filename_cell = f'=LIEN_HYPERTEXTE("{file_link}"; "{safe_filename}")' if file_link else filename
-    
-    # Check if we need to process this file
-    should_full_process = True
-    row_index_to_update = -1
+    # CRITICAL FIX: Ensure we always have a link. 
+    # If webViewLink is missing, construct it manually from ID.
+    if not file_link and file_id:
+        file_link = f"https://drive.google.com/file/d/{file_id}/view"
+        logger.warning(f"webViewLink missing for {clean_filename} ({file_id}). Constructed manual link.")
+
+    # Construct Hyperlink Formula for Filename
+    # =HYPERLINK("link", "name")
+    if file_link:
+        filename_cell = f'=HYPERLINK("{file_link}", "{clean_filename}")'
+    else:
+        # This should rarely happen now with the fallback
+        logger.error(f"Could not generate link for {clean_filename}. Excel link will be broken.")
+        filename_cell = clean_filename
+
+    # Check if we have existing data for this file
     use_existing_data = False
     existing_data = None
     
@@ -336,6 +345,29 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     'needs_fix': is_hyperlink and not is_correct_format,
                     'status': str(row[3]).strip() if len(row) > 3 else ""
                 }
+            elif clean_filename:
+                # Fallback: Map by Filename if ID is missing (Broken Link)
+                # We prefix with "NAME:" to distinguish from IDs if needed, or just check format.
+                # Actually, let's put it in the same map but we need to know it's a name.
+                # But existing_data_map expects ID as key.
+                # Let's use a separate map for these "orphans".
+                pass # We'll handle this in a second pass below? 
+                # No, let's store it in existing_data_map with a special key or just the filename?
+                # If we store by filename, we can't look it up by ID later.
+                # So we need a separate list of "rows to fix by name".
+                
+                # Let's store it in a separate dict
+                if not hasattr(process_folder, "missing_id_map"):
+                     process_folder.missing_id_map = {}
+                process_folder.missing_id_map[clean_filename] = {
+                    'index': i,
+                    'email': str(email).strip(),
+                    'phone': str(phone).strip(),
+                    'language': str(language).strip(),
+                    'is_hyperlink': False, # It's text
+                    'needs_fix': True,
+                    'status': str(row[3]).strip() if len(row) > 3 else ""
+                }
 
     # 3. Create Temp Directory
     if not os.path.exists(TEMP_DIR):
@@ -347,35 +379,78 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         logger.info(f"Processed files will be moved to folder ID: {processed_folder_id}")
 
         # 4. List Files (Metadata only) - FROM SOURCE ONLY
-        # Use server-side sorting and limiting for Source to avoid listing 10,000 files
         logger.info(f"Listing top 50 most recent files from Source Folder ID: {folder_id}")
         source_files = list_files_in_folder(drive_service, folder_id, order_by='modifiedTime desc', page_size=50)
         
         # Identify files needing update from Excel
         files_needing_update = []
+        
+        # A. Check files WITH IDs
         for fid, data in existing_data_map.items():
-            # Check if needs update: Email/Phone missing/NOT FOUND, or Status="Non" (and not "Delete")
-            # PRIORITIZE: Empty Status (Never processed)
             email = data['email'].upper()
-            phone = data['phone']
             status = data['status'].upper()
             
             if status == "DELETE":
                 continue
                 
             needs_update = False
-            priority = 0 # Higher is better
+            priority = 0
             
-            if status == "":
+            if not data['is_hyperlink']:
                 needs_update = True
-                priority = 2 # Highest priority: Never processed
+                priority = 3
+            elif status == "":
+                needs_update = True
+                priority = 2
             elif email == "" or email == "NOT FOUND" or status == "NON":
                 needs_update = True
-                priority = 1 # Medium priority: Failed previously
+                priority = 1
                 
             if needs_update:
                 files_needing_update.append({'id': fid, 'priority': priority})
+
+        # B. Check files WITHOUT IDs (Broken Links) - Search by Name
+        if hasattr(process_folder, "missing_id_map") and process_folder.missing_id_map:
+            logger.info(f"Found {len(process_folder.missing_id_map)} rows with missing IDs (Broken Links). Searching Drive...")
+            for name, data in process_folder.missing_id_map.items():
+                # Search for this file in Source OR Processed
+                # q = "name = 'NAME' and trashed = false"
+                # We need to be careful about quotes in names
+                safe_name = name.replace("'", "\\'")
+                query = f"name = '{safe_name}' and trashed = false"
                 
+                try:
+                    # Search in both folders? Or just globally?
+                    # Globally is safer to find it wherever it is.
+                    # But we should restrict to our folders if possible? 
+                    # No, let's find it anywhere and check parents later if needed.
+                    # Actually, just finding it is enough to get the ID.
+                    
+                    results = drive_service.files().list(
+                        q=query,
+                        fields="files(id, name, webViewLink, modifiedTime, parents)",
+                        supportsAllDrives=True,
+                        includeItemsFromAllDrives=True,
+                        pageSize=1
+                    ).execute()
+                    
+                    files = results.get('files', [])
+                    if files:
+                        f = files[0]
+                        fid = f['id']
+                        logger.info(f"Found missing ID for '{name}': {fid}")
+                        
+                        # Add to existing_data_map so process_single_file can find the row index!
+                        existing_data_map[fid] = data
+                        
+                        # Add to update queue with High Priority
+                        files_needing_update.append({'id': fid, 'priority': 3})
+                    else:
+                        logger.warning(f"Could not find file '{name}' in Drive.")
+                        
+                except Exception as e:
+                    logger.warning(f"Error searching for '{name}': {e}")
+
         # Sort updates by priority (descending), then we'll fetch metadata
         files_needing_update.sort(key=lambda x: x['priority'], reverse=True)
         
