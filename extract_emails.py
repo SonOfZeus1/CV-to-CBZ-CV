@@ -117,7 +117,7 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     # Use FORMULA render option to get the raw hyperlink formula for length comparison
     rows = get_sheet_values(sheets_service, sheet_id, sheet_name, value_render_option='FORMULA')
     
-    expected_header = ["Filename", "Email", "Phone", "Status", "JSON Link", "Language"]
+    expected_header = ["Filename", "Email", "Phone", "Status", "Emplacement", "Language"]
     
     if not rows:
         # Sheet is empty, write header
@@ -162,7 +162,7 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     # format_header_row(sheets_service, sheet_id, sheet_name) # Optional, but good practice
     logger.info("Cleanup complete.")
 
-def process_single_file(file_data, existing_data_map):
+def process_single_file(file_data, existing_data_map, source_folder_id, processed_folder_id):
     """
     Processes a single file: checks if it needs processing, downloads, extracts info.
     Returns a dict with action ('APPEND', 'UPDATE', 'SKIP') and data.
@@ -226,9 +226,18 @@ def process_single_file(file_data, existing_data_map):
             existing_data['email'], 
             existing_data['phone'],
             "Oui" if existing_data['email'] != "NOT FOUND" else "Non", # Status
-            "", # JSON Link
+            "Processed", # Emplacement (Assume Processed if we are updating link, or should we check?)
             existing_data.get('language', '') # Language
         ]
+        # If we are just updating link, we might want to verify location? 
+        # But for simplicity, if it's in the sheet, we assume it's processed or will be.
+        # Actually, let's check the file_data parents if available.
+        parents = file_data.get('parents', [])
+        location = "Processed"
+        if source_folder_id in parents: location = "CVS"
+        elif processed_folder_id in parents: location = "Processed"
+        
+        row_data[4] = location
         return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename}
 
     if should_full_process:
@@ -252,7 +261,7 @@ def process_single_file(file_data, existing_data_map):
             
             if not text:
                 logger.warning(f"Could not extract text from {clean_filename}")
-                row_data = [filename_cell, "NOT FOUND", "", "", "", "Unknown"]
+                row_data = [filename_cell, "NOT FOUND", "", "", "CVS", "Unknown"]
                 if row_index_to_update != -1:
                     return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename}
                 else:
@@ -279,7 +288,8 @@ def process_single_file(file_data, existing_data_map):
             
             # Add Status="Oui" if email found, else "Non"
             status_val = "Oui" if email else "Non"
-            row_data = [filename_cell, email_val, phone, status_val, "", language]
+            # We are about to move it to Processed, so write "Processed"
+            row_data = [filename_cell, email_val, phone, status_val, "Processed", language]
             
             if row_index_to_update != -1:
                 return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename}
@@ -568,7 +578,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             # Submit tasks
             future_to_file = {
-                executor.submit(process_single_file, file_data, existing_data_map): file_data 
+                executor.submit(process_single_file, file_data, existing_data_map, folder_id, processed_folder_id): file_data 
                 for file_data in files_to_process
             }
             
@@ -705,18 +715,13 @@ def normalize_string(s):
 
 def audit_and_repair_hyperlinks(drive_service, sheets_service, spreadsheet_id, sheet_name, source_folder_id, processed_folder_id):
     """
-    Scans the Filename column. If a cell is invalid:
-    1. Parses ID from formula -> Lookup in Cache (O(1))
-    2. If ID fail -> Lookup Name in Cache (Exact)
-    3. If Name fail -> Lookup Name in Cache (Fuzzy/Contains)
-    4. If all fail -> Log Anomaly (MISSING_FILE, etc.)
+    Scans the sheet to:
+    1. Update 'Emplacement' (Column E) based on actual file location (CVS vs Processed).
+    2. Repair broken/invalid hyperlinks in Column A.
     """
-    logger.info("Running Optimized Audit & Repair on Hyperlinks...")
-    
-    fatal_errors = [] # Initialize to prevent NameError in reporting block
+    logger.info("Running Audit & Repair (Location + Hyperlinks)...")
     
     # 1. Build Cache
-    # We search in Source AND Processed folders
     folder_ids = [source_folder_id]
     if processed_folder_id:
         folder_ids.append(processed_folder_id)
@@ -734,119 +739,79 @@ def audit_and_repair_hyperlinks(drive_service, sheets_service, spreadsheet_id, s
         return
 
     updates = []
-    anomalies = [] # List of {row, reason, value}
     
     for i, row in enumerate(rows):
         if i == 0: continue # Skip header
         
         filename_cell = row[0] if len(row) > 0 else ""
+        current_location = row[4] if len(row) > 4 else ""
         
-        # Check validity (Accept both French and English formulas)
-        # API often returns 'HYPERLINK' even if UI shows 'LIEN_HYPERTEXTE'
-        is_valid = (filename_cell.startswith('=LIEN_HYPERTEXTE') or filename_cell.startswith('=HYPERLINK')) and ';' in filename_cell
-        
-        if is_valid:
-            continue
-            
-        # --- REPAIR LOGIC ---
-        logger.info(f"Row {i+1}: Invalid link '{filename_cell}'. Attempting repair...")
-        
+        # --- 1. Identify File ---
         found_file = None
-        repair_method = None
         
-        # Strategy A: Extract ID from broken formula
-        # Regex to find /d/<ID>/ or id=<ID>
-        # Common patterns: drive.google.com/file/d/XYZ/view, open?id=XYZ
-        extracted_id = None
+        # A. Try ID from Formula
         id_match = re.search(r'/d/([a-zA-Z0-9_-]+)|id=([a-zA-Z0-9_-]+)', filename_cell)
         if id_match:
             extracted_id = id_match.group(1) or id_match.group(2)
-            
-        if extracted_id and extracted_id in id_map:
-            found_file = id_map[extracted_id]
-            repair_method = "ID_MATCH"
+            if extracted_id in id_map:
+                found_file = id_map[extracted_id]
         
-        # Strategy B: Exact Name Match
+        # B. Try Name (Exact or Fuzzy)
         if not found_file:
-            # Assume cell content is the name (or part of formula)
             clean_name = filename_cell
             if filename_cell.startswith('='):
-                 # Try to extract name from formula: =HYPERLINK("url"; "name")
-                 # Match last quoted string
                  name_match = re.search(r';\s*"([^"]+)"\)$', filename_cell)
                  if name_match:
                      clean_name = name_match.group(1)
             
             if clean_name in name_map:
                 found_file = name_map[clean_name]
-                repair_method = "NAME_EXACT"
-                
-        # Strategy C: Fuzzy / Contains Match
-        if not found_file:
-            norm_name = normalize_string(clean_name)
-            if norm_name in fuzzy_map:
-                found_file = fuzzy_map[norm_name]
-                repair_method = "NAME_FUZZY"
             else:
-                # Try 'contains' (slower, loop through fuzzy_map keys)
-                # Only if we really want to be exhaustive.
-                # Let's skip for now to keep it O(1)-ish, or do a quick check?
-                pass
+                norm = normalize_string(clean_name)
+                if norm in fuzzy_map:
+                    found_file = fuzzy_map[norm]
 
-        # --- ACTION ---
+        # --- 2. Determine Updates ---
+        needs_update = False
+        new_row = list(row)
+        # Ensure row has enough columns (up to Index 5 for Language)
+        while len(new_row) < 6:
+            new_row.append("")
+            
+        # A. Update Location
         if found_file:
-            file_link = found_file.get('webViewLink')
-            if not file_link:
-                 file_link = f"https://drive.google.com/file/d/{found_file['id']}/view"
+            parents = found_file.get('parents', [])
+            actual_location = "Autre"
+            if source_folder_id in parents:
+                actual_location = "CVS"
+            elif processed_folder_id in parents:
+                actual_location = "Processed"
             
-            new_formula = create_hyperlink_formula(file_link, found_file['name'])
-            
-            range_name = f"{sheet_name}!A{i+1}"
-            updates.append({
-                'range': range_name,
-                'values': [[new_formula]]
-            })
-            logger.info(f" -> REPAIRED ({repair_method}): {found_file['name']}")
-            
-        else:
-            # ANOMALY
-            reason = "MISSING_FILE"
-            if extracted_id:
-                reason = "NO_PERMISSION_OR_DELETED" # ID was there but not in our list
-            elif not clean_name:
-                reason = "EMPTY_CELL"
-            
-            msg = f"Row {i+1}: {reason} - '{filename_cell}'"
-            logger.warning(f" -> ANOMALY: {msg}")
-            anomalies.append(msg)
+            if current_location != actual_location:
+                new_row[4] = actual_location
+                needs_update = True
+                # logger.info(f"Row {i+1}: Updating Location '{current_location}' -> '{actual_location}'")
 
-    # Apply Repairs
-    if updates:
-        logger.info(f"Applying {len(updates)} repairs to Excel...")
-        data = [{'range': u['range'], 'values': u['values']} for u in updates]
-        body = {'valueInputOption': 'USER_ENTERED', 'data': data}
-        try:
-            sheets_service.spreadsheets().values().batchUpdate(
-                spreadsheetId=spreadsheet_id, body=body).execute()
-            logger.info("Repairs applied successfully.")
-        except Exception as e:
-            logger.error(f"Failed to apply repairs: {e}")
-
-    if anomalies:
-        logger.warning(f"Found {len(anomalies)} anomalies that could not be repaired.")
-
-
-    # REPORTING (Non-Blocking)
-    if fatal_errors:
-        logger.warning(f"AUDIT COMPLETED WITH ANOMALIES: {len(fatal_errors)} rows could not be repaired.")
-        logger.warning("These rows remain as plain text or broken links in the Excel sheet.")
-        logger.warning("Sample of anomalies:\n" + "\n".join(fatal_errors[:20]))
-        if len(fatal_errors) > 20:
-            logger.warning(f"... and {len(fatal_errors)-20} more.")
+        # B. Repair Link (if invalid)
+        is_valid_formula = (filename_cell.startswith('=LIEN_HYPERTEXTE') or filename_cell.startswith('=HYPERLINK')) and ';' in filename_cell
         
-        # We DO NOT raise ValueError here. The job succeeds.
+        if (not is_valid_formula) and found_file:
+             file_link = found_file.get('webViewLink') or f"https://drive.google.com/file/d/{found_file['id']}/view"
+             new_formula = create_hyperlink_formula(file_link, found_file['name'])
+             
+             if new_row[0] != new_formula:
+                 new_row[0] = new_formula
+                 needs_update = True
+                 logger.info(f"Row {i+1}: Repaired Link -> {found_file['name']}")
+
+        if needs_update:
+            updates.append((i, new_row))
+            
+    if updates:
+        logger.info(f"Flushing {len(updates)} repairs/updates to Sheet...")
+        batch_update_rows(sheets_service, spreadsheet_id, updates, sheet_name)
     else:
-        logger.info("AUDIT SUCCESS: All hyperlinks are valid (or were successfully repaired).")
+        logger.info("No updates needed.")
 
 def extract_file_id_from_hyperlink_formula(formula):
     """

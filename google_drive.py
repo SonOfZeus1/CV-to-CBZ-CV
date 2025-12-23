@@ -32,7 +32,7 @@ def list_files_in_folder(service, folder_id, order_by=None, page_size=1000):
                 q=query,
                 pageSize=page_size,
                 orderBy=order_by,
-                fields="nextPageToken, files(id, name, webViewLink, modifiedTime)",
+                fields="nextPageToken, files(id, name, webViewLink, modifiedTime, parents)",
                 pageToken=page_token,
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True
