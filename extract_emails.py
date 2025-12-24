@@ -203,10 +203,10 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
         row_index_to_update = data['index']
         existing_data = data
         
-        # Condition 1: Missing Email or Phone -> Full Process
-        if not data['email'] or not data['phone'] or data['email'].upper() == "NOT FOUND":
-            # logger.info(f"Reprocessing {filename}: Missing Email/Phone.")
-            should_full_process = True
+        # Condition 1: Missing Email or Phone -> REMOVED (User Request)
+        # if not data['email'] or not data['phone'] or data['email'].upper() == "NOT FOUND":
+        #     should_full_process = True
+        pass
         
         # Condition 2: Missing Hyperlink OR Broken Formula -> Update Link Only
         elif not data['is_hyperlink'] or data['needs_fix']:
@@ -415,8 +415,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 needs_update = True
                 priority = 2
             elif email == "" or email == "NOT FOUND" or status == "NON":
-                needs_update = True
-                priority = 1
+                # needs_update = True
+                # priority = 1
+                pass
                 
             if needs_update:
                 files_needing_update.append({'id': fid, 'priority': priority})
@@ -537,7 +538,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             file_id = file_data['id']
             # If not in Excel, it's new.
             if file_id not in existing_data_map:
-                 file_data['priority'] = 0 # New files have base priority
+                 file_data['priority'] = 10 # New files have HIGHEST priority (User Request)
                  files_to_process.append(file_data)
             else:
                 # In Excel. Check if needs update.
@@ -555,7 +556,8 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 elif status == "":
                     priority = 2
                 elif email == "" or email == "NOT FOUND" or status == "NON":
-                    priority = 1
+                    # priority = 1
+                    pass
                     
                 if priority > 0:
                     file_data['priority'] = priority
