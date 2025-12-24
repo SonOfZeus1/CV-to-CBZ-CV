@@ -427,7 +427,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 priority = 3
             elif status == "":
                 needs_update = True
-                priority = 2
+                priority = 20 # Empty Status has HIGHEST priority (User Request)
             elif email == "" or email == "NOT FOUND" or status == "NON":
                 # needs_update = True
                 # priority = 1
@@ -572,7 +572,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 if status == "DELETE":
                     continue
                 elif status == "":
-                    priority = 2
+                    priority = 20 # Empty Status has HIGHEST priority (User Request)
                 elif email == "" or email == "NOT FOUND" or status == "NON":
                     # priority = 1
                     pass
