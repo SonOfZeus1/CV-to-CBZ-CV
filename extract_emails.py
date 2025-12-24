@@ -206,7 +206,10 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
         # Condition 1: Missing Email or Phone -> REMOVED (User Request)
         # if not data['email'] or not data['phone'] or data['email'].upper() == "NOT FOUND":
         #     should_full_process = True
-        pass
+        
+        # Condition 1.5: Missing Language -> Full Process (to detect language)
+        if not data.get('language'):
+             should_full_process = True
         
         # Condition 2: Missing Hyperlink OR Broken Formula -> Update Link Only
         elif not data['is_hyperlink'] or data['needs_fix']:
@@ -285,11 +288,22 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
             
             # Prepare Row Data
             email_val = email if email else "NOT FOUND"
-            
-            # Add Status="Oui" if email found, else "Non"
+            phone_val = phone
             status_val = "Oui" if email else "Non"
+            
+            # PRESERVE EXISTING DATA if available and valid
+            if use_existing_data and existing_data:
+                # If we have an existing valid email, keep it
+                if existing_data['email'] and existing_data['email'] != "NOT FOUND":
+                    email_val = existing_data['email']
+                    status_val = existing_data['status'] # Keep existing status too
+                
+                # If we have an existing phone, keep it
+                if existing_data['phone']:
+                    phone_val = existing_data['phone']
+
             # We are about to move it to Processed, so write "Processed"
-            row_data = [filename_cell, email_val, phone, status_val, "Processed", language]
+            row_data = [filename_cell, email_val, phone_val, status_val, "Processed", language]
             
             if row_index_to_update != -1:
                 return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename}
@@ -418,6 +432,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 # needs_update = True
                 # priority = 1
                 pass
+            
+            elif not data.get('language'):
+                needs_update = True
+                priority = 1
                 
             if needs_update:
                 files_needing_update.append({'id': fid, 'priority': priority})
@@ -558,6 +576,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 elif email == "" or email == "NOT FOUND" or status == "NON":
                     # priority = 1
                     pass
+                
+                elif not data.get('language'):
+                    priority = 1
                     
                 if priority > 0:
                     file_data['priority'] = priority
