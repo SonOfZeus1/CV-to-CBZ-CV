@@ -292,7 +292,7 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
             status_val = "Oui" if email else "Non"
             
             # PRESERVE EXISTING DATA if available and valid
-            if use_existing_data and existing_data:
+            if existing_data:
                 # If we have an existing valid email, keep it
                 if existing_data['email'] and existing_data['email'] != "NOT FOUND":
                     email_val = existing_data['email']
