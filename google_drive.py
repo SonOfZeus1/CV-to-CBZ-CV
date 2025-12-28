@@ -1,13 +1,52 @@
+import time
+import random
+import functools
 import io
 import json
 import os
 import google.auth
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+from googleapiclient.errors import HttpError
 import ssl
 import socket
+import httplib2
+from google.auth.exceptions import TransportError
 
 SCOPES = ['https://www.googleapis.com/auth/drive']
+
+def execute_with_retry(func, retries=10, delay_base=2):
+    """
+    Executes a function (usually an API call) with exponential backoff retry logic.
+    Handles SSL errors, socket timeouts, and rate limits (429).
+    """
+    attempt = 0
+    while attempt < retries:
+        try:
+            return func()
+        except (ssl.SSLEOFError, socket.timeout, socket.error, httplib2.HttpLib2Error, TransportError) as e:
+            sleep_time = (delay_base ** attempt) + random.uniform(0, 1)
+            print(f"Network error ({type(e).__name__}): {e}. Retrying in {sleep_time:.2f}s...")
+            time.sleep(sleep_time)
+            attempt += 1
+        except HttpError as error:
+            if error.resp.status in [429, 500, 502, 503, 504]:
+                sleep_time = (delay_base ** attempt) + random.uniform(0, 1)
+                print(f"API Error ({error.resp.status}): {error}. Retrying in {sleep_time:.2f}s...")
+                time.sleep(sleep_time)
+                attempt += 1
+            else:
+                raise
+        except Exception as e:
+            # For other unexpected errors, we might want to retry or raise.
+            # Given the flakiness, let's retry on generic Exception if it looks network-y, 
+            # but usually it's safer to raise unless we know it's safe.
+            # However, the previous code retried on Exception.
+            print(f"Unexpected error: {e}. Retrying in {(delay_base ** attempt):.2f}s...")
+            time.sleep((delay_base ** attempt) + 1)
+            attempt += 1
+            
+    raise Exception(f"Max retries ({retries}) exceeded for operation.")
 
 def get_drive_service():
     """Authenticates with Google Drive API using Application Default Credentials (ADC) and returns a service object."""
@@ -29,34 +68,15 @@ def list_files_in_folder(service, folder_id, order_by=None, page_size=1000):
     page_token = None
     
     while True:
-        try:
-            results = service.files().list(
-                q=query,
-                pageSize=page_size,
-                orderBy=order_by,
-                fields="nextPageToken, files(id, name, webViewLink, modifiedTime, parents)",
-                pageToken=page_token,
-                supportsAllDrives=True,
-                includeItemsFromAllDrives=True
-            ).execute()
-        except (ssl.SSLEOFError, socket.timeout, socket.error) as e:
-            print(f"Network error in list_files_in_folder: {e}. Retrying...")
-            continue # Retry the loop (which calls list again) - wait, we need to handle page_token carefully?
-            # Actually, if we retry, we should use the SAME page_token.
-            # But the loop structure is `while True`.
-            # If we `continue`, it goes to top of loop. `page_token` is updated at bottom.
-            # So if we fail at `execute()`, `page_token` is still the old one.
-            # So `continue` is correct for retry!
-            # But we should probably sleep.
-            import time
-            time.sleep(2)
-            continue
-        except HttpError as error:
-            print(f"An error occurred: {error}")
-            break
-        except Exception as e:
-            print(f"Unexpected error in list_files_in_folder: {e}")
-            break
+        results = execute_with_retry(lambda: service.files().list(
+            q=query,
+            pageSize=page_size,
+            orderBy=order_by,
+            fields="nextPageToken, files(id, name, webViewLink, modifiedTime, parents)",
+            pageToken=page_token,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute())
 
         files.extend(results.get('files', []))
         page_token = results.get('nextPageToken')
@@ -99,18 +119,8 @@ def download_file(service, file_id, file_name, download_path):
     done = False
     while not done:
         try:
-            status, done = downloader.next_chunk()
+            status, done = execute_with_retry(lambda: downloader.next_chunk())
             # print(f"Downloading {file_name}: {int(status.progress() * 100)}%")
-        except (ssl.SSLEOFError, socket.timeout, socket.error) as e:
-            print(f"Network error downloading {file_name}: {e}. Retrying chunk...")
-            import time
-            time.sleep(2)
-            # MediaIoBaseDownload should handle retries internally? 
-            # No, we might need to recreate it or just call next_chunk again?
-            # next_chunk() might fail.
-            # If we just call it again, does it resume?
-            # Yes, it uses the stream position.
-            continue
         except Exception as e:
             print(f"Error downloading {file_name}: {e}")
             raise
@@ -131,27 +141,18 @@ def upload_file_to_folder(service, file_path, folder_id):
         'parents': [folder_id]
     }
     
-    attempt = 0
-    while attempt < 10:
-        try:
-            file = service.files().create(
-                body=file_metadata,
-                media_body=media,
-                fields='id, webViewLink',
-                supportsAllDrives=True
-            ).execute()
-            print(f"Uploaded '{file_name}' with ID: {file.get('id')}")
-            return file.get('id'), file.get('webViewLink')
-        except (ssl.SSLEOFError, socket.timeout, socket.error) as e:
-            print(f"Network error in upload_file_to_folder: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-        except Exception as e:
-            print(f"Unexpected error in upload_file_to_folder: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-            
-    raise Exception("Max retries exceeded for upload_file_to_folder")
+    try:
+        file = execute_with_retry(lambda: service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id, webViewLink',
+            supportsAllDrives=True
+        ).execute())
+        print(f"Uploaded '{file_name}' with ID: {file.get('id')}")
+        return file.get('id'), file.get('webViewLink')
+    except Exception as e:
+        print(f"Error uploading {file_name}: {e}")
+        raise
 
 def get_or_create_folder(service, folder_name, parent_id=None):
     """Checks if a folder exists, creates it if not, and returns its ID."""
@@ -159,39 +160,30 @@ def get_or_create_folder(service, folder_name, parent_id=None):
     if parent_id:
         query += f" and '{parent_id}' in parents"
     
-    attempt = 0
-    while attempt < 10:
-        try:
-            results = service.files().list(
-                q=query,
-                fields="files(id)",
-                supportsAllDrives=True,
-                includeItemsFromAllDrives=True
-            ).execute()
-            items = results.get('files', [])
+    try:
+        results = execute_with_retry(lambda: service.files().list(
+            q=query,
+            fields="files(id)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute())
+        items = results.get('files', [])
 
-            if items:
-                return items[0]['id']
-            else:
-                file_metadata = {
-                    'name': folder_name,
-                    'mimeType': 'application/vnd.google-apps.folder'
-                }
-                if parent_id:
-                    file_metadata['parents'] = [parent_id]
-                
-                folder = service.files().create(body=file_metadata, fields='id', supportsAllDrives=True).execute()
-                return folder.get('id')
-        except (ssl.SSLEOFError, socket.timeout, socket.error) as e:
-            print(f"Network error in get_or_create_folder: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-        except Exception as e:
-            print(f"Unexpected error in get_or_create_folder: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
+        if items:
+            return items[0]['id']
+        else:
+            file_metadata = {
+                'name': folder_name,
+                'mimeType': 'application/vnd.google-apps.folder'
+            }
+            if parent_id:
+                file_metadata['parents'] = [parent_id]
             
-    raise Exception("Max retries exceeded for get_or_create_folder")
+            folder = execute_with_retry(lambda: service.files().create(body=file_metadata, fields='id', supportsAllDrives=True).execute())
+            return folder.get('id')
+    except Exception as e:
+        print(f"Error in get_or_create_folder: {e}")
+        raise
 
 def move_file(service, file_id, current_folder_id, new_folder_id):
     """
@@ -199,12 +191,8 @@ def move_file(service, file_id, current_folder_id, new_folder_id):
     """
     try:
         # Retrieve the existing parents to remove
-        # Retrieve the existing parents to remove
-        file = service.files().get(fileId=file_id, fields='parents', supportsAllDrives=True).execute()
+        file = execute_with_retry(lambda: service.files().get(fileId=file_id, fields='parents', supportsAllDrives=True).execute())
         current_parents_list = file.get('parents', [])
-        
-        # Debug logging
-        # print(f"DEBUG: Checking move for {file_id}. Current parents: {current_parents_list}, Target: {new_folder_id}")
         
         # Check if already in new_folder_id
         if new_folder_id in current_parents_list:
@@ -214,39 +202,22 @@ def move_file(service, file_id, current_folder_id, new_folder_id):
         previous_parents = ",".join(current_parents_list)
         
         # Move the file by adding the new parent
-        attempt = 0
-        retries = 10
-        while attempt < retries:
-            try:
-                # 2. Add new parent
-                service.files().update(
-                    fileId=file_id,
-                    addParents=new_folder_id,
-                    removeParents=previous_parents,
-                    fields='id, parents',
-                    supportsAllDrives=True
-                ).execute()
-                # print(f"Moved file {file_id} to folder {new_folder_id}")
+        try:
+            execute_with_retry(lambda: service.files().update(
+                fileId=file_id,
+                addParents=new_folder_id,
+                removeParents=previous_parents,
+                fields='id, parents',
+                supportsAllDrives=True
+            ).execute())
+            # print(f"Moved file {file_id} to folder {new_folder_id}")
+            return
+        except HttpError as error:
+            if error.resp.status == 404:
+                print(f"Warning: File {file_id} not found during move (likely already moved).")
                 return
-            except HttpError as error:
-                if error.resp.status == 404:
-                    print(f"Warning: File {file_id} not found during move (likely already moved).")
-                    return
-                else:
-                    print(f"Error moving file {file_id} (attempt {attempt+1}/{retries}): {error}")
-                    time.sleep((2 ** attempt) + 1)
-                    attempt += 1
-            except Exception as e:
-                print(f"Error moving file {file_id} (attempt {attempt+1}/{retries}): {e}")
-                time.sleep((2 ** attempt) + 1)
-                attempt += 1
-                
-        print(f"Failed to move file {file_id} after {retries} attempts.")
-    except HttpError as error:
-        if error.resp.status == 404:
-            print(f"Warning: File {file_id} not found during move (likely already moved).")
-        else:
-            print(f"Error moving file {file_id}: {error}")
+            else:
+                raise
     except Exception as e:
         print(f"Error moving file {file_id}: {e}")
 
@@ -339,35 +310,15 @@ def append_to_sheet(service, sheet_id, values, sheet_name="Feuille 1", retries=1
     range_name = f"'{sheet_name}'!A:B" # Appending to columns A and B
     body = {'values': [values]}
     
-    attempt = 0
-    while attempt < retries:
-        try:
-            service.spreadsheets().values().append(
-                spreadsheetId=sheet_id, range=range_name,
-                valueInputOption="USER_ENTERED", body=body
-            ).execute()
-            print(f"Appended to sheet: {values}")
-            return
-        except HttpError as error:
-            if error.resp.status == 429:
-                sleep_time = (2 ** attempt) + 1 # Exponential backoff + 1s buffer
-                print(f"Quota exceeded (429) in append. Retrying in {sleep_time} seconds...")
-                time.sleep(sleep_time)
-                attempt += 1
-            else:
-                print(f"Error appending to sheet: {error}")
-                raise
-        except (ssl.SSLEOFError, socket.timeout, socket.error) as e:
-            print(f"Network error in append_to_sheet: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-        except Exception as e:
-            print(f"Unexpected error in append_to_sheet: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-    
-    print(f"Failed to append to sheet after {retries} retries.")
-    raise Exception("Max retries exceeded for Google Sheets API write requests.")
+    try:
+        execute_with_retry(lambda: service.spreadsheets().values().append(
+            spreadsheetId=sheet_id, range=range_name,
+            valueInputOption="USER_ENTERED", body=body
+        ).execute())
+        print(f"Appended to sheet: {values}")
+    except Exception as e:
+        print(f"Error appending to sheet: {e}")
+        raise
 
 def get_sheet_values(service, sheet_id, sheet_name="Feuille 1", value_render_option="FORMATTED_VALUE"):
     """
@@ -376,23 +327,14 @@ def get_sheet_values(service, sheet_id, sheet_name="Feuille 1", value_render_opt
     """
     range_name = f"'{sheet_name}'!A:E" # Columns A-E (Filename, Email, Phone, Status, JSON Link)
     
-    attempt = 0
-    while attempt < 10:
-        try:
-            result = service.spreadsheets().values().get(
-                spreadsheetId=sheet_id, range=range_name, valueRenderOption=value_render_option
-            ).execute()
-            return result.get('values', [])
-        except (ssl.SSLEOFError, socket.timeout, socket.error) as e:
-            print(f"Network error in get_sheet_values: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-        except Exception as e:
-            print(f"Unexpected error in get_sheet_values: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-            
-    raise Exception("Max retries exceeded for get_sheet_values")
+    try:
+        result = execute_with_retry(lambda: service.spreadsheets().values().get(
+            spreadsheetId=sheet_id, range=range_name, valueRenderOption=value_render_option
+        ).execute())
+        return result.get('values', [])
+    except Exception as e:
+        print(f"Error in get_sheet_values: {e}")
+        raise
 
 def clear_and_write_sheet(service, sheet_id, values, sheet_name="Feuille 1", retries=10):
     """
@@ -400,42 +342,26 @@ def clear_and_write_sheet(service, sheet_id, values, sheet_name="Feuille 1", ret
     Used for deduplication.
     """
     # 1. Clear (usually fast, but let's be safe)
+    # 1. Clear (usually fast, but let's be safe)
     try:
-        service.spreadsheets().values().clear(
+        execute_with_retry(lambda: service.spreadsheets().values().clear(
             spreadsheetId=sheet_id, range=f"'{sheet_name}'!A:Z"
-        ).execute()
+        ).execute())
     except HttpError as error:
         print(f"Warning: Failed to clear sheet: {error}")
 
     # 2. Write with retry
     body = {'values': values}
     
-    attempt = 0
-    while attempt < retries:
-        try:
-            service.spreadsheets().values().update(
-                spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1",
-                valueInputOption="USER_ENTERED", body=body
-            ).execute()
-            print(f"Rewrote sheet with {len(values)} rows.")
-            return
-        except HttpError as error:
-            if error.resp.status == 429:
-                sleep_time = (2 ** attempt) + 1
-                print(f"Quota exceeded (429) in rewrite. Retrying in {sleep_time} seconds...")
-                time.sleep(sleep_time)
-                attempt += 1
-            else:
-                raise
-        except (ssl.SSLEOFError, socket.timeout, socket.error) as e:
-            print(f"Network error in clear_and_write_sheet: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-        except Exception as e:
-            print(f"Unexpected error in clear_and_write_sheet: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-    raise Exception("Max retries exceeded for clear_and_write_sheet")
+    try:
+        execute_with_retry(lambda: service.spreadsheets().values().update(
+            spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1",
+            valueInputOption="USER_ENTERED", body=body
+        ).execute())
+        print(f"Rewrote sheet with {len(values)} rows.")
+    except Exception as e:
+        print(f"Error in clear_and_write_sheet: {e}")
+        raise
 
 def format_header_row(service, sheet_id, sheet_name="Feuille 1"):
     """
@@ -493,32 +419,17 @@ def update_sheet_row(service, sheet_id, row_index, values, sheet_name="Feuille 1
     
     body = {'values': [values]}
     
-    attempt = 0
-    while attempt < retries:
-        try:
-            service.spreadsheets().values().update(
-                spreadsheetId=sheet_id, range=range_name,
-                valueInputOption="USER_ENTERED", body=body
-            ).execute()
-            print(f"Updated row {sheet_row_num}: {values}")
-            return
-        except HttpError as error:
-            if error.resp.status == 429:
-                sleep_time = (2 ** attempt) + 1
-                print(f"Quota exceeded (429) in update_row. Retrying in {sleep_time} seconds...")
-                time.sleep(sleep_time)
-                attempt += 1
-            else:
-                raise
-        except (ssl.SSLEOFError, socket.timeout, socket.error) as e:
-            print(f"Network error in update_sheet_row: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-        except Exception as e:
-            print(f"Unexpected error in update_sheet_row: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-    raise Exception("Max retries exceeded for update_sheet_row")
+    body = {'values': [values]}
+    
+    try:
+        execute_with_retry(lambda: service.spreadsheets().values().update(
+            spreadsheetId=sheet_id, range=range_name,
+            valueInputOption="USER_ENTERED", body=body
+        ).execute())
+        print(f"Updated row {sheet_row_num}: {values}")
+    except Exception as e:
+        print(f"Error in update_sheet_row: {e}")
+        raise
 
 import re
 
@@ -609,19 +520,14 @@ def set_column_validation(service, sheet_id, sheet_name, col_index, options):
     }
     
     # Retry logic for set_column_validation
-    attempt = 0
-    while attempt < 10:
-        try:
-            service.spreadsheets().batchUpdate(
-                spreadsheetId=sheet_id,
-                body=body
-            ).execute()
-            print(f"Set validation for column index {col_index} with options {options}")
-            return
-        except Exception as e:
-            print(f"Warning: Failed to set validation (attempt {attempt+1}/5): {e}")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
+    try:
+        execute_with_retry(lambda: service.spreadsheets().batchUpdate(
+            spreadsheetId=sheet_id,
+            body=body
+        ).execute())
+        print(f"Set validation for column index {col_index} with options {options}")
+    except Exception as e:
+        print(f"Warning: Failed to set validation: {e}")
 
 def append_batch_to_sheet(service, sheet_id, rows, sheet_name="Feuille 1", retries=10):
     """
@@ -634,34 +540,15 @@ def append_batch_to_sheet(service, sheet_id, rows, sheet_name="Feuille 1", retri
     range_name = f"'{sheet_name}'!A:F"
     body = {'values': rows}
     
-    attempt = 0
-    while attempt < retries:
-        try:
-            service.spreadsheets().values().append(
-                spreadsheetId=sheet_id, range=range_name,
-                valueInputOption="USER_ENTERED", body=body
-            ).execute()
-            print(f"Appended {len(rows)} rows to sheet.")
-            return
-        except HttpError as error:
-            if error.resp.status == 429:
-                sleep_time = (2 ** attempt) + 1
-                print(f"Quota exceeded (429) in batch append. Retrying in {sleep_time} seconds...")
-                time.sleep(sleep_time)
-                attempt += 1
-            else:
-                print(f"Error appending batch: {error}")
-                raise
-        except (ssl.SSLEOFError, socket.timeout, socket.error) as e:
-            print(f"Network error in append_batch_to_sheet: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-        except Exception as e:
-            print(f"Unexpected error in append_batch_to_sheet: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-    
-    raise Exception("Max retries exceeded for append_batch_to_sheet")
+    try:
+        execute_with_retry(lambda: service.spreadsheets().values().append(
+            spreadsheetId=sheet_id, range=range_name,
+            valueInputOption="USER_ENTERED", body=body
+        ).execute())
+        print(f"Appended {len(rows)} rows to sheet.")
+    except Exception as e:
+        print(f"Error appending batch: {e}")
+        raise
 
 def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", retries=10):
     """
@@ -673,23 +560,18 @@ def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", retrie
 
     # Get sheetId with retry
     sheet_int_id = 0
-    attempt = 0
-    while attempt < retries:
-        try:
-            sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
-            sheets = sheet_metadata.get('sheets', '')
-            for s in sheets:
-                if s.get("properties", {}).get("title") == sheet_name:
-                    sheet_int_id = s.get("properties", {}).get("sheetId")
-                    break
-            break # Success
-        except Exception as e:
-            print(f"Error getting sheet metadata (attempt {attempt+1}/{retries}): {e}")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-            if attempt == retries:
-                print("Failed to get sheet metadata after retries.")
-                return
+    # Get sheetId with retry
+    sheet_int_id = 0
+    try:
+        sheet_metadata = execute_with_retry(lambda: service.spreadsheets().get(spreadsheetId=sheet_id).execute())
+        sheets = sheet_metadata.get('sheets', '')
+        for s in sheets:
+            if s.get("properties", {}).get("title") == sheet_name:
+                sheet_int_id = s.get("properties", {}).get("sheetId")
+                break
+    except Exception as e:
+        print(f"Error getting sheet metadata: {e}")
+        return
             
     requests = []
     for row_idx, values in updates:
@@ -717,34 +599,15 @@ def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", retrie
         'data': data
     }
     
-    attempt = 0
-    while attempt < retries:
-        try:
-            service.spreadsheets().values().batchUpdate(
-                spreadsheetId=sheet_id,
-                body=body
-            ).execute()
-            print(f"Batch updated {len(updates)} rows.")
-            return
-        except HttpError as error:
-            if error.resp.status == 429:
-                sleep_time = (2 ** attempt) + 1
-                print(f"Quota exceeded (429) in batch update. Retrying in {sleep_time} seconds...")
-                time.sleep(sleep_time)
-                attempt += 1
-            else:
-                print(f"Error batch updating: {error}")
-                raise
-        except (ssl.SSLEOFError, socket.timeout, socket.error) as e:
-            print(f"Network error in batch_update_rows: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-        except Exception as e:
-            print(f"Error batch updating (attempt {attempt+1}/{retries}): {e}")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-    
-    raise Exception("Max retries exceeded for batch_update_rows")
+    try:
+        execute_with_retry(lambda: service.spreadsheets().values().batchUpdate(
+            spreadsheetId=sheet_id,
+            body=body
+        ).execute())
+        print(f"Batch updated {len(updates)} rows.")
+    except Exception as e:
+        print(f"Error batch updating: {e}")
+        raise
 
 def delete_rows(service, sheet_id, row_indices, sheet_name="Feuille 1", retries=10):
     """
@@ -789,32 +652,14 @@ def delete_rows(service, sheet_id, row_indices, sheet_name="Feuille 1", retries=
         
     body = {'requests': requests}
     
-    attempt = 0
-    while attempt < retries:
-        try:
-            service.spreadsheets().batchUpdate(
-                spreadsheetId=sheet_id,
-                body=body
-            ).execute()
-            print(f"Deleted {len(row_indices)} rows.")
-            return
-        except HttpError as error:
-            if error.resp.status == 429:
-                sleep_time = (2 ** attempt) + 1
-                print(f"Quota exceeded (429) in delete_rows. Retrying in {sleep_time} seconds...")
-                time.sleep(sleep_time)
-                attempt += 1
-            else:
-                print(f"Error deleting rows: {error}")
-                raise
-            else:
-                print(f"Error deleting rows: {error}")
-                raise
-        except (ssl.SSLEOFError, socket.timeout, socket.error) as e:
-            print(f"Network error in delete_rows: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
-        except Exception as e:
-            print(f"Error deleting rows: {e}. Retrying in {(2 ** attempt) + 1}s...")
-            time.sleep((2 ** attempt) + 1)
-            attempt += 1
+    body = {'requests': requests}
+    
+    try:
+        execute_with_retry(lambda: service.spreadsheets().batchUpdate(
+            spreadsheetId=sheet_id,
+            body=body
+        ).execute())
+        print(f"Deleted {len(row_indices)} rows.")
+    except Exception as e:
+        print(f"Error deleting rows: {e}")
+        raise
