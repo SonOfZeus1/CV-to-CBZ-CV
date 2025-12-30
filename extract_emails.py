@@ -212,6 +212,11 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
         # Condition 1.5: Missing Language -> Full Process (to detect language)
         if not data.get('language'):
              should_full_process = True
+             
+        # Condition 1.6: Not Indexed -> Full Process (to generate MD)
+        if not data.get('is_indexed'):
+             should_full_process = True
+             logger.info(f"File {clean_filename} needs indexing. Forcing processing.")
         
         # Condition 2: Missing Hyperlink OR Broken Formula -> Update Link Only
         elif not data['is_hyperlink'] or data['needs_fix']:
@@ -225,7 +230,14 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
     
     # If we are here, we either need full process or just update link
     
-    if use_existing_data and existing_data:
+    # If we are here, we either need full process or just update link
+    
+    # Check if we need to index it before returning early!
+    needs_indexing = False
+    if file_id in existing_data_map and not existing_data_map[file_id].get('is_indexed'):
+        needs_indexing = True
+    
+    if use_existing_data and existing_data and not needs_indexing:
         row_data = [
             filename_cell, 
             existing_data['email'], 
