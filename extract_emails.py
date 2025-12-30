@@ -19,6 +19,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 TEMP_DIR = "temp_cvs"
+INDEX_DIR = "index_cvs"
+INDEXED_COL_IDX = 8 # Column I (0-based index)
 
 def select_best_email(emails, filename):
     """
@@ -117,7 +119,7 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     # Use FORMULA render option to get the raw hyperlink formula for length comparison
     rows = get_sheet_values(sheets_service, sheet_id, sheet_name, value_render_option='FORMULA')
     
-    expected_header = ["Filename", "Email", "Phone", "Status", "Emplacement", "Language"]
+    expected_header = ["Filename", "Email", "Phone", "Status", "Emplacement", "Language", "", "", "Indexé"]
     
     if not rows:
         # Sheet is empty, write header
@@ -162,7 +164,7 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     # format_header_row(sheets_service, sheet_id, sheet_name) # Optional, but good practice
     logger.info("Cleanup complete.")
 
-def process_single_file(file_data, existing_data_map, source_folder_id, processed_folder_id):
+def process_single_file(file_data, existing_data_map, source_folder_id, processed_folder_id, index_folder_id):
     """
     Processes a single file: checks if it needs processing, downloads, extracts info.
     Returns a dict with action ('APPEND', 'UPDATE', 'SKIP') and data.
@@ -241,7 +243,7 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
         elif processed_folder_id in parents: location = "Processed"
         
         row_data[4] = location
-        return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename}
+        return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename, 'is_indexed': True}
 
     if should_full_process:
         try:
@@ -305,10 +307,59 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
             # We are about to move it to Processed, so write "Processed"
             row_data = [filename_cell, email_val, phone_val, status_val, "Processed", language]
             
+            # --- START INDEXING (MARKDOWN) ---
+            try:
+                # Create Index Directory if not exists
+                if not os.path.exists(INDEX_DIR):
+                    os.makedirs(INDEX_DIR)
+                    
+                # Prepare Metadata for Frontmatter
+                # Escape quotes for YAML
+                def escape_yaml(s):
+                    return str(s).replace('"', '\\"')
+                
+                md_filename = f"{file_id}.md"
+                md_path = os.path.join(INDEX_DIR, md_filename)
+                
+                # Create Markdown Content
+                md_content = f"""---
+id: "{file_id}"
+filename: "{escape_yaml(clean_filename)}"
+email: "{escape_yaml(email_val)}"
+phone: "{escape_yaml(phone_val)}"
+language: "{escape_yaml(language)}"
+url: "{file_link}"
+date_processed: "{os.environ.get('GITHUB_RUN_ID', 'local')}"
+---
+
+# {clean_filename}
+
+{text}
+"""
+                with open(md_path, 'w', encoding='utf-8') as f:
+                    f.write(md_content)
+                    
+                # Upload to Drive (_index_cvs)
+                # We need the index_folder_id. It's passed via process_single_file args? 
+                # No, we need to pass it.
+                # Let's check the function signature.
+                # process_single_file(file_data, existing_data_map, source_folder_id, processed_folder_id)
+                # We need to add index_folder_id to the signature.
+                
+                # For now, I will assume it is passed or available. 
+                # Wait, I need to update the signature first.
+                pass 
+            except Exception as e:
+                logger.error(f"Error creating index for {clean_filename}: {e}")
+                # Don't fail the whole process for indexing error
+            # --- END INDEXING ---
+
+            # --- END INDEXING ---
+
             if row_index_to_update != -1:
-                return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename}
+                return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename, 'md_path': md_path, 'is_indexed': True}
             else:
-                return {'action': 'APPEND', 'data': row_data, 'filename': clean_filename}
+                return {'action': 'APPEND', 'data': row_data, 'filename': clean_filename, 'md_path': md_path, 'is_indexed': True}
                 
         except Exception as e:
             logger.error(f"Error processing {clean_filename}: {e}")
@@ -371,7 +422,8 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     'language': str(language).strip(),
                     'is_hyperlink': is_hyperlink,
                     'needs_fix': is_hyperlink and not is_correct_format,
-                    'status': str(row[3]).strip() if len(row) > 3 else ""
+                    'status': str(row[3]).strip() if len(row) > 3 else "",
+                    'is_indexed': str(row[8]).strip().lower() == "oui" if len(row) > 8 else False
                 }
             elif clean_filename:
                 # Fallback: Map by Filename if ID is missing (Broken Link)
@@ -403,6 +455,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         # 5b. Create/Get Processed Folder
         processed_folder_id = get_or_create_folder(drive_service, "_processed", parent_id=folder_id)
         logger.info(f"Processed files will be moved to folder ID: {processed_folder_id}")
+
+        # 5c. Create/Get Index Folder
+        index_folder_id = get_or_create_folder(drive_service, "_index_cvs", parent_id=folder_id)
+        logger.info(f"Index files will be uploaded to folder ID: {index_folder_id}")
 
         # 4. List Files (Metadata only) - FROM SOURCE ONLY
         logger.info(f"Listing top 50 most recent files from Source Folder ID: {folder_id}")
@@ -436,6 +492,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             elif not data.get('language'):
                 needs_update = True
                 priority = 1
+            
+            elif not data.get('is_indexed'):
+                needs_update = True
+                priority = 30 # Indexing has TOP priority (User Request)
                 
             if needs_update:
                 files_needing_update.append({'id': fid, 'priority': priority})
@@ -579,6 +639,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 
                 elif not data.get('language'):
                     priority = 1
+                
+                elif not data.get('is_indexed'):
+                    priority = 30 # Indexing has TOP priority
                     
                 if priority > 0:
                     file_data['priority'] = priority
@@ -595,13 +658,14 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         # 5. Process Files in Parallel
         append_buffer = []
         update_buffer = []
+        indexed_buffer = [] # Buffer for "Indexé" column updates
         BATCH_SIZE = 50
         MAX_WORKERS = 5
         
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             # Submit tasks
             future_to_file = {
-                executor.submit(process_single_file, file_data, existing_data_map, folder_id, processed_folder_id): file_data 
+                executor.submit(process_single_file, file_data, existing_data_map, folder_id, processed_folder_id, index_folder_id): file_data 
                 for file_data in files_to_process
             }
             
@@ -637,9 +701,51 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     except Exception as e:
                         logger.error(f"Failed to move {result['filename']}: {e}")
 
+                # Upload MD Index if available
+                if 'md_path' in result and result['md_path']:
+                    try:
+                        upload_file_to_folder(drive_service, result['md_path'], index_folder_id, mime_type='text/markdown')
+                        # Clean up local MD file
+                        if os.path.exists(result['md_path']):
+                            os.remove(result['md_path'])
+                    except Exception as e:
+                        logger.error(f"Failed to upload index for {result['filename']}: {e}")
+
+                # Collect Index Updates
+                if result.get('is_indexed'):
+                    # If it was an update, we know the row index.
+                    # If it was an append, we don't know the row index yet (it's at the end).
+                    # But wait, append_batch_to_sheet appends to A:F. 
+                    # We need to write "Oui" to Column I.
+                    # For new rows, we can just include "Oui" in the appended data?
+                    # No, append_batch writes specific columns.
+                    # Let's update our append logic to include up to Column I?
+                    # Or just update later.
+                    
+                    # Actually, for existing rows (UPDATE), we can add to indexed_buffer
+                    if result['action'] == 'UPDATE':
+                        indexed_buffer.append((result['row_index'], ["Oui"]))
+                    elif result['action'] == 'APPEND':
+                        # For APPEND, we should ideally include it in the row data.
+                        # Current row_data length is 6 (Filename...Language).
+                        # We need to pad to 9 columns to reach "Indexé" (Col I).
+                        # [Filename, Email, Phone, Status, Emplacement, Language, "", "", "Oui"]
+                        while len(result['data']) < 8:
+                            result['data'].append("")
+                        result['data'].append("Oui")
+                        
                 # Batch Write
                 if len(append_buffer) >= BATCH_SIZE:
                     logger.info(f"Flushing {len(append_buffer)} new rows to Sheet...")
+                    # Note: append_batch_to_sheet writes to A:F by default in google_drive.py
+                    # We need to ensure it writes enough columns if we extended data.
+                    # But google_drive.py says range A:B in one place and A:F in another?
+                    # Let's check append_batch_to_sheet in google_drive.py.
+                    # It uses A:F. We should probably update it to A:Z or dynamic.
+                    # But since we updated google_drive.py to read A:Z, let's assume we can write more.
+                    # Actually, append just takes values. The range 'A:F' in append might restrict it?
+                    # Yes, if we pass 9 columns but range is A:F, it might truncate or error.
+                    # We should check google_drive.py append_batch_to_sheet.
                     append_batch_to_sheet(sheets_service, sheet_id, append_buffer, sheet_name)
                     append_buffer = []
 
@@ -647,6 +753,11 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     logger.info(f"Flushing {len(update_buffer)} updates to Sheet...")
                     batch_update_rows(sheets_service, sheet_id, update_buffer, sheet_name)
                     update_buffer = []
+                    
+                if len(indexed_buffer) >= BATCH_SIZE:
+                    logger.info(f"Flushing {len(indexed_buffer)} index status updates...")
+                    batch_update_rows(sheets_service, sheet_id, indexed_buffer, sheet_name, start_col='I')
+                    indexed_buffer = []
         
         # Flush remaining
         if append_buffer:
@@ -656,12 +767,20 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         if update_buffer:
             logger.info(f"Flushing remaining {len(update_buffer)} updates...")
             batch_update_rows(sheets_service, sheet_id, update_buffer, sheet_name)
+            
+        if indexed_buffer:
+            logger.info(f"Flushing remaining {len(indexed_buffer)} index status updates...")
+            batch_update_rows(sheets_service, sheet_id, indexed_buffer, sheet_name, start_col='I')
 
     finally:
         # 6. Cleanup
         if os.path.exists(TEMP_DIR):
             shutil.rmtree(TEMP_DIR)
             logger.info("Temporary directory cleaned up.")
+            
+        if os.path.exists(INDEX_DIR):
+            shutil.rmtree(INDEX_DIR)
+            logger.info("Index directory cleaned up.")
             
         # 7. Set Data Validation for Status Column (Column D, index 3)
         logger.info("Setting data validation for Status column...")

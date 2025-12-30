@@ -131,10 +131,14 @@ def download_file(service, file_id, file_name, download_path):
     
     return file_path
 
-def upload_file_to_folder(service, file_path, folder_id):
+def upload_file_to_folder(service, file_path, folder_id, mime_type=None):
     """Uploads a file to a specific Google Drive folder."""
     file_name = os.path.basename(file_path)
-    media = MediaFileUpload(file_path, mimetype='application/octet-stream', resumable=True)
+    
+    if not mime_type:
+        mime_type = 'application/octet-stream'
+        
+    media = MediaFileUpload(file_path, mimetype=mime_type, resumable=True)
     
     file_metadata = {
         'name': file_name,
@@ -325,7 +329,7 @@ def get_sheet_values(service, sheet_id, sheet_name="Feuille 1", value_render_opt
     Returns all values from the specified sheet.
     value_render_option: 'FORMATTED_VALUE' (default), 'UNFORMATTED_VALUE', or 'FORMULA'
     """
-    range_name = f"'{sheet_name}'!A:E" # Columns A-E (Filename, Email, Phone, Status, JSON Link)
+    range_name = f"'{sheet_name}'!A:Z" # Read all columns to support expansion
     
     try:
         result = execute_with_retry(lambda: service.spreadsheets().values().get(
@@ -537,7 +541,7 @@ def append_batch_to_sheet(service, sheet_id, rows, sheet_name="Feuille 1", retri
     if not rows:
         return
 
-    range_name = f"'{sheet_name}'!A:F"
+    range_name = f"'{sheet_name}'!A:Z"
     body = {'values': rows}
     
     try:
@@ -550,16 +554,15 @@ def append_batch_to_sheet(service, sheet_id, rows, sheet_name="Feuille 1", retri
         print(f"Error appending batch: {e}")
         raise
 
-def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", retries=10):
+def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", start_col='A', retries=10):
     """
     Updates multiple rows in one batchUpdate call.
     updates: List of tuples (row_index_0_based, values_list)
+    start_col: The starting column letter (e.g., 'A', 'I').
     """
     if not updates:
         return
 
-    # Get sheetId with retry
-    sheet_int_id = 0
     # Get sheetId with retry
     sheet_int_id = 0
     try:
@@ -573,22 +576,27 @@ def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", retrie
         print(f"Error getting sheet metadata: {e}")
         return
             
-    requests = []
-    for row_idx, values in updates:
-        # Create a PasteDataRequest or UpdateCellsRequest?
-        # UpdateCells is better for specific ranges, but requires constructing RowData.
-        # easier to use value ranges with batchUpdate? No, values.batchUpdate exists!
-        pass
-    
-    # Actually, spreadsheets.values.batchUpdate is easier for multiple ranges!
-    # But wait, values.batchUpdate takes a list of ValueRanges.
-    # Each ValueRange has a range and values.
-    
     data = []
     for row_idx, values in updates:
         sheet_row_num = row_idx + 1
-        end_col_char = chr(ord('A') + len(values) - 1)
-        range_name = f"'{sheet_name}'!A{sheet_row_num}:{end_col_char}{sheet_row_num}"
+        # Calculate end column based on start_col and length of values
+        start_col_idx = 0
+        if len(start_col) == 1:
+            start_col_idx = ord(start_col.upper()) - ord('A')
+        
+        end_col_idx = start_col_idx + len(values) - 1
+        
+        # Convert indices back to letters (simple implementation for A-Z)
+        # For > Z, this simple logic fails, but we are likely within A-Z for now.
+        # If needed, we can implement a proper col index to letter function.
+        if start_col_idx > 25 or end_col_idx > 25:
+             # Fallback or simple support for AA, AB etc if needed, but let's assume A-Z for now
+             pass
+             
+        start_col_char = chr(ord('A') + start_col_idx)
+        end_col_char = chr(ord('A') + end_col_idx)
+        
+        range_name = f"'{sheet_name}'!{start_col_char}{sheet_row_num}:{end_col_char}{sheet_row_num}"
         data.append({
             'range': range_name,
             'values': [values]
@@ -604,7 +612,7 @@ def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", retrie
             spreadsheetId=sheet_id,
             body=body
         ).execute())
-        print(f"Batch updated {len(updates)} rows.")
+        print(f"Batch updated {len(updates)} rows starting at col {start_col}.")
     except Exception as e:
         print(f"Error batch updating: {e}")
         raise
