@@ -198,6 +198,8 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
         # This should rarely happen now with the fallback
         logger.error(f"Could not generate link for {clean_filename}. Excel link will be broken.")
         filename_cell = clean_filename
+        
+    md_link = "" # Initialize md_link
 
     # Check if we have existing data for this file
     use_existing_data = False
@@ -252,7 +254,7 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
         elif processed_folder_id in parents: location = "Processed"
         
         row_data[4] = location
-        return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename, 'is_indexed': True}
+        return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename, 'is_indexed': True, 'md_link': md_link}
 
     if should_full_process:
         try:
@@ -380,7 +382,7 @@ date_processed: "{os.environ.get('GITHUB_RUN_ID', 'local')}"
                 
         except Exception as e:
             logger.error(f"Error processing {clean_filename}: {e}")
-            return {'action': 'ERROR', 'filename': clean_filename, 'error': str(e)}
+            return {'action': 'ERROR', 'filename': clean_filename, 'error': str(e), 'md_link': md_link}
 
     return {'action': 'SKIP', 'filename': clean_filename}
 
