@@ -126,10 +126,6 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
         clear_and_write_sheet(sheets_service, sheet_id, [expected_header], sheet_name)
         format_header_row(sheets_service, sheet_id, sheet_name)
         return
-    else:
-        # Force update header to ensure "Indexé" title is present in Col G
-        # We only update the first row.
-        update_sheet_row(sheets_service, sheet_id, 1, expected_header, sheet_name)
 
     header = rows[0]
     data = rows[1:]
@@ -356,26 +352,22 @@ date_processed: "{os.environ.get('GITHUB_RUN_ID', 'local')}"
                     f.write(md_content)
                     
                 # Upload to Drive (_index_cvs)
-                # We need the index_folder_id. It's passed via process_single_file args? 
-                # No, we need to pass it.
-                # Let's check the function signature.
-                # process_single_file(file_data, existing_data_map, source_folder_id, processed_folder_id)
-                # We need to add index_folder_id to the signature.
+                md_file_id, md_link = upload_file_to_folder(drive_service, md_path, index_folder_id, mime_type='text/markdown')
                 
-                # For now, I will assume it is passed or available. 
-                # Wait, I need to update the signature first.
-                pass 
+                # Clean up local MD file
+                if os.path.exists(md_path):
+                    os.remove(md_path)
+                    
             except Exception as e:
                 logger.error(f"Error creating index for {clean_filename}: {e}")
+                md_link = None
                 # Don't fail the whole process for indexing error
             # --- END INDEXING ---
 
-            # --- END INDEXING ---
-
             if row_index_to_update != -1:
-                return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename, 'md_path': md_path, 'is_indexed': True}
+                return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename, 'md_link': md_link, 'is_indexed': bool(md_link)}
             else:
-                return {'action': 'APPEND', 'data': row_data, 'filename': clean_filename, 'md_path': md_path, 'is_indexed': True}
+                return {'action': 'APPEND', 'data': row_data, 'filename': clean_filename, 'md_link': md_link, 'is_indexed': bool(md_link)}
                 
         except Exception as e:
             logger.error(f"Error processing {clean_filename}: {e}")
@@ -439,7 +431,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     'is_hyperlink': is_hyperlink,
                     'needs_fix': is_hyperlink and not is_correct_format,
                     'status': str(row[3]).strip() if len(row) > 3 else "",
-                    'is_indexed': str(row[6]).strip().lower() == "oui" if len(row) > 6 else False
+                    'is_indexed': str(row[6]).strip().upper().startswith("=HYPERLINK") if len(row) > 6 else False
                 }
             elif clean_filename:
                 # Fallback: Map by Filename if ID is missing (Broken Link)
@@ -717,38 +709,22 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     except Exception as e:
                         logger.error(f"Failed to move {result['filename']}: {e}")
 
-                # Upload MD Index if available
-                if 'md_path' in result and result['md_path']:
-                    try:
-                        upload_file_to_folder(drive_service, result['md_path'], index_folder_id, mime_type='text/markdown')
-                        # Clean up local MD file
-                        if os.path.exists(result['md_path']):
-                            os.remove(result['md_path'])
-                    except Exception as e:
-                        logger.error(f"Failed to upload index for {result['filename']}: {e}")
+                # Upload MD Index if available - ALREADY DONE IN PROCESS_SINGLE_FILE
+                # The previous logic did it here, but process_single_file now does it to get the link.
+                # We can remove this block or check if 'md_path' is still returned (it shouldn't be).
+                pass
 
                 # Collect Index Updates
-                if result.get('is_indexed'):
-                    # If it was an update, we know the row index.
-                    # If it was an append, we don't know the row index yet (it's at the end).
-                    # But wait, append_batch_to_sheet appends to A:F. 
-                    # We need to write "Oui" to Column I.
-                    # For new rows, we can just include "Oui" in the appended data?
-                    # No, append_batch writes specific columns.
-                    # Let's update our append logic to include up to Column I?
-                    # Or just update later.
+                if result.get('is_indexed') and result.get('md_link'):
+                    hyperlink_formula = f'=HYPERLINK("{result["md_link"]}", "Indexé")'
                     
-                    # Actually, for existing rows (UPDATE), we can add to indexed_buffer
                     if result['action'] == 'UPDATE':
-                        indexed_buffer.append((result['row_index'], ["Oui"]))
+                        indexed_buffer.append((result['row_index'], [hyperlink_formula]))
                     elif result['action'] == 'APPEND':
-                        # For APPEND, we should ideally include it in the row data.
-                        # Current row_data length is 6 (Filename...Language).
-                        # We need to pad to 7 columns to reach "Indexé" (Col G).
-                        # [Filename, Email, Phone, Status, Emplacement, Language, "Oui"]
+                        # For APPEND, pad to 7 columns (Col G)
                         while len(result['data']) < 6:
                             result['data'].append("")
-                        result['data'].append("Oui")
+                        result['data'].append(hyperlink_formula)
                         
                 # Batch Write
                 if len(append_buffer) >= BATCH_SIZE:
