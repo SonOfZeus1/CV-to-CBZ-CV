@@ -219,6 +219,9 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
         if not data.get('language'):
              should_full_process = True
         
+        elif not data.get('is_indexed'):
+             should_full_process = True
+        
         # Condition 2: Missing Hyperlink OR Broken Formula -> Update Link Only
         elif not data['is_hyperlink'] or data['needs_fix']:
             # logger.info(f"Updating Link for {filename}.")
