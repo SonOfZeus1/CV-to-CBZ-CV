@@ -431,7 +431,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     'is_hyperlink': is_hyperlink,
                     'needs_fix': is_hyperlink and not is_correct_format,
                     'status': str(row[3]).strip() if len(row) > 3 else "",
-                    'is_indexed': str(row[6]).strip().upper().startswith("=HYPERLINK") if len(row) > 6 else False
+                    'is_indexed': str(row[6]).strip().upper().startswith(("=HYPERLINK", "=LIEN_HYPERTEXTE")) if len(row) > 6 else False
                 }
             elif clean_filename:
                 # Fallback: Map by Filename if ID is missing (Broken Link)
@@ -716,7 +716,8 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
 
                 # Collect Index Updates
                 if result.get('is_indexed') and result.get('md_link'):
-                    hyperlink_formula = f'=HYPERLINK("{result["md_link"]}", "Indexé")'
+                    # Use the helper function to ensure consistent format (LIEN_HYPERTEXTE with ;)
+                    hyperlink_formula = create_hyperlink_formula(result["md_link"], "Indexé")
                     
                     if result['action'] == 'UPDATE':
                         indexed_buffer.append((result['row_index'], [hyperlink_formula]))
