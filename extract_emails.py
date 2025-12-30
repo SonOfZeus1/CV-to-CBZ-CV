@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 TEMP_DIR = "temp_cvs"
 INDEX_DIR = "index_cvs"
-INDEXED_COL_IDX = 8 # Column I (0-based index)
+INDEXED_COL_IDX = 6 # Column G (0-based index)
 
 def select_best_email(emails, filename):
     """
@@ -119,13 +119,17 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     # Use FORMULA render option to get the raw hyperlink formula for length comparison
     rows = get_sheet_values(sheets_service, sheet_id, sheet_name, value_render_option='FORMULA')
     
-    expected_header = ["Filename", "Email", "Phone", "Status", "Emplacement", "Language", "", "", "Indexé"]
+    expected_header = ["Filename", "Email", "Phone", "Status", "Emplacement", "Language", "Indexé"]
     
     if not rows:
         # Sheet is empty, write header
         clear_and_write_sheet(sheets_service, sheet_id, [expected_header], sheet_name)
         format_header_row(sheets_service, sheet_id, sheet_name)
         return
+    else:
+        # Force update header to ensure "Indexé" title is present in Col G
+        # We only update the first row.
+        update_sheet_row(sheets_service, sheet_id, 1, expected_header, sheet_name)
 
     header = rows[0]
     data = rows[1:]
@@ -435,7 +439,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     'is_hyperlink': is_hyperlink,
                     'needs_fix': is_hyperlink and not is_correct_format,
                     'status': str(row[3]).strip() if len(row) > 3 else "",
-                    'is_indexed': str(row[8]).strip().lower() == "oui" if len(row) > 8 else False
+                    'is_indexed': str(row[6]).strip().lower() == "oui" if len(row) > 6 else False
                 }
             elif clean_filename:
                 # Fallback: Map by Filename if ID is missing (Broken Link)
@@ -740,9 +744,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     elif result['action'] == 'APPEND':
                         # For APPEND, we should ideally include it in the row data.
                         # Current row_data length is 6 (Filename...Language).
-                        # We need to pad to 9 columns to reach "Indexé" (Col I).
-                        # [Filename, Email, Phone, Status, Emplacement, Language, "", "", "Oui"]
-                        while len(result['data']) < 8:
+                        # We need to pad to 7 columns to reach "Indexé" (Col G).
+                        # [Filename, Email, Phone, Status, Emplacement, Language, "Oui"]
+                        while len(result['data']) < 6:
                             result['data'].append("")
                         result['data'].append("Oui")
                         
@@ -768,7 +772,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     
                 if len(indexed_buffer) >= BATCH_SIZE:
                     logger.info(f"Flushing {len(indexed_buffer)} index status updates...")
-                    batch_update_rows(sheets_service, sheet_id, indexed_buffer, sheet_name, start_col='I')
+                    batch_update_rows(sheets_service, sheet_id, indexed_buffer, sheet_name, start_col='G')
                     indexed_buffer = []
         
         # Flush remaining
@@ -782,7 +786,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             
         if indexed_buffer:
             logger.info(f"Flushing remaining {len(indexed_buffer)} index status updates...")
-            batch_update_rows(sheets_service, sheet_id, indexed_buffer, sheet_name, start_col='I')
+            batch_update_rows(sheets_service, sheet_id, indexed_buffer, sheet_name, start_col='G')
 
     finally:
         # 6. Cleanup
