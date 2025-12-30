@@ -7,7 +7,7 @@ from google_drive import (
     download_file, append_to_sheet, get_sheet_values, 
     clear_and_write_sheet, format_header_row, update_sheet_row,
     append_batch_to_sheet, batch_update_rows, set_column_validation,
-    get_or_create_folder, move_file, delete_rows
+    get_or_create_folder, move_file, delete_rows, upload_file_to_folder
 )
 import re
 import difflib
@@ -478,8 +478,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         logger.info(f"Processed files will be moved to folder ID: {processed_folder_id}")
 
         # 5c. Create/Get Index Folder
-        index_folder_id = get_or_create_folder(drive_service, "_index_cvs", parent_id=folder_id)
-        logger.info(f"Index files will be uploaded to folder ID: {index_folder_id}")
+        # User requested a NEW folder to avoid "invisible" old folder issues.
+        index_folder_id = get_or_create_folder(drive_service, "_cv_index_v2", parent_id=folder_id)
+        logger.info(f"Index files will be uploaded to NEW folder ID: {index_folder_id} (Name: _cv_index_v2)")
 
         # 4. List Files (Metadata only) - FROM SOURCE ONLY
         logger.info(f"Listing top 50 most recent files from Source Folder ID: {folder_id}")
