@@ -100,18 +100,30 @@ def main():
         logger.critical(f"Auth Error: {e}")
         return
 
-    # 1. Find _cv_index_v2 folder inside Source Folder
-    logger.info(f"Looking for _cv_index_v2 in {source_folder_id}...")
-    query = f"'{source_folder_id}' in parents and name = '_cv_index_v2' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-    results = drive_service.files().list(q=query, fields="files(id, name)").execute()
-    items = results.get('files', [])
-    
-    if not items:
-        logger.error("_cv_index_v2 folder not found! Please run Pipeline 1 first.")
+    # 1. Resolve Index Folder
+    # Check if source_folder_id IS the index folder (by name)
+    try:
+        source_folder_meta = drive_service.files().get(fileId=source_folder_id, fields="name").execute()
+        if source_folder_meta.get('name') == '_cv_index_v2':
+            logger.info(f"Provided folder ID IS the index folder: {source_folder_id}")
+            index_folder_id = source_folder_id
+        else:
+            # Search for _cv_index_v2 inside source folder
+            logger.info(f"Looking for _cv_index_v2 in {source_folder_id}...")
+            query = f"'{source_folder_id}' in parents and name = '_cv_index_v2' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+            results = drive_service.files().list(q=query, fields="files(id, name)").execute()
+            items = results.get('files', [])
+            
+            if not items:
+                logger.error("_cv_index_v2 folder not found! Please run Pipeline 1 first.")
+                return
+                
+            index_folder_id = items[0]['id']
+            logger.info(f"Found Index Folder: {index_folder_id}")
+            
+    except Exception as e:
+        logger.critical(f"Error resolving folder: {e}")
         return
-        
-    index_folder_id = items[0]['id']
-    logger.info(f"Found Index Folder: {index_folder_id}")
 
     # 2. List files in Index Folder
     logger.info(f"Listing files in Index Folder...")
