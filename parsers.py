@@ -541,38 +541,46 @@ def verify_content_coverage(cv_data: Dict[str, Any], raw_text: str):
         if ratio < 0.6:
             logger.warning("ALERTE: Coverage < 60%. Some content might be missing.")
 
-def parse_cv(file_path: str) -> Optional[dict]:
-    filename = os.path.basename(file_path)
-    _, extension = os.path.splitext(filename)
-    
-    # 1. Extract Text
-    text, ocr_applied = "", False
-    if extension.lower() == ".pdf":
-        text, ocr_applied = extract_text_from_pdf(file_path)
-    elif extension.lower() == ".docx":
-        text = extract_text_from_docx(file_path)
-    
+def parse_cv_from_text(text: str, filename: str, metadata: Optional[Dict] = None) -> Optional[dict]:
+    """
+    Parses CV from raw text.
+    metadata: Optional dict with pre-validated info (email, phone, etc.) from YAML frontmatter.
+    """
     if not text.strip():
-        logger.error("Empty text extracted.")
+        logger.error("Empty text provided.")
         return None
 
-    # 2. Clean Text
+    # 1. Clean Text
     clean_text = pre_process_text(text)
     
-    # 3. AI Contact Extraction
+    # 2. AI Contact Extraction
     logger.info("Step 1: Extracting Contact Info...")
-    basics = ai_parse_contact(clean_text)
-    if not basics:
+    
+    # Optimization: Use metadata if available
+    basics = {}
+    if metadata:
+        logger.info("Using metadata from Frontmatter for Contact Info.")
+        basics = {
+            "email": metadata.get("email", ""),
+            "phone": metadata.get("phone", ""),
+        }
+    
+    ai_basics = ai_parse_contact(clean_text)
+    if not ai_basics:
         logger.warning("Contact extraction failed. Attempting Heuristic Fallback.")
-        # Use the contact block from segmentation if available, otherwise use first few lines
         contact_text = clean_text[:1000]
-        basics = heuristic_parse_contact(contact_text)
+        ai_basics = heuristic_parse_contact(contact_text)
         
-    # 4. AI Segmentation
+    if ai_basics:
+        if metadata:
+            ai_basics["email"] = metadata.get("email") or ai_basics.get("email")
+            ai_basics["phone"] = metadata.get("phone") or ai_basics.get("phone")
+        basics = ai_basics
+
+    # 3. AI Segmentation
     logger.info("Step 2: Segmenting CV...")
     segments = ai_parse_segmentation(clean_text)
     
-    # Check if AI segmentation failed (empty or just other_block)
     is_ai_failed = not segments or (list(segments.keys()) == ["other_block"] and len(segments) == 1)
     
     if is_ai_failed:
@@ -583,17 +591,15 @@ def parse_cv(file_path: str) -> Optional[dict]:
         logger.warning("Heuristic segmentation also failed. Using full text as 'other'.")
         segments = {"other_block": clean_text}
 
-    # 5. Process Experience
+    # 4. Process Experience
     logger.info("Step 3: Processing Experience Blocks (Parallel)...")
     structured_experiences = []
     
     if "experience_blocks" in segments and isinstance(segments["experience_blocks"], list):
         experience_blocks = [b for b in segments["experience_blocks"] if isinstance(b, str) and b.strip()]
         
-        # Helper function for parallel execution
         def process_single_experience(exp_text, index):
             try:
-                # Add delay to respect rate limits
                 time.sleep(2)
                 exp_data = ai_parse_experience_block(exp_text)
                 return index, exp_data, exp_text
@@ -601,108 +607,45 @@ def parse_cv(file_path: str) -> Optional[dict]:
                 logger.error(f"Error parsing experience block {index}: {e}")
                 return index, None, exp_text
 
-        # Execute sequentially to avoid Rate Limits
-        results = []
-        for i, txt in enumerate(experience_blocks):
-            # Add significant delay to respect strict rate limits
-            time.sleep(20) 
-            idx, exp_data, exp_text = process_single_experience(txt, i)
-            results.append((idx, exp_data, exp_text))
-                
-        # Sort by original index to maintain order
-        results.sort(key=lambda x: x[0])
-        
-        # Deduplication set
-        seen_experiences = set()
-        
-        for _, exp_data, exp_text in results:
-            if not exp_data:
-                continue
-                
-            # Handle structured dates
-            start_date = exp_data.get("start_date", "")
-            end_date = exp_data.get("end_date", "")
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = []
+            for i, exp_text in enumerate(experience_blocks):
+                futures.append(executor.submit(process_single_experience, exp_text, i))
             
-            # Construct legacy dates string for display
-            dates_str = f"{start_date} - {end_date}" if start_date and end_date else exp_data.get("dates", "")
+            results = []
+            for future in as_completed(futures):
+                results.append(future.result())
             
-            # Calculate duration using structured dates
-            if not exp_data.get("duration"):
-                exp_data["duration"] = calculate_duration_string(start_date, end_date)
+            results.sort(key=lambda x: x[0])
+            
+            for _, exp_data, exp_text in results:
+                if exp_data:
+                    entry = ExperienceEntry(
+                        job_title=exp_data.get("job_title", ""),
+                        company=exp_data.get("company", ""),
+                        location=exp_data.get("location", ""),
+                        dates=exp_data.get("dates", ""),
+                        duration=exp_data.get("duration", ""),
+                        summary=exp_data.get("summary", ""),
+                        tasks=exp_data.get("tasks", []),
+                        skills=exp_data.get("skills", []),
+                        full_text=exp_text
+                    )
+                    structured_experiences.append(entry)
 
-            # Fallback parsing if AI failed to extract key fields
-            if not exp_data.get("job_title") and not exp_data.get("company"):
-                logger.warning("AI failed to extract experience details, trying heuristic fallback...")
-                heuristic_data = heuristic_parse_experience(exp_text)
-                # Merge heuristic data
-                for k, v in heuristic_data.items():
-                    if not exp_data.get(k):
-                        exp_data[k] = v
-                
-                # If we fell back to heuristic, we might have a single 'dates' string
-                # Try to split it for duration calculation if needed
-                if not exp_data.get("duration") and exp_data.get("dates"):
-                    # Heuristic returns "Start - End"
-                    d_str = exp_data.get("dates")
-                    # We can try to reuse our calc function by splitting loosely
-                    parts = re.split(r'\s+(?:-|–|—|to|à)\s+', d_str)
-                    if len(parts) == 2:
-                        exp_data["duration"] = calculate_duration_string(parts[0], parts[1])
-
-            # Map various possible keys for job title
-            job_title = exp_data.get("job_title") or exp_data.get("titre_poste") or exp_data.get("titre") or "Poste inconnu"
-            company = exp_data.get("company", "") or exp_data.get("entreprise", "")
-            location = exp_data.get("localisation", "") or exp_data.get("location", "")
-            
-            # Deduplication Check
-            # Create a signature based on key fields
-            # We normalize strings to avoid minor differences (case, whitespace)
-            def normalize_key(s): return str(s).strip().lower()
-            
-            sig = (
-                normalize_key(job_title),
-                normalize_key(company),
-                normalize_key(dates_str)
-            )
-            
-            if sig in seen_experiences:
-                logger.info(f"Skipping duplicate experience: {job_title} at {company} ({dates_str})")
-                continue
-                
-            seen_experiences.add(sig)
-
-            entry = ExperienceEntry(
-                job_title=job_title,
-                company=company,
-                location=location,
-                dates=dates_str,
-                duration=exp_data.get("duration", "") or exp_data.get("duree", ""),
-                summary=exp_data.get("resume", "") or exp_data.get("summary", ""),
-                tasks=exp_data.get("taches", []) or exp_data.get("tasks", []),
-                skills=exp_data.get("competences", []) or exp_data.get("skills", []),
-                full_text=exp_text
-            )
-            structured_experiences.append(entry)
-    # 5b. Generate Dynamic Summary
-    logger.info("Step 3b: Generating Dynamic Summary...")
+    # 5. Generate Summary
     generated_summary = ""
     if structured_experiences:
-        try:
-            # Convert ExperienceEntry objects to dicts for the AI function
-            exp_dicts = [exp.to_dict() for exp in structured_experiences]
-            summary_result = ai_generate_summary(exp_dicts)
-            generated_summary = summary_result.get("generated_summary", "")
-        except Exception as e:
-            logger.error(f"Error generating summary: {e}")
+        logger.info("Step 4: Generating Professional Summary...")
+        summary_data = ai_generate_summary([e.to_dict() for e in structured_experiences])
+        generated_summary = summary_data.get("generated_summary", "")
 
     # 6. Process Education
-    logger.info("Step 4: Processing Education...")
+    logger.info("Step 5: Processing Education...")
     education_entries = []
     edu_block = segments.get("education_block", "")
     if edu_block:
         edu_data = ai_parse_education(edu_block)
-        
-        # Fallback
         if not edu_data or not edu_data.get("education"):
              logger.warning("AI Education Parsing failed. Using Heuristic Fallback.")
              edu_data = heuristic_parse_education(edu_block)
@@ -719,20 +662,14 @@ def parse_cv(file_path: str) -> Optional[dict]:
     skills_tech = []
     skills_block = segments.get("skills_block", "")
     if skills_block:
-        # Split by comma, bullet, or newline
         raw_skills = re.split(r"[,•\n]", skills_block)
         for s in raw_skills:
             s = s.strip()
             if not s: continue
-            # Filter out headers and noise
-            # Check for colons at end (standard and full-width)
             if s.endswith(":") or s.endswith("："): continue 
-            # Check for known headers
             if "COMPÉTENCES" in s.upper() or "TECHNIQUES" in s.upper(): continue
             if "DÉVELOPPEMENT" in s.upper() and s.endswith(":"): continue
-            
-            if len(s) < 2: continue # Filter single chars like "."
-            
+            if len(s) < 2: continue
             skills_tech.append(s)
 
     extra_info = []
@@ -742,7 +679,7 @@ def parse_cv(file_path: str) -> Optional[dict]:
 
     # 8. Assemble CV Data
     cv_data = CVData(
-        meta={"filename": filename, "ocr_applied": str(ocr_applied)},
+        meta={"filename": filename, "ocr_applied": str(metadata.get("ocr_applied", "False") if metadata else "False")},
         basics=basics,
         links=[basics.get("linkedin")] if basics.get("linkedin") else [],
         summary=generated_summary if generated_summary else basics.get("summary", ""), 
@@ -751,6 +688,7 @@ def parse_cv(file_path: str) -> Optional[dict]:
         education=education_entries,
         languages=basics.get("languages", []),
         extra_info=extra_info,
+        unmapped=[],
         raw_text=text
     )
 
@@ -768,3 +706,23 @@ def parse_cv(file_path: str) -> Optional[dict]:
         logger.error("CRITICAL: Name missing in basics!")
         
     return result_dict
+
+def parse_cv(file_path: str) -> Optional[dict]:
+    filename = os.path.basename(file_path)
+    _, extension = os.path.splitext(filename)
+    
+    # 1. Extract Text
+    text, ocr_applied = "", False
+    if extension.lower() == ".pdf":
+        text, ocr_applied = extract_text_from_pdf(file_path)
+    elif extension.lower() == ".docx":
+        text = extract_text_from_docx(file_path)
+    
+    if not text.strip():
+        logger.error("Empty text extracted.")
+        return None
+
+    # 2. Delegate to parse_cv_from_text
+    # We pass ocr_applied as metadata
+    return parse_cv_from_text(text, filename, metadata={"ocr_applied": ocr_applied})
+

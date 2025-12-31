@@ -2,14 +2,16 @@ import os
 import json
 import logging
 import io
+import yaml
+import re
 from dotenv import load_dotenv
 from googleapiclient.http import MediaIoBaseDownload
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from google_drive import get_drive_service, list_files_in_folder, download_file, upload_file_to_folder
-from parsers import parse_cv
+from google_drive import get_drive_service, list_files_in_folder, download_file, upload_file_to_folder, get_or_create_folder
+from parsers import parse_cv_from_text
 
 # Configuration
 DOWNLOADS_DIR = "downloads"
@@ -17,7 +19,7 @@ JSON_OUTPUT_DIR = "output_jsons"
 
 def process_file(file_item, drive_service, output_folder_id):
     """
-    Process a single file: Download -> Parse -> Upload JSON
+    Process a single MD file: Read Content -> Parse -> Upload JSON
     """
     file_id = file_item['id']
     file_name = file_item['name']
@@ -25,20 +27,41 @@ def process_file(file_item, drive_service, output_folder_id):
     logger.info(f"Processing file: {file_name} ({file_id})")
     
     try:
-        # 1. Download PDF
+        # 1. Download MD File (or read content directly if small)
+        # Since MD files are small, we can download to memory or temp file
         local_path = download_file(drive_service, file_id, file_name, DOWNLOADS_DIR)
         if not local_path:
             logger.error(f"Failed to download {file_name}")
             return
 
-        # 2. Parse (AI Extraction)
-        parsed_data = parse_cv(local_path)
+        # 2. Read Content
+        with open(local_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        # 3. Parse Frontmatter
+        # Frontmatter is between first two ---
+        metadata = {}
+        body_text = content
+        
+        if content.startswith("---"):
+            try:
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    frontmatter = parts[1]
+                    body_text = parts[2]
+                    metadata = yaml.safe_load(frontmatter)
+            except Exception as e:
+                logger.warning(f"Failed to parse frontmatter for {file_name}: {e}")
+        
+        # 4. Parse (AI Extraction) using Raw Text
+        # We pass metadata (email, phone) to help AI
+        parsed_data = parse_cv_from_text(body_text, file_name, metadata=metadata)
         
         if not parsed_data:
             logger.error(f"Failed to parse {file_name}")
             return
 
-        # 3. Save JSON Locally
+        # 5. Save JSON Locally
         base_name = os.path.splitext(file_name)[0]
         json_filename = f"{base_name}_extracted.json"
         if not os.path.exists(JSON_OUTPUT_DIR):
@@ -48,10 +71,7 @@ def process_file(file_item, drive_service, output_folder_id):
         with open(json_output_path, 'w', encoding='utf-8') as f:
             json.dump(parsed_data, f, ensure_ascii=False, indent=4)
             
-        # 4. Upload JSON to Drive
-        # We upload to the output folder. 
-        # Note: We don't check for duplicates here as per "simple" requirement, 
-        # but upload_file_to_folder usually creates a new file.
+        # 6. Upload JSON to Drive
         json_file_id, json_link = upload_file_to_folder(drive_service, json_output_path, output_folder_id)
         
         logger.info(f"SUCCESS: Extracted {file_name} -> {json_filename} ({json_link})")
@@ -61,7 +81,7 @@ def process_file(file_item, drive_service, output_folder_id):
 
 def main():
     load_dotenv()
-    logger.info("--- Starting Pipeline 1: EXTRACTION (Folder -> Folder) ---")
+    logger.info("--- Starting Pipeline 2: EXTRACTION (Markdown -> JSON) ---")
 
     source_folder_id = os.environ.get('CV_TO_JSON_FOLDER_ID')
     json_output_folder_id = os.environ.get('JSON_OUTPUT_FOLDER_ID')
@@ -80,19 +100,33 @@ def main():
         logger.critical(f"Auth Error: {e}")
         return
 
-    # 1. List files in Source Folder
-    logger.info(f"Listing files in Source Folder ({source_folder_id})...")
-    files = list_files_in_folder(drive_service, source_folder_id)
+    # 1. Find _cv_index_v2 folder inside Source Folder
+    logger.info(f"Looking for _cv_index_v2 in {source_folder_id}...")
+    query = f"'{source_folder_id}' in parents and name = '_cv_index_v2' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    results = drive_service.files().list(q=query, fields="files(id, name)").execute()
+    items = results.get('files', [])
+    
+    if not items:
+        logger.error("_cv_index_v2 folder not found! Please run Pipeline 1 first.")
+        return
+        
+    index_folder_id = items[0]['id']
+    logger.info(f"Found Index Folder: {index_folder_id}")
+
+    # 2. List files in Index Folder
+    logger.info(f"Listing files in Index Folder...")
+    files = list_files_in_folder(drive_service, index_folder_id)
     
     if not files:
-        logger.info("No files found in Source Folder.")
+        logger.info("No files found in Index Folder.")
         return
         
     logger.info(f"Found {len(files)} files to process.")
 
-    # 2. Process each file
+    # 3. Process each file
     for file_item in files:
-        process_file(file_item, drive_service, json_output_folder_id)
+        if file_item['name'].endswith('.md'):
+            process_file(file_item, drive_service, json_output_folder_id)
 
     logger.info("--- Extraction Pipeline Finished ---")
 
