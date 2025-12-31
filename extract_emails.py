@@ -483,8 +483,8 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         logger.info(f"Index files will be uploaded to NEW folder ID: {index_folder_id} (Name: _cv_index_v2)")
 
         # 4. List Files (Metadata only) - FROM SOURCE ONLY
-        logger.info(f"Listing top 50 most recent files from Source Folder ID: {folder_id}")
-        source_files = list_files_in_folder(drive_service, folder_id, order_by='modifiedTime desc', page_size=50)
+        logger.info(f"Listing top 100 most recent files from Source Folder ID: {folder_id}")
+        source_files = list_files_in_folder(drive_service, folder_id, order_by='modifiedTime desc', page_size=100)
         
         # Identify files needing update from Excel
         files_needing_update = []
@@ -584,7 +584,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         # So we should perhaps take them even before source_files?
         # Let's keep the mix but ensure high priority ones get in.
         
-        update_ids = update_ids[:50]
+        update_ids = update_ids[:100]
         
         for fid in update_ids:
             if fid not in source_ids:
