@@ -10,7 +10,6 @@ from groq import Groq
 logger = logging.getLogger(__name__)
 
 # Constants
-# Constants
 # Priority list of models (Quality -> Speed/Quota)
 MODELS = [
     "llama-3.3-70b-versatile",  # Best Quality (100k TPD)
@@ -18,6 +17,35 @@ MODELS = [
     "llama-3.1-8b-instant",     # Fast/High Quota (500k TPD)
 ]
 MAX_RETRIES_PER_MODEL = 2
+
+# Rate Limiting Configuration
+RATE_LIMITS = {
+    "llama-3.3-70b-versatile": {"rpm": 30},
+    "qwen/qwen3-32b": {"rpm": 60},
+    "llama-3.1-8b-instant": {"rpm": 30},
+}
+
+class RateLimiter:
+    def __init__(self):
+        self.last_request_time = {}
+        
+    def wait_for_token(self, model_name):
+        limits = RATE_LIMITS.get(model_name, {"rpm": 30})
+        rpm = limits["rpm"]
+        interval = 60.0 / rpm
+        
+        now = time.time()
+        last = self.last_request_time.get(model_name, 0)
+        
+        elapsed = now - last
+        if elapsed < interval:
+            sleep_time = interval - elapsed
+            logger.info(f"Rate Limit: Sleeping {sleep_time:.2f}s for {model_name}")
+            time.sleep(sleep_time)
+            
+        self.last_request_time[model_name] = time.time()
+
+rate_limiter = RateLimiter()
 
 class AIClient:
     _instance = None
@@ -54,55 +82,13 @@ class AIClient:
         if expect_json:
              messages.append({"role": "system", "content": "IMPORTANT: Output ONLY valid JSON. No markdown, no explanations."})
 
-# Rate Limiting Configuration
-RATE_LIMITS = {
-    "llama-3.3-70b-versatile": {"rpm": 30},
-    "qwen/qwen3-32b": {"rpm": 60},
-    "llama-3.1-8b-instant": {"rpm": 30},
-}
-
-class RateLimiter:
-    def __init__(self):
-        self.last_request_time = {}
+        logger.info(f"Calling AI (JSON={expect_json}). Prompt length: {len(prompt)}")
         
-    def wait_for_token(self, model_name):
-        limits = RATE_LIMITS.get(model_name, {"rpm": 30})
-        rpm = limits["rpm"]
-        interval = 60.0 / rpm
-        
-        now = time.time()
-        last = self.last_request_time.get(model_name, 0)
-        
-        elapsed = now - last
-        if elapsed < interval:
-            sleep_time = interval - elapsed
-            logger.info(f"Rate Limit: Sleeping {sleep_time:.2f}s for {model_name}")
-            time.sleep(sleep_time)
-            
-        self.last_request_time[model_name] = time.time()
+        start_time = time.time()
 
-rate_limiter = RateLimiter()
-
-def call_groq_api(system_prompt: str, user_prompt: str, expect_json: bool = True, temperature: float = 0.0) -> Dict[str, Any]:
-    """
-    Calls Groq API with fallback logic and Rate Limiting.
-    """
-    prompt = f"{system_prompt}\n\n{user_prompt}"
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt}
-    ]
-    
-    if expect_json:
-         messages.append({"role": "system", "content": "IMPORTANT: Output ONLY valid JSON. No markdown, no explanations."})
-
-    logger.info(f"Calling AI (JSON={expect_json}). Prompt length: {len(prompt)}")
-    
-    start_time = time.time()
-
-    # Iterate through models in priority order
-    for model in MODELS:
-        try:
+        # Iterate through models in priority order
+        for model in MODELS:
+            # Rate Limit Check
             rate_limiter.wait_for_token(model)
             
             logger.info(f"Trying model: {model}")
@@ -138,8 +124,7 @@ def call_groq_api(system_prompt: str, user_prompt: str, expect_json: bool = True
                                 logger.info("Retrying same model...")
                                 continue
                             else:
-                                # If JSON parsing fails repeatedly on this model, maybe try next model?
-                                # Or just fail. Let's try next model.
+                                # If JSON parsing fails repeatedly on this model, try next model
                                 logger.warning(f"JSON parsing failed for {model}, switching to next model...")
                                 break 
                     
