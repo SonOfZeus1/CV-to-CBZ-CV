@@ -53,15 +53,32 @@ def get_drive_service():
     creds, _ = google.auth.default(scopes=SCOPES)
     return build('drive', 'v3', credentials=creds)
 
-def list_files_in_folder(service, folder_id, order_by=None, page_size=1000):
+def list_files_in_folder(service, folder_id, order_by=None, page_size=1000, mime_types=None):
     """
     Lists files in a specific Google Drive folder.
     Returns a list of file metadata (id, name, webViewLink, modifiedTime).
     """
-    # Filter for only PDF and DOCX files to avoid "fileNotDownloadable" 403 errors on Google Docs/Sheets
+    # Default to PDF and DOCX if no mime_types provided (Backward Compatibility)
+    if mime_types is None:
+        mime_types = [
+            'application/pdf',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        ]
+        
+    # Build query dynamically
+    mime_query_parts = []
+    for mime in mime_types:
+        if mime == 'text/markdown':
+            # Special case for markdown which might be identified by extension
+            mime_query_parts.append("(mimeType = 'text/markdown' or name contains '.md')")
+        else:
+            mime_query_parts.append(f"mimeType = '{mime}'")
+            
+    mime_query = " or ".join(mime_query_parts)
+    
     query = (
         f"'{folder_id}' in parents "
-        f"and (mimeType = 'application/pdf' or mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') "
+        f"and ({mime_query}) "
         f"and trashed = false"
     )
     files = []

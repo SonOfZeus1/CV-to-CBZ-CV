@@ -100,7 +100,8 @@ def main():
     # 2. List files in Index Folder
     logger.info(f"Listing files in Index Folder...")
     try:
-        files = list_files_in_folder(drive_service, index_folder_id)
+        # Only list Markdown files for Pipeline 2
+        files = list_files_in_folder(drive_service, index_folder_id, mime_types=['text/markdown'])
     except Exception as e:
         logger.critical(f"Error listing files in folder {index_folder_id}: {e}")
         return
