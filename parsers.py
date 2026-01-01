@@ -638,28 +638,38 @@ def parse_cv_from_text(text: str, filename: str, metadata: Optional[Dict] = None
     # Re-extract anchors from this specific text
     exp_anchors = extract_date_anchors(experience_source_text)
     
-    def process_anchor(anchor, next_anchor_start_idx, full_text):
+    def process_anchor(anchor, prev_anchor_end_idx, next_anchor_start_idx, full_text):
         # Define window
-        # Start: look back 10 lines or 500 chars for context (Title/Company)
+        # Start: Look back for context (Title/Company), but NOT beyond the previous anchor's end.
+        # This prevents capturing the previous job's description or company.
+        
+        # Default lookback is 500 chars, but clamped by prev_anchor_end_idx
+        lookback_limit = prev_anchor_end_idx if prev_anchor_end_idx is not None else 0
+        desired_start = max(0, anchor.start_idx - 500)
+        
+        start_window = max(desired_start, lookback_limit)
+        
         # End: next anchor start
-        
-        start_window = max(0, anchor.start_idx - 500)
         end_window = next_anchor_start_idx if next_anchor_start_idx else len(full_text)
-        
-        # Refine start: try to stop at previous newline to avoid cutting words
-        # But simple slicing is okay for AI context.
         
         block_text = full_text[start_window:end_window]
         
         # Prepare Date Context string
         date_context = f"Raw: {anchor.raw}, Start: {anchor.start}, End: {anchor.end}, Current: {anchor.is_current}"
+        if anchor.start_is_year_only:
+             date_context += " (Year Only)"
         
         # AI Call
         try:
-            slot_data = ai_parse_experience_slot(block_text, date_context)
+            slot_data = ai_parse_experience_slot(
+                block_text, 
+                date_context,
+                start_is_year_only=anchor.start_is_year_only,
+                end_is_year_only=anchor.end_is_year_only
+            )
             if not slot_data: return None
             
-            # Merge Data
+            # Create Entry
             entry = ExperienceEntry(
                 job_title=slot_data.get("job_title", ""),
                 company=slot_data.get("company", ""),
@@ -668,12 +678,19 @@ def parse_cv_from_text(text: str, filename: str, metadata: Optional[Dict] = None
                 date_start=anchor.start,
                 date_end=anchor.end,
                 is_current=anchor.is_current,
-                duration=f"{compute_duration_months(anchor.start, anchor.end, anchor.is_current)} mois",
+                duration="", # Recalculate below
                 summary=slot_data.get("summary", ""),
                 tasks=slot_data.get("tasks", []),
                 skills=slot_data.get("skills", []),
                 full_text=block_text[:200] + "..." # Truncate for storage
             )
+            
+            # Calculate Duration only if precise enough
+            if not anchor.start_is_year_only and (anchor.is_current or (anchor.end and not anchor.end_is_year_only)):
+                 months = compute_duration_months(anchor.start, anchor.end, anchor.is_current)
+                 if months > 0:
+                     entry.duration = f"{months} mois"
+            
             return entry
         except Exception as e:
             logger.error(f"Error processing anchor {anchor.raw}: {e}")

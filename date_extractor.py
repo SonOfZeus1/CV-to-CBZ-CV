@@ -11,48 +11,48 @@ logger = logging.getLogger(__name__)
 @dataclass
 class DateAnchor:
     raw: str
-    start: str # YYYY-MM or YYYY-01
-    end: Optional[str] # YYYY-MM or None
+    start: str # YYYY-MM or YYYY
+    end: Optional[str] # YYYY-MM or YYYY or None
     is_current: bool
-    precision: str # "month" or "year"
+    precision: str # "year", "month"
     start_idx: int
     end_idx: int
+    start_is_year_only: bool = False
+    end_is_year_only: bool = False
 
 def compute_duration_months(start_str: str, end_str: Optional[str], is_current: bool) -> int:
     """Calculates duration in months."""
-    if not start_str:
+    if not start_str or len(start_str) == 4: # Year only -> No duration calculation
         return 0
         
     try:
         start_date = datetime.strptime(start_str, "%Y-%m")
     except ValueError:
-        return 0 # Should not happen if normalized correctly
+        return 0 
 
     end_date = datetime.now()
     if not is_current and end_str:
+        if len(end_str) == 4: # End is year only -> No duration
+            return 0
         try:
             end_date = datetime.strptime(end_str, "%Y-%m")
         except ValueError:
             return 0
             
-    # Add 1 month for inclusive calculation (e.g. Jan to Jan = 1 month)
-    # But relativedelta does difference.
-    # If end_date is same month as start_date, diff is 0. We want 1.
-    # So we add 1 month to end_date roughly? Or just use relativedelta + 1?
-    
     diff = relativedelta(end_date, start_date)
     total_months = diff.years * 12 + diff.months
     
-    # Heuristic: if total_months is 0 (same month), count as 1
     if total_months == 0:
         total_months = 1
         
     return total_months
 
-def normalize_date(date_obj: datetime) -> str:
-    """Returns YYYY-MM string."""
+def normalize_date(date_obj: datetime, is_year_only: bool = False) -> str:
+    """Returns YYYY-MM or YYYY string."""
     if not date_obj:
         return ""
+    if is_year_only:
+        return date_obj.strftime("%Y")
     return date_obj.strftime("%Y-%m")
 
 def extract_date_anchors(text: str) -> List[DateAnchor]:
@@ -86,24 +86,29 @@ def extract_date_anchors(text: str) -> List[DateAnchor]:
         end_raw = match.group(2)
         
         start_dt = dateparser.parse(start_raw, languages=['fr', 'en'], settings={'PREFER_DAY_OF_MONTH': 'first'})
+        start_is_year_only = len(start_raw) <= 4
         
         is_current = False
         end_dt = None
+        end_is_year_only = False
         
         if re.match(r'(?i)^(present|aujourd\'hui|now|actuel|current)$', end_raw):
             is_current = True
         else:
             end_dt = dateparser.parse(end_raw, languages=['fr', 'en'], settings={'PREFER_DAY_OF_MONTH': 'last'})
+            end_is_year_only = len(end_raw) <= 4
             
         if start_dt:
             anchor = DateAnchor(
                 raw=raw,
-                start=normalize_date(start_dt),
-                end=normalize_date(end_dt) if end_dt else None,
+                start=normalize_date(start_dt, start_is_year_only),
+                end=normalize_date(end_dt, end_is_year_only) if end_dt else None,
                 is_current=is_current,
-                precision="month" if len(start_raw) > 4 else "year",
+                precision="month" if not start_is_year_only else "year",
                 start_idx=match.start(),
-                end_idx=match.end()
+                end_idx=match.end(),
+                start_is_year_only=start_is_year_only,
+                end_is_year_only=end_is_year_only
             )
             anchors.append(anchor)
 
@@ -117,16 +122,19 @@ def extract_date_anchors(text: str) -> List[DateAnchor]:
         raw = match.group(0)
         start_raw = match.group(1)
         start_dt = dateparser.parse(start_raw, languages=['fr', 'en'], settings={'PREFER_DAY_OF_MONTH': 'first'})
+        start_is_year_only = len(start_raw) <= 4
         
         if start_dt:
             anchor = DateAnchor(
                 raw=raw,
-                start=normalize_date(start_dt),
+                start=normalize_date(start_dt, start_is_year_only),
                 end=None,
                 is_current=True,
-                precision="month" if len(start_raw) > 4 else "year",
+                precision="month" if not start_is_year_only else "year",
                 start_idx=match.start(),
-                end_idx=match.end()
+                end_idx=match.end(),
+                start_is_year_only=start_is_year_only,
+                end_is_year_only=False
             )
             anchors.append(anchor)
 
@@ -184,12 +192,14 @@ def extract_date_anchors(text: str) -> List[DateAnchor]:
         if start_dt:
             anchor = DateAnchor(
                 raw=raw,
-                start=normalize_date(start_dt),
-                end=normalize_date(start_dt), # Single year = start and end same year roughly
+                start=normalize_date(start_dt, is_year_only=True),
+                end=normalize_date(start_dt, is_year_only=True), # Single year = start and end same year roughly
                 is_current=False,
                 precision="year",
                 start_idx=start_pos,
-                end_idx=end_pos
+                end_idx=end_pos,
+                start_is_year_only=True,
+                end_is_year_only=True
             )
             anchors.append(anchor)
 

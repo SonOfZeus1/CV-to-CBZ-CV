@@ -37,4 +37,18 @@ def preprocess_markdown(text: str) -> str:
              spaced_m = r'\s+'.join(list(m))
              text = re.sub(fr'\b{spaced_m}\b', m, text, flags=re.IGNORECASE)
 
+    # 4. Fix Spaced Years (e.g. "2 0 0 8" -> "2008")
+    # This is common in some PDF extractions (vertical text)
+    # Regex: digit space digit space digit space digit
+    # We use a lookahead/lookbehind to ensure it's isolated or part of a date
+    text = re.sub(r'(?<!\d)(\d)\s+(\d)\s+(\d)\s+(\d)(?!\d)', r'\1\2\3\4', text)
+
+    # 5. Fix "DEPUIS" / "SINCE" context
+    # Ensure space after
+    text = re.sub(r'(?i)(depuis|since)\s*(\d)', r'\1 \2', text)
+    
+    # 6. Fix "Contrat" context
+    # "Contrat 2023" -> "Contrat 2023" (already ok, but ensure space)
+    text = re.sub(r'(?i)(contrat|mandat)[:\s]*(\d)', r'\1 \2', text)
+
     return text.strip()

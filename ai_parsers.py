@@ -225,9 +225,14 @@ def ai_parse_segmentation(full_text: str) -> Dict[str, Any]:
     prompt = SEGMENTATION_USER_PROMPT.format(text=full_text[:15000])
     return call_ai(prompt, SEGMENTATION_SYSTEM_PROMPT, expect_json=True)
 
-def ai_parse_experience_slot(block_text: str, date_context: str) -> Dict[str, Any]:
+def ai_parse_experience_slot(block_text: str, date_context: str, start_is_year_only: bool = False, end_is_year_only: bool = False) -> Dict[str, Any]:
     """Fills content slots for a pre-segmented experience block."""
-    prompt = EXPERIENCE_SLOT_FILLING_USER_PROMPT.format(text=block_text, date_context=date_context)
+    # Append instruction about year-only dates if needed
+    extra_instruction = ""
+    if start_is_year_only or end_is_year_only:
+        extra_instruction = "\nNOTE: Dates provided are Year-Only. Do NOT invent months."
+        
+    prompt = EXPERIENCE_SLOT_FILLING_USER_PROMPT.format(text=block_text, date_context=date_context + extra_instruction)
     return call_ai(prompt, EXPERIENCE_SLOT_FILLING_SYSTEM_PROMPT, expect_json=True)
 
 def ai_parse_education(block_text: str) -> Dict[str, Any]:
