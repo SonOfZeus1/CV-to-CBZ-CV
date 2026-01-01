@@ -55,6 +55,11 @@ class AIClient:
              messages.append({"role": "system", "content": "IMPORTANT: Output ONLY valid JSON. No markdown, no explanations."})
 
         logger.info(f"Calling AI (JSON={expect_json}). Prompt length: {len(prompt)}")
+        
+        # Rate Limit Throttling: Sleep to avoid hitting 30 RPM (1 req / 2s)
+        # We add a small buffer.
+        time.sleep(2.0)
+        
         start_time = time.time()
 
         # Iterate through models in priority order
