@@ -591,47 +591,112 @@ def parse_cv_from_text(text: str, filename: str, metadata: Optional[Dict] = None
         logger.warning("Heuristic segmentation also failed. Using full text as 'other'.")
         segments = {"other_block": clean_text}
 
-    # 4. Process Experience
-    logger.info("Step 3: Processing Experience Blocks (Parallel)...")
+    # 4. Process Experience (Experience-First Strategy)
+    logger.info("Step 3: Processing Experience Blocks (Code-First)...")
     structured_experiences = []
     
+    # Import new modules
+    from text_processor import preprocess_markdown
+    from date_extractor import extract_date_anchors, compute_duration_months
+    from ai_parsers import ai_parse_experience_slot
+    
+    # 1. Preprocess specifically for Markdown
+    # We already cleaned text with pre_process_text, but let's apply the markdown specific one too
+    # on the full text or just the experience part?
+    # The segmentation might have failed if text was dirty.
+    # Ideally we should have preprocessed BEFORE segmentation.
+    # But let's apply it now on the full text to find anchors.
+    
+    clean_md_text = preprocess_markdown(text)
+    
+    # 2. Extract Date Anchors
+    anchors = extract_date_anchors(clean_md_text)
+    logger.info(f"Found {len(anchors)} date anchors.")
+    
+    # 3. Build Blocks around Anchors
+    # Strategy: Each anchor is a potential experience.
+    # We take the text between this anchor and the next one (or end of text).
+    # We also look backwards a bit to catch the title/company.
+    
+    # Filter anchors to only keep those likely to be experience dates (not education dates)
+    # This is hard without segmentation.
+    # Hybrid approach: Use the 'experience_blocks' from AI segmentation if available,
+    # BUT re-process them with our Date Extractor.
+    
+    # If AI segmentation worked reasonably well, we can use it to narrow down the text.
+    # If not, we fall back to full text.
+    
+    experience_source_text = ""
     if "experience_blocks" in segments and isinstance(segments["experience_blocks"], list):
-        experience_blocks = [b for b in segments["experience_blocks"] if isinstance(b, str) and b.strip()]
+        # Join them to get a continuous block
+        experience_source_text = "\n\n".join([str(b) for b in segments["experience_blocks"]])
+    else:
+        # Fallback: use the whole text if segmentation failed
+        experience_source_text = clean_md_text
         
-        def process_single_experience(exp_text, index):
-            try:
-                time.sleep(2)
-                exp_data = ai_parse_experience_block(exp_text)
-                return index, exp_data, exp_text
-            except Exception as e:
-                logger.error(f"Error parsing experience block {index}: {e}")
-                return index, None, exp_text
+    # Re-extract anchors from this specific text
+    exp_anchors = extract_date_anchors(experience_source_text)
+    
+    def process_anchor(anchor, next_anchor_start_idx, full_text):
+        # Define window
+        # Start: look back 10 lines or 500 chars for context (Title/Company)
+        # End: next anchor start
+        
+        start_window = max(0, anchor.start_idx - 500)
+        end_window = next_anchor_start_idx if next_anchor_start_idx else len(full_text)
+        
+        # Refine start: try to stop at previous newline to avoid cutting words
+        # But simple slicing is okay for AI context.
+        
+        block_text = full_text[start_window:end_window]
+        
+        # Prepare Date Context string
+        date_context = f"Raw: {anchor.raw}, Start: {anchor.start}, End: {anchor.end}, Current: {anchor.is_current}"
+        
+        # AI Call
+        try:
+            slot_data = ai_parse_experience_slot(block_text, date_context)
+            if not slot_data: return None
+            
+            # Merge Data
+            entry = ExperienceEntry(
+                job_title=slot_data.get("job_title", ""),
+                company=slot_data.get("company", ""),
+                location=slot_data.get("location", ""),
+                dates=anchor.raw,
+                date_start=anchor.start,
+                date_end=anchor.end,
+                is_current=anchor.is_current,
+                duration=f"{compute_duration_months(anchor.start, anchor.end, anchor.is_current)} mois",
+                summary=slot_data.get("summary", ""),
+                tasks=slot_data.get("tasks", []),
+                skills=slot_data.get("skills", []),
+                full_text=block_text[:200] + "..." # Truncate for storage
+            )
+            return entry
+        except Exception as e:
+            logger.error(f"Error processing anchor {anchor.raw}: {e}")
+            return None
 
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = []
-            for i, exp_text in enumerate(experience_blocks):
-                futures.append(executor.submit(process_single_experience, exp_text, i))
-            
-            results = []
-            for future in as_completed(futures):
-                results.append(future.result())
-            
-            results.sort(key=lambda x: x[0])
-            
-            for _, exp_data, exp_text in results:
-                if exp_data:
-                    entry = ExperienceEntry(
-                        job_title=exp_data.get("job_title", ""),
-                        company=exp_data.get("company", ""),
-                        location=exp_data.get("location", ""),
-                        dates=exp_data.get("dates", ""),
-                        duration=exp_data.get("duration", ""),
-                        summary=exp_data.get("summary", ""),
-                        tasks=exp_data.get("tasks", []),
-                        skills=exp_data.get("skills", []),
-                        full_text=exp_text
-                    )
-                    structured_experiences.append(entry)
+    # Process anchors
+    # We reverse them to handle "next_anchor" logic easily? No, forward is better.
+    # We need to handle overlaps.
+    
+    # Deduplication set
+    seen_keys = set()
+    
+    for i, anchor in enumerate(exp_anchors):
+        # Determine end of block
+        next_start = exp_anchors[i+1].start_idx if i + 1 < len(exp_anchors) else None
+        
+        entry = process_anchor(anchor, next_start, experience_source_text)
+        
+        if entry:
+            # Deduplication Key: Title + Company + StartDate
+            key = f"{entry.job_title}|{entry.company}|{entry.date_start}"
+            if key not in seen_keys:
+                structured_experiences.append(entry)
+                seen_keys.add(key)
 
     # 5. Generate Summary
     generated_summary = ""
