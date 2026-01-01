@@ -91,6 +91,11 @@ def main():
         
     logger.info(f"Using Index Folder ID from env: {index_folder_id}")
 
+    json_output_folder_id = os.environ.get('JSON_OUTPUT_FOLDER_ID')
+    if not json_output_folder_id:
+        logger.warning("JSON_OUTPUT_FOLDER_ID not set. Using CV_TO_JSON_FOLDER_ID as fallback.")
+        json_output_folder_id = index_folder_id
+
     try:
         drive_service = get_drive_service()
     except Exception as e:
