@@ -181,6 +181,18 @@ Dates détectées (Contexte) : {date_context}
 Extrait les informations sémantiques.
 """
 
+# --- FUNCTIONS ---
+
+def ai_parse_contact(text_head: str) -> Dict[str, Any]:
+    """Extracts contact info from the first part of the CV."""
+    prompt = CONTACT_USER_PROMPT.format(text=text_head[:3000])
+    return call_ai(prompt, CONTACT_SYSTEM_PROMPT, expect_json=True)
+
+def ai_parse_segmentation(full_text: str) -> Dict[str, Any]:
+    """Segments the full CV text into logical blocks."""
+    prompt = SEGMENTATION_USER_PROMPT.format(text=full_text[:15000])
+    return call_ai(prompt, SEGMENTATION_SYSTEM_PROMPT, expect_json=True)
+
 def ai_parse_experience_slot(block_text: str, date_context: str) -> Dict[str, Any]:
     """Fills content slots for a pre-segmented experience block."""
     prompt = EXPERIENCE_SLOT_FILLING_USER_PROMPT.format(text=block_text, date_context=date_context)
