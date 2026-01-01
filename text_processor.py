@@ -42,12 +42,20 @@ def preprocess_markdown(text: str) -> str:
     # Regex: digit space digit space digit space digit
     # We use a lookahead/lookbehind to ensure it's isolated or part of a date
     text = re.sub(r'(?<!\d)(\d)\s+(\d)\s+(\d)\s+(\d)(?!\d)', r'\1\2\3\4', text)
+    
+    # 5. Fix Spaced Caps (e.g. "J O N A T H A N" -> "JONATHAN")
+    # Regex: Capital Space Capital Space Capital...
+    # We find sequences of 3+ spaced capitals
+    def repl_caps(m):
+        return m.group(0).replace(" ", "")
+    
+    text = re.sub(r'\b[A-Z](?:\s+[A-Z]){2,}\b', repl_caps, text)
 
-    # 5. Fix "DEPUIS" / "SINCE" context
+    # 6. Fix "DEPUIS" / "SINCE" context
     # Ensure space after
     text = re.sub(r'(?i)(depuis|since)\s*(\d)', r'\1 \2', text)
     
-    # 6. Fix "Contrat" context
+    # 7. Fix "Contrat" context
     # "Contrat 2023" -> "Contrat 2023" (already ok, but ensure space)
     text = re.sub(r'(?i)(contrat|mandat)[:\s]*(\d)', r'\1 \2', text)
 

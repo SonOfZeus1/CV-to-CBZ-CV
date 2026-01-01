@@ -54,16 +54,57 @@ class AIClient:
         if expect_json:
              messages.append({"role": "system", "content": "IMPORTANT: Output ONLY valid JSON. No markdown, no explanations."})
 
-        logger.info(f"Calling AI (JSON={expect_json}). Prompt length: {len(prompt)}")
-        
-        # Rate Limit Throttling: Sleep to avoid hitting 30 RPM (1 req / 2s)
-        # We add a small buffer.
-        time.sleep(2.0)
-        
-        start_time = time.time()
+# Rate Limiting Configuration
+RATE_LIMITS = {
+    "llama-3.3-70b-versatile": {"rpm": 30},
+    "qwen/qwen3-32b": {"rpm": 60},
+    "llama-3.1-8b-instant": {"rpm": 30},
+}
 
-        # Iterate through models in priority order
-        for model in MODELS:
+class RateLimiter:
+    def __init__(self):
+        self.last_request_time = {}
+        
+    def wait_for_token(self, model_name):
+        limits = RATE_LIMITS.get(model_name, {"rpm": 30})
+        rpm = limits["rpm"]
+        interval = 60.0 / rpm
+        
+        now = time.time()
+        last = self.last_request_time.get(model_name, 0)
+        
+        elapsed = now - last
+        if elapsed < interval:
+            sleep_time = interval - elapsed
+            logger.info(f"Rate Limit: Sleeping {sleep_time:.2f}s for {model_name}")
+            time.sleep(sleep_time)
+            
+        self.last_request_time[model_name] = time.time()
+
+rate_limiter = RateLimiter()
+
+def call_groq_api(system_prompt: str, user_prompt: str, expect_json: bool = True, temperature: float = 0.0) -> Dict[str, Any]:
+    """
+    Calls Groq API with fallback logic and Rate Limiting.
+    """
+    prompt = f"{system_prompt}\n\n{user_prompt}"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+    
+    if expect_json:
+         messages.append({"role": "system", "content": "IMPORTANT: Output ONLY valid JSON. No markdown, no explanations."})
+
+    logger.info(f"Calling AI (JSON={expect_json}). Prompt length: {len(prompt)}")
+    
+    start_time = time.time()
+
+    # Iterate through models in priority order
+    for model in MODELS:
+        try:
+            rate_limiter.wait_for_token(model)
+            
             logger.info(f"Trying model: {model}")
             
             for attempt in range(MAX_RETRIES_PER_MODEL):

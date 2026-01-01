@@ -90,9 +90,11 @@ class ExperienceEntry:
     job_title: str = ""
     company: str = ""
     location: str = ""
-    dates: str = ""
-    date_start: str = "" # ISO YYYY-MM
-    date_end: str = ""   # ISO YYYY-MM or None
+    dates: str = "" # Original text
+    dates_raw: str = "" # Exact raw string from date extraction
+    date_start: str = "" # ISO YYYY-MM or YYYY
+    date_end: str = ""   # ISO YYYY-MM or YYYY or None
+    date_precision: str = "unknown" # "month", "year", "unknown"
     is_current: bool = False
     duration: str = ""
     summary: str = ""
@@ -675,8 +677,10 @@ def parse_cv_from_text(text: str, filename: str, metadata: Optional[Dict] = None
                 company=slot_data.get("company", ""),
                 location=slot_data.get("location", ""),
                 dates=anchor.raw,
+                dates_raw=anchor.raw,
                 date_start=anchor.start,
                 date_end=anchor.end,
+                date_precision=anchor.precision,
                 is_current=anchor.is_current,
                 duration="", # Recalculate below
                 summary=slot_data.get("summary", ""),
@@ -706,8 +710,9 @@ def parse_cv_from_text(text: str, filename: str, metadata: Optional[Dict] = None
     for i, anchor in enumerate(exp_anchors):
         # Determine end of block
         next_start = exp_anchors[i+1].start_idx if i + 1 < len(exp_anchors) else None
+        prev_end = exp_anchors[i-1].end_idx if i > 0 else None
         
-        entry = process_anchor(anchor, next_start, experience_source_text)
+        entry = process_anchor(anchor, prev_end, next_start, experience_source_text)
         
         if entry:
             # Deduplication Key: Title + Company + StartDate
