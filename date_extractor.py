@@ -73,7 +73,8 @@ def extract_date_anchors(text: str) -> List[DateAnchor]:
     month_pat = r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|janv|fév|mars|avr|mai|juin|juil|août|sept|oct|nov|déc)[a-z]*\.?'
     month_digit_pat = r'(?:0?[1-9]|1[0-2])'
     
-    date_part_pat = fr'(?:(?:{month_pat}|{month_digit_pat})[\s/]+)?{year_pat}'
+    # Allow optional opening parenthesis before the date part
+    date_part_pat = fr'(?:[\(\s]*)(?:(?:{month_pat}|{month_digit_pat})[\s/]+)?{year_pat}(?:[\)\s]*)'
     
     # Full Range Pattern
     range_pat = fr'({date_part_pat})\s*-\s*({date_part_pat}|present|aujourd\'hui|now|actuel|current)'
@@ -133,6 +134,10 @@ def extract_date_anchors(text: str) -> List[DateAnchor]:
     # We look for lines that contain a year but are NOT part of an existing range.
     # Regex: Line start or newline, optional text, Year, optional text, newline or end
     
+    # Find Single Years (isolated) -> Potential single year experience or start date
+    # We look for lines that contain a year but are NOT part of an existing range.
+    # Regex: Line start or newline, optional text, Year, optional text, newline or end
+    
     # Simpler: Find all years, check if they fall into existing anchor ranges
     for match in re.finditer(year_pat, text):
         start_pos = match.start()
@@ -148,6 +153,31 @@ def extract_date_anchors(text: str) -> List[DateAnchor]:
         if re.search(r'\d', text[start_pos-1:start_pos]) or re.search(r'\d', text[end_pos:end_pos+1]):
             continue
             
+        # STRICTER CHECK:
+        # A valid single year anchor should be:
+        # 1. At the start of a line (ignoring whitespace/bullets)
+        # 2. OR followed by a newline shortly after
+        # 3. NOT preceded by words like "in", "en", "depuis", "since" (unless it's a start date)
+        # 4. NOT part of a sentence (e.g. "completed in 2022")
+        
+        line_start = text.rfind('\n', 0, start_pos) + 1
+        line_end = text.find('\n', end_pos)
+        if line_end == -1: line_end = len(text)
+        
+        line_content = text[line_start:line_end].strip()
+        
+        # If the year is in the middle of a long sentence, skip it.
+        # Heuristic: if line length > 50 chars and year is not at start/end, skip.
+        if len(line_content) > 60:
+             # Check if year is at start
+             if not re.match(r'^[\W_]*' + re.escape(match.group(0)), line_content):
+                 continue
+
+        # Check for preceding text that indicates it's NOT an anchor
+        preceding_text = text[line_start:start_pos].lower()
+        if any(w in preceding_text for w in ["date du", "en date du", "dated", "completed", "version"]):
+            continue
+
         raw = match.group(0)
         start_dt = dateparser.parse(raw)
         

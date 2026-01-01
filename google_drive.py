@@ -149,7 +149,10 @@ def download_file(service, file_id, file_name, download_path):
     return file_path
 
 def upload_file_to_folder(service, file_path, folder_id, mime_type=None):
-    """Uploads a file to a specific Google Drive folder."""
+    """
+    Uploads a file to a specific Google Drive folder.
+    If a file with the same name exists, it OVERWRITES it.
+    """
     file_name = os.path.basename(file_path)
     
     if not mime_type:
@@ -157,19 +160,45 @@ def upload_file_to_folder(service, file_path, folder_id, mime_type=None):
         
     media = MediaFileUpload(file_path, mimetype=mime_type, resumable=True)
     
-    file_metadata = {
-        'name': file_name,
-        'parents': [folder_id]
-    }
+    # 1. Check if file exists
+    query = f"name = '{file_name}' and '{folder_id}' in parents and trashed = false"
+    existing_file_id = None
     
     try:
-        file = execute_with_retry(lambda: service.files().create(
-            body=file_metadata,
-            media_body=media,
-            fields='id, webViewLink',
-            supportsAllDrives=True
+        results = execute_with_retry(lambda: service.files().list(
+            q=query, fields="files(id)", supportsAllDrives=True, includeItemsFromAllDrives=True
         ).execute())
-        print(f"Uploaded '{file_name}' with ID: {file.get('id')}")
+        files = results.get('files', [])
+        if files:
+            existing_file_id = files[0]['id']
+            print(f"File '{file_name}' already exists (ID: {existing_file_id}). Overwriting...")
+    except Exception as e:
+        print(f"Warning: Failed to check for existing file: {e}")
+
+    try:
+        if existing_file_id:
+            # 2. Update existing file
+            file = execute_with_retry(lambda: service.files().update(
+                fileId=existing_file_id,
+                media_body=media,
+                fields='id, webViewLink',
+                supportsAllDrives=True
+            ).execute())
+            print(f"Overwritten '{file_name}' with ID: {file.get('id')}")
+        else:
+            # 3. Create new file
+            file_metadata = {
+                'name': file_name,
+                'parents': [folder_id]
+            }
+            file = execute_with_retry(lambda: service.files().create(
+                body=file_metadata,
+                media_body=media,
+                fields='id, webViewLink',
+                supportsAllDrives=True
+            ).execute())
+            print(f"Uploaded '{file_name}' with ID: {file.get('id')}")
+            
         return file.get('id'), file.get('webViewLink')
     except Exception as e:
         print(f"Error uploading {file_name}: {e}")
