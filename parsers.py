@@ -16,7 +16,6 @@ from PIL import Image
 from ai_parsers import (
     ai_parse_contact,
     ai_parse_segmentation,
-    ai_parse_experience_block,
     ai_parse_education,
     ai_generate_summary
 )
