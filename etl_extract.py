@@ -91,6 +91,12 @@ def main():
         
     logger.info(f"Using Index Folder ID from env: {index_folder_id}")
 
+    try:
+        drive_service = get_drive_service()
+    except Exception as e:
+        logger.critical(f"Auth Error: {e}")
+        return
+
     # 2. List files in Index Folder
     logger.info(f"Listing files in Index Folder...")
     try:
