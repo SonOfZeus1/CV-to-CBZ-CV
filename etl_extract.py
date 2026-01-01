@@ -83,62 +83,21 @@ def main():
     load_dotenv()
     logger.info("--- Starting Pipeline 2: EXTRACTION (Markdown -> JSON) ---")
 
-    # Use EMAIL_SOURCE_FOLDER_ID (Same as Pipeline 1) to avoid confusion
-    source_folder_id = os.environ.get('EMAIL_SOURCE_FOLDER_ID')
-    # Fallback to CV_TO_JSON_FOLDER_ID if set (legacy)
-    if not source_folder_id:
-        source_folder_id = os.environ.get('CV_TO_JSON_FOLDER_ID')
-
-    json_output_folder_id = os.environ.get('JSON_OUTPUT_FOLDER_ID')
-    
-    if not source_folder_id:
-        logger.error("Missing EMAIL_SOURCE_FOLDER_ID in .env")
-        return
-
-    if not json_output_folder_id:
-        logger.warning("JSON_OUTPUT_FOLDER_ID not set. Using CV_TO_JSON_FOLDER_ID as fallback.")
-        json_output_folder_id = source_folder_id
-
-    try:
-        drive_service = get_drive_service()
-    except Exception as e:
-        logger.critical(f"Auth Error: {e}")
-        return
-
-    # 1. Resolve Index Folder
-    # Strategy: Try to see if the provided ID is the index folder itself.
-    # If that fails or it's not, assume it's a parent and search inside.
-    index_folder_id = None
-    
-    try:
-        source_folder_meta = drive_service.files().get(fileId=source_folder_id, fields="name").execute()
-        if source_folder_meta.get('name') == '_cv_index_v2':
-            logger.info(f"Provided folder ID IS the index folder: {source_folder_id}")
-            index_folder_id = source_folder_id
-    except Exception as e:
-        logger.warning(f"Could not resolve provided ID as a folder directly (Error: {e}). Assuming it is a Parent Folder and searching inside...")
-
+    # 1. Use CV_TO_JSON_FOLDER_ID directly as the Index Folder
+    index_folder_id = os.environ.get('CV_TO_JSON_FOLDER_ID')
     if not index_folder_id:
-        # Search for _cv_index_v2 inside source folder
-        logger.info(f"Looking for _cv_index_v2 inside {source_folder_id}...")
-        query = f"'{source_folder_id}' in parents and name = '_cv_index_v2' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-        try:
-            results = drive_service.files().list(q=query, fields="files(id, name)").execute()
-            items = results.get('files', [])
-            
-            if items:
-                index_folder_id = items[0]['id']
-                logger.info(f"Found Index Folder: {index_folder_id}")
-            else:
-                logger.error(f"_cv_index_v2 folder not found inside {source_folder_id}!")
-                return
-        except Exception as e:
-             logger.critical(f"Error searching for index folder: {e}")
-             return
+        logger.error("Missing CV_TO_JSON_FOLDER_ID in .env")
+        return
+        
+    logger.info(f"Using Index Folder ID from env: {index_folder_id}")
 
     # 2. List files in Index Folder
     logger.info(f"Listing files in Index Folder...")
-    files = list_files_in_folder(drive_service, index_folder_id)
+    try:
+        files = list_files_in_folder(drive_service, index_folder_id)
+    except Exception as e:
+        logger.critical(f"Error listing files in folder {index_folder_id}: {e}")
+        return
     
     if not files:
         logger.info("No files found in Index Folder.")
