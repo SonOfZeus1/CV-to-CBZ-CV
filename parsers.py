@@ -125,7 +125,6 @@ class CVData:
     achievements_global: List[str] = field(default_factory=list)
     extra_info: List[str] = field(default_factory=list)
     unmapped: List[str] = field(default_factory=list)
-    raw_text: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         payload = asdict(self)
@@ -755,8 +754,7 @@ def parse_cv_from_text(text: str, filename: str, metadata: Optional[Dict] = None
         education=education_entries,
         languages=basics.get("languages", []),
         extra_info=extra_info,
-        unmapped=[],
-        raw_text=text
+        unmapped=[]
     )
 
     result_dict = cv_data.to_dict()

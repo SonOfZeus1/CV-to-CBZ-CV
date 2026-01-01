@@ -130,9 +130,39 @@ def extract_date_anchors(text: str) -> List[DateAnchor]:
             anchors.append(anchor)
 
     # Find Single Years (isolated) -> Potential single year experience or start date
-    # This is risky, so we only take them if they are NOT part of an existing range
-    # and look like a line item (e.g. at start of line or followed by newline)
+    # We look for lines that contain a year but are NOT part of an existing range.
+    # Regex: Line start or newline, optional text, Year, optional text, newline or end
     
+    # Simpler: Find all years, check if they fall into existing anchor ranges
+    for match in re.finditer(year_pat, text):
+        start_pos = match.start()
+        end_pos = match.end()
+        
+        # Check overlap
+        if any(a.start_idx <= start_pos < a.end_idx for a in anchors):
+            continue
+            
+        # Context check: Is it likely a date? 
+        # Avoid phone numbers, postal codes (though 4 digits is rare for postal in CA/US, common elsewhere)
+        # Check if surrounded by digits
+        if re.search(r'\d', text[start_pos-1:start_pos]) or re.search(r'\d', text[end_pos:end_pos+1]):
+            continue
+            
+        raw = match.group(0)
+        start_dt = dateparser.parse(raw)
+        
+        if start_dt:
+            anchor = DateAnchor(
+                raw=raw,
+                start=normalize_date(start_dt),
+                end=normalize_date(start_dt), # Single year = start and end same year roughly
+                is_current=False,
+                precision="year",
+                start_idx=start_pos,
+                end_idx=end_pos
+            )
+            anchors.append(anchor)
+
     # Sort anchors by position
     anchors.sort(key=lambda x: x.start_idx)
     
