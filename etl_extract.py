@@ -83,11 +83,16 @@ def main():
     load_dotenv()
     logger.info("--- Starting Pipeline 2: EXTRACTION (Markdown -> JSON) ---")
 
-    source_folder_id = os.environ.get('CV_TO_JSON_FOLDER_ID')
+    # Use EMAIL_SOURCE_FOLDER_ID (Same as Pipeline 1) to avoid confusion
+    source_folder_id = os.environ.get('EMAIL_SOURCE_FOLDER_ID')
+    # Fallback to CV_TO_JSON_FOLDER_ID if set (legacy)
+    if not source_folder_id:
+        source_folder_id = os.environ.get('CV_TO_JSON_FOLDER_ID')
+
     json_output_folder_id = os.environ.get('JSON_OUTPUT_FOLDER_ID')
     
     if not source_folder_id:
-        logger.error("Missing CV_TO_JSON_FOLDER_ID in .env")
+        logger.error("Missing EMAIL_SOURCE_FOLDER_ID in .env")
         return
 
     if not json_output_folder_id:
