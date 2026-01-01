@@ -91,6 +91,9 @@ class ExperienceEntry:
     company: str = ""
     location: str = ""
     dates: str = ""
+    date_start: str = "" # ISO YYYY-MM
+    date_end: str = ""   # ISO YYYY-MM or None
+    is_current: bool = False
     duration: str = ""
     summary: str = ""
     tasks: List[str] = field(default_factory=list)

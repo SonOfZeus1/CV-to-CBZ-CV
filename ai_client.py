@@ -14,12 +14,8 @@ logger = logging.getLogger(__name__)
 # Priority list of models (Quality -> Speed/Quota)
 MODELS = [
     "llama-3.3-70b-versatile",  # Best Quality (100k TPD)
-    "llama-3.1-70b-versatile",  # High Quality (100k TPD)
-    "llama3-70b-8192",          # Legacy High Quality (100k TPD)
-    "mixtral-8x7b-32768",       # Good Balance (500k TPD)
-    "gemma2-9b-it",             # Google Model (500k TPD)
+    "qwen/qwen3-32b",           # Good Balance (500k TPD)
     "llama-3.1-8b-instant",     # Fast/High Quota (500k TPD)
-    "llama3-8b-8192"            # Legacy Fast (500k TPD)
 ]
 MAX_RETRIES_PER_MODEL = 2
 

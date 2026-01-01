@@ -181,6 +181,38 @@ Dates détectées (Contexte) : {date_context}
 Extrait les informations sémantiques.
 """
 
+EDUCATION_SYSTEM_PROMPT = """
+Tu es un expert en formatage de CV. Tu dois structurer la section formation / éducation.
+Tu dois être robuste aux différentes langues (FR/EN), aux dates variées, et aux mises en forme non standards.
+"""
+
+EDUCATION_USER_PROMPT = """
+Voici le texte brut de la section formation / éducation.
+Tu dois en extraire une liste de diplômes.
+
+Règles :
+- Un "diplome" correspond à un titre académique ou professionnel (ex: "Baccalauréat en Ingénierie Logiciel", "Master en Informatique", "Licence en Mathématiques").
+- "etablissement" est le nom de l'école ou de l'université.
+- "annee" est l'année ou la période telle qu'écrite dans le CV (ne pas modifier le format).
+- "localisation" est la ville, province et/ou pays si présents.
+- Ne rien inventer : si un champ est absent, renvoie "" pour ce champ.
+
+Retourne un JSON strict :
+{{
+  "education": [
+    {{
+      "diplome": "Titre du diplôme",
+      "etablissement": "Nom de l'école/université",
+      "annee": "Année ou période",
+      "localisation": "Ville, Pays"
+    }}
+  ]
+}}
+
+Section formation :
+\"\"\"{text}\"\"\"
+"""
+
 # --- FUNCTIONS ---
 
 def ai_parse_contact(text_head: str) -> Dict[str, Any]:
