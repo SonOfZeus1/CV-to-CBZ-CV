@@ -14,7 +14,7 @@ nltk
 Jinja2
 WeasyPrint
 reportlab
-groq
+openai
 dateparser
 python-dotenv
 PyYAML
