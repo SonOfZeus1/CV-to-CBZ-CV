@@ -67,8 +67,8 @@ def extract_date_anchors(text: str) -> List[DateAnchor]:
     # We look for the separator " - " (normalized)
     
     # Pattern for a single date component (Month Year or Year)
-    # Year: 1990-2029
-    year_pat = r'(?:19|20)\d{2}'
+    # Year: 1990-2029 (allow O as 0, e.g. 2O2O)
+    year_pat = r'(?:19|20)[0-9O]{2}'
     # Month: 01-12, Jan-Dec (FR/EN)
     month_pat = r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|janv|fév|mars|avr|mai|juin|juil|août|sept|oct|nov|déc)[a-z]*\.?'
     month_digit_pat = r'(?:0?[1-9]|1[0-2])'

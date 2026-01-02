@@ -59,4 +59,18 @@ def preprocess_markdown(text: str) -> str:
     # "Contrat 2023" -> "Contrat 2023" (already ok, but ensure space)
     text = re.sub(r'(?i)(contrat|mandat)[:\s]*(\d)', r'\1 \2', text)
 
+    # 8. Collapse Wide Spaces (Column Detection Heuristic)
+    # "2008          Manager" -> "2008 Manager"
+    # We replace 3 or more spaces with a single space to help regexes connect separated parts.
+    text = re.sub(r'[ \t]{3,}', ' ', text)
+
+    # 9. Fix Common Mojibake (Mini-ftfy)
+    # Replace common encoding errors if any (Latin-1 vs UTF-8 mixups)
+    replacements = {
+        'Ã©': 'é', 'Ã ': 'à', 'Ã¨': 'è', 'Ã´': 'ô', 'Ãª': 'ê', 'Ã«': 'ë',
+        'Ã¯': 'ï', 'Ã§': 'ç', 'â€™': "'", 'â€“': "-", 'â€”': "-"
+    }
+    for bad, good in replacements.items():
+        text = text.replace(bad, good)
+
     return text.strip()

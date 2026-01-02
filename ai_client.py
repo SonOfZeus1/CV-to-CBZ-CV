@@ -4,7 +4,7 @@ import logging
 import time
 from typing import Any, Dict, Optional, Union
 
-from groq import Groq
+from openai import OpenAI
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -12,17 +12,15 @@ logger = logging.getLogger(__name__)
 # Constants
 # Priority list of models (Quality -> Speed/Quota)
 MODELS = [
-    "llama-3.3-70b-versatile",  # Best Quality (100k TPD)
-    "qwen/qwen3-32b",           # Good Balance (500k TPD)
-    "llama-3.1-8b-instant",     # Fast/High Quota (500k TPD)
+    "xiaomi/mimo-v2-flash",      # Primary: Fast, Huge Context (256k)
+    "openai/gpt-oss-120b",       # Fallback: Intelligent, Robust
 ]
 MAX_RETRIES_PER_MODEL = 2
 
-# Rate Limiting Configuration
+# Rate Limiting Configuration (OpenRouter usually handles this, but we keep a safety buffer)
 RATE_LIMITS = {
-    "llama-3.3-70b-versatile": {"rpm": 30},
-    "qwen/qwen3-32b": {"rpm": 60},
-    "llama-3.1-8b-instant": {"rpm": 30},
+    "xiaomi/mimo-v2-flash": {"rpm": 60}, 
+    "openai/gpt-oss-120b": {"rpm": 30},
 }
 
 class RateLimiter:
@@ -51,13 +49,18 @@ class AIClient:
     _instance = None
 
     def __init__(self):
-        api_key = os.getenv("GROQ_API_KEY")
+        # OpenRouter uses OpenAI client structure
+        api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("GROQ_API_KEY") # Fallback to GROQ key if user hasn't updated env yet (though they should)
+        
         if not api_key:
-            logger.warning("GROQ_API_KEY not found. AI features will be disabled.")
+            logger.warning("OPENROUTER_API_KEY not found. AI features will be disabled.")
             self.client = None
         else:
-            self.client = Groq(api_key=api_key)
-            logger.info("Groq Client initialized successfully.")
+            self.client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=api_key,
+            )
+            logger.info("OpenRouter Client initialized successfully.")
 
     @classmethod
     def get_instance(cls):
@@ -67,8 +70,7 @@ class AIClient:
 
     def call_ai(self, prompt: str, system_prompt: str = "You are a helpful assistant.", expect_json: bool = False) -> Union[str, Dict[str, Any]]:
         """
-        Generic function to call the AI with Multi-Model Fallback.
-        Iterates through MODELS list if Rate Limits are hit.
+        Generic function to call the AI with Multi-Model Fallback via OpenRouter.
         """
         if not self.client:
             logger.error("AI call attempted but client is not initialized (missing key).")
@@ -99,7 +101,11 @@ class AIClient:
                         model=model,
                         messages=messages,
                         temperature=0.1 if expect_json else 0.3,
-                        response_format={"type": "json_object"} if expect_json else None
+                        response_format={"type": "json_object"} if expect_json else None,
+                        extra_headers={
+                            "HTTP-Referer": "https://github.com/SonOfZeus1/CV-to-CBZ-CV", # Optional, for OpenRouter rankings
+                            "X-Title": "CV Extraction Pipeline", # Optional
+                        },
                     )
                     
                     content = completion.choices[0].message.content
