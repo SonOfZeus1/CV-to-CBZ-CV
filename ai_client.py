@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 # Constants
 # Priority list of models (Quality -> Speed/Quota)
 MODELS = [
-    "xiaomi/mimo-v2-flash",      # Primary: Fast, Huge Context (256k)
-    "openai/gpt-oss-120b",       # Fallback: Intelligent, Robust
+    "openai/gpt-oss-120b",       # Primary: Intelligent, Robust (Working)
+    "xiaomi/mimo-v2-flash",      # Secondary: Fast (Currently Unstable/404)
 ]
 MAX_RETRIES_PER_MODEL = 2
 
