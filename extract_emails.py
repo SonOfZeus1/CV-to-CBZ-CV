@@ -11,7 +11,7 @@ from google_drive import (
 )
 import re
 import difflib
-from parsers import extract_text_from_pdf, extract_text_from_docx, heuristic_parse_contact
+from simple_parsers import extract_text_from_pdf, extract_text_from_docx, heuristic_parse_contact
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Configure logging
