@@ -61,7 +61,7 @@ def validate_extraction(cv_data: Dict[str, Any], anchor_map: Dict[str, Any]) -> 
         block_text_lower = block.get("text", "").lower()
         tasks = exp.get("tasks", [])
         
-        for task in tasks:
+        for task in (tasks or []):
             # Simple check: do at least 50% of significant words appear in block?
             words = [w for w in task.lower().split() if len(w) > 3]
             if not words: continue

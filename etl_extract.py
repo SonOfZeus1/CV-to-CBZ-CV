@@ -146,9 +146,9 @@ def main():
         
     logger.info(f"Found {len(files)} files to process.")
 
-    # 3. Process each file (Limit to 200)
-    files_to_process = [f for f in files if f['name'].endswith('.md')][:200]
-    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 200)...")
+    # 3. Process each file (Limit to 1 for testing)
+    files_to_process = [f for f in files if f['name'].endswith('.md')][:1]
+    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 1)...")
 
     report_buffer = []
 
