@@ -650,13 +650,6 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
 
         # --- PRE-FLIGHT CHECK: Move files already in Excel to _processed ---
         logger.info("Running Pre-flight Check: Moving files already in Excel to _processed...")
-        
-        # --- ENSURE REPORT HEADERS ---
-        # User requested automatic header creation for the "Candidats" tab
-        try:
-            ensure_report_headers(sheets_service, sheet_id, "Candidats")
-        except Exception as e:
-            logger.warning(f"Failed to ensure headers for 'Candidats': {e}")
             
         files_to_process = []
         moved_file_ids = set()
@@ -790,7 +783,6 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                         logger.error(f"Failed to upload index for {result['filename']}: {e}")
 
                 # Collect Index Updates
-                # Collect Index Updates
                 if md_link:
                     # Create Hyperlink Formula
                     # =LIEN_HYPERTEXTE("url"; "name.md")
@@ -805,20 +797,6 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                         # So we just append it.
                         # [Filename, Email, Phone, Status, Emplacement, Language, Lien Index]
                         result['data'].append(formula)
-                        
-                # --- GENERATE REPORT ROW ---
-                # Independent of MD Link success (though we prefer having it)
-                if 'json_data' in result and result['json_data']:
-                    try:
-                        # Use md_link if we have it, otherwise empty
-                        final_md_link = md_link if md_link else ""
-                        
-                        # We can generate the full row for the report
-                        report_row = format_candidate_row(result['json_data'], final_md_link)
-                        report_buffer.append(report_row)
-                        logger.info(f"Added row to Report Buffer. Buffer size: {len(report_buffer)}")
-                    except Exception as e:
-                        logger.error(f"Failed to format report row for {result['filename']}: {e}")
                         
                 # Batch Write
                 if len(append_buffer) >= BATCH_SIZE:
@@ -836,15 +814,6 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     logger.info(f"Flushing {len(indexed_buffer)} index status updates...")
                     batch_update_rows(sheets_service, sheet_id, indexed_buffer, sheet_name, start_col='G')
                     indexed_buffer = []
-
-                if len(report_buffer) >= BATCH_SIZE:
-                    logger.info(f"Flushing {len(report_buffer)} rows to Detailed Report (Sheet ID: {sheet_id}, Tab: 'Candidats')...")
-                    try:
-                        append_batch_to_sheet(sheets_service, sheet_id, report_buffer, sheet_name="Candidats")
-                        logger.info("Successfully flushed batch to 'Candidats'.")
-                    except Exception as e:
-                        logger.warning(f"Could not write to 'Candidats' (maybe tab missing?): {e}")
-                    report_buffer = []
         
         # Flush remaining
         if append_buffer:
@@ -858,14 +827,6 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         if indexed_buffer:
             logger.info(f"Flushing remaining {len(indexed_buffer)} index status updates...")
             batch_update_rows(sheets_service, sheet_id, indexed_buffer, sheet_name, start_col='G')
-
-        if report_buffer:
-            logger.info(f"Flushing remaining {len(report_buffer)} rows to Detailed Report (Sheet ID: {sheet_id}, Tab: 'Candidats')...")
-            try:
-                append_batch_to_sheet(sheets_service, sheet_id, report_buffer, sheet_name="Candidats")
-                logger.info("Successfully flushed remaining rows to 'Candidats'.")
-            except Exception as e:
-                logger.warning(f"Could not write to 'Candidats': {e}")
 
     finally:
         # 6. Cleanup

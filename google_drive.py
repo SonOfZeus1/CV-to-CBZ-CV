@@ -598,6 +598,65 @@ def append_batch_to_sheet(service, sheet_id, rows, sheet_name="Feuille 1", retri
         print(f"Appended {len(rows)} rows to sheet.")
     except Exception as e:
         print(f"Error appending batch: {e}")
+
+def ensure_report_headers(service, sheet_id, sheet_name):
+    """
+    Checks if the report sheet exists and has headers. 
+    If it doesn't exist, creates it and writes headers.
+    If it exists but is empty, writes headers.
+    """
+    print(f"Checking headers for sheet '{sheet_name}'...")
+    
+    headers = [
+        "Prénom", "Nom", "Email", "Téléphone", "Adresse", 
+        "Langues", "Années Expérience", "Dernier Titre", 
+        "Dernière Localisation", "Lien MD"
+    ]
+    
+    try:
+        # Check first row
+        result = service.spreadsheets().values().get(
+            spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1:J1"
+        ).execute()
+        values = result.get('values', [])
+        
+        if not values:
+            print(f"Sheet '{sheet_name}' exists but is empty. Writing headers...")
+            body = {'values': [headers]}
+            service.spreadsheets().values().update(
+                spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1",
+                valueInputOption="USER_ENTERED", body=body
+            ).execute()
+            print("Headers written successfully.")
+        else:
+            print(f"Sheet '{sheet_name}' already has headers.")
+            
+    except Exception as e:
+        # If error is likely "Sheet not found"
+        print(f"Sheet '{sheet_name}' not found or inaccessible ({e}). Attempting to create it...")
+        try:
+            body = {
+                'requests': [{
+                    'addSheet': {
+                        'properties': {
+                            'title': sheet_name
+                        }
+                    }
+                }]
+            }
+            service.spreadsheets().batchUpdate(spreadsheetId=sheet_id, body=body).execute()
+            print(f"Created new sheet '{sheet_name}'.")
+            
+            # Now write headers
+            body = {'values': [headers]}
+            service.spreadsheets().values().update(
+                spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1",
+                valueInputOption="USER_ENTERED", body=body
+            ).execute()
+            print("Headers written to new sheet.")
+            
+        except Exception as create_error:
+            print(f"Failed to create sheet '{sheet_name}': {create_error}")
         raise
 
 def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", start_col='A', retries=10):
