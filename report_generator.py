@@ -116,24 +116,37 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str) -> List[str]:
     9. Latest Location
     10. MD Source Link
     """
-    contact = json_data.get('contact_info', {})
-    experiences = json_data.get('experiences', [])
+    # The JSON structure has changed. It now uses 'basics' for contact info.
+    basics = json_data.get('basics', {})
+    experiences = json_data.get('experience', []) # Note: 'experience' not 'experiences' in the new JSON
 
-    # 1-6. Contact Info
-    first_name = contact.get('first_name', '')
-    last_name = contact.get('last_name', '')
-    email = contact.get('email', '')
-    phone = contact.get('phone', '')
-    address = contact.get('address', '')
+    # 1-2. Name (Split into First/Last if possible, otherwise put full name in First Name)
+    full_name = basics.get('name', '')
+    if ' ' in full_name:
+        # Simple split
+        parts = full_name.split(' ', 1)
+        first_name = parts[0]
+        last_name = parts[1]
+    else:
+        first_name = full_name
+        last_name = ""
+
+    # 3-6. Contact Info
+    email = basics.get('email', '')
+    phone = basics.get('phone', '')
+    address = basics.get('address', '')
     
-    langs = contact.get('languages', [])
+    langs = basics.get('languages', [])
     if isinstance(langs, list):
         languages = ", ".join(langs)
     else:
         languages = str(langs)
 
     # 7. Total Experience
-    total_exp = calculate_total_experience(experiences)
+    # Use the pre-calculated value from JSON if available, otherwise calculate
+    total_exp = basics.get('total_experience')
+    if total_exp is None:
+        total_exp = calculate_total_experience(experiences)
 
     # 8-9. Latest Role
     latest_exp = get_latest_experience(experiences)

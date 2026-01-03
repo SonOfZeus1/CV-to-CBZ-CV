@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 from google_drive import (
     get_drive_service, list_files_in_folder, download_file, 
     upload_file_to_folder, get_or_create_folder,
-    get_sheets_service, append_batch_to_sheet, ensure_report_headers
+    get_sheets_service, append_batch_to_sheet, upsert_batch_to_sheet, ensure_report_headers
 )
 from parsers import parse_cv_from_text
 from report_generator import format_candidate_row
@@ -158,7 +158,9 @@ def main():
     if report_buffer and sheets_service and email_sheet_id:
         logger.info(f"Flushing {len(report_buffer)} rows to 'Candidats'...")
         try:
-            append_batch_to_sheet(sheets_service, email_sheet_id, report_buffer, sheet_name="Candidats")
+            # Use Upsert (Update if exists, Append if new)
+            # Email is at index 2 (Name, Surname, Email...)
+            upsert_batch_to_sheet(sheets_service, email_sheet_id, report_buffer, sheet_name="Candidats", email_col_index=2)
             logger.info("Report flush successful.")
         except Exception as e:
             logger.error(f"Failed to flush report: {e}")

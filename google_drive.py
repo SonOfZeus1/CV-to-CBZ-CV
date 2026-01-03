@@ -579,6 +579,80 @@ def set_column_validation(service, sheet_id, sheet_name, col_index, options):
     except Exception as e:
         print(f"Warning: Failed to set validation: {e}")
 
+def upsert_batch_to_sheet(service, sheet_id, rows, sheet_name="Candidats", email_col_index=2):
+    """
+    Updates existing rows if Email matches, otherwise appends new rows.
+    email_col_index: 0-based index of the Email column (Default 2 for 'Candidats' sheet: Name, Surname, Email...)
+    """
+    if not rows:
+        return
+
+    # 1. Read existing data to find duplicates
+    existing_values = get_sheet_values(service, sheet_id, sheet_name)
+    
+    # Map Email -> Row Index (0-based relative to sheet)
+    email_map = {}
+    if existing_values:
+        for i, row in enumerate(existing_values):
+            if len(row) > email_col_index:
+                email = row[email_col_index].strip().lower()
+                if email:
+                    email_map[email] = i # i is 0-based index of the row
+
+    rows_to_append = []
+    updates = []
+
+    for new_row in rows:
+        # Check if email exists in new_row
+        if len(new_row) > email_col_index:
+            email = str(new_row[email_col_index]).strip().lower()
+            
+            if email and email in email_map:
+                # Update existing row
+                row_index = email_map[email]
+                # Convert row_index to A1 notation (1-based)
+                # A=1, B=2...
+                # We assume we update the whole row from A to end of new_row length
+                end_col_char = chr(ord('A') + len(new_row) - 1)
+                range_name = f"'{sheet_name}'!A{row_index + 1}:{end_col_char}{row_index + 1}"
+                
+                updates.append({
+                    'range': range_name,
+                    'values': [new_row]
+                })
+            else:
+                # New row
+                rows_to_append.append(new_row)
+        else:
+            # No email, treat as new? Or skip? Let's append.
+            rows_to_append.append(new_row)
+
+    # 2. Perform Batch Updates
+    if updates:
+        data = []
+        for u in updates:
+            data.append({
+                'range': u['range'],
+                'values': u['values']
+            })
+        
+        body = {
+            'valueInputOption': 'USER_ENTERED',
+            'data': data
+        }
+        
+        try:
+            execute_with_retry(lambda: service.spreadsheets().values().batchUpdate(
+                spreadsheetId=sheet_id, body=body
+            ).execute())
+            print(f"Updated {len(updates)} existing rows.")
+        except Exception as e:
+            print(f"Error batch updating: {e}")
+
+    # 3. Perform Batch Append
+    if rows_to_append:
+        append_batch_to_sheet(service, sheet_id, rows_to_append, sheet_name)
+
 def append_batch_to_sheet(service, sheet_id, rows, sheet_name="Feuille 1", retries=10):
     """
     Appends multiple rows to the sheet in one API call.
