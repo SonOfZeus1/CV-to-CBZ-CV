@@ -104,7 +104,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y tesseract-ocr
         python -m pip install --upgrade pip
-        pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib PyMuPDF python-docx pytesseract nltk Pillow groq dateparser python-dotenv Jinja2 WeasyPrint python-dateutil
+        pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib PyMuPDF python-docx pytesseract nltk Pillow groq dateparser python-dotenv Jinja2 WeasyPrint python-dateutil openai
         python -m nltk.downloader stopwords punkt averaged_perceptron_tagger
 
     - name: Run script
