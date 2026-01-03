@@ -536,10 +536,18 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             if not data['is_hyperlink']:
                 needs_update = True
                 priority = 3
-            elif status == "":
+            elif status == "NON":
                 needs_update = True
-                priority = 20 # Empty Status has HIGHEST priority (User Request)
-            elif email == "" or email == "NOT FOUND" or status == "NON":
+                priority = 20 # Status "NON" (Second Priority)
+            elif status == "":
+                # needs_update = True
+                # priority = 20 
+                pass # Empty status no longer triggers high priority update by default?
+                # Actually, if status is empty, we probably SHOULD update it, but user was specific about priority 2.
+                # Let's set needs_update=True but low priority if we want to fill it.
+                needs_update = True
+                priority = 1
+            elif email == "" or email == "NOT FOUND":
                 # needs_update = True
                 # priority = 1
                 pass
@@ -550,7 +558,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             
             elif not data.get('is_indexed'):
                 needs_update = True
-                priority = 30 # Indexing has TOP priority (User Request)
+                priority = 10 # Indexing (Third Priority)
                 
             if needs_update:
                 files_needing_update.append({'id': fid, 'priority': priority})
@@ -671,7 +679,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             file_id = file_data['id']
             # If not in Excel, it's new.
             if file_id not in existing_data_map:
-                 file_data['priority'] = 10 # New files have HIGHEST priority (User Request)
+                 file_data['priority'] = 30 # New files have HIGHEST priority (User Request)
                  files_to_process.append(file_data)
             else:
                 # In Excel. Check if needs update.
@@ -686,9 +694,14 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 priority = 0
                 if status == "DELETE":
                     continue
+                elif status == "NON":
+                    priority = 20 # Status "NON" (Second Priority) - Retry failed ones
                 elif status == "":
-                    priority = 20 # Empty Status has HIGHEST priority (User Request)
-                elif email == "" or email == "NOT FOUND" or status == "NON":
+                    # priority = 1 # Empty status is now low priority or handled elsewhere?
+                    # User didn't specify what to do with empty status now. 
+                    # Let's leave it as default (0) or low priority.
+                    pass
+                elif email == "" or email == "NOT FOUND":
                     # priority = 1
                     pass
                 
@@ -696,7 +709,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     priority = 1
                 
                 elif not data.get('is_indexed'):
-                    priority = 30 # Indexing has TOP priority
+                    priority = 10 # Indexing (Third Priority)
                     
                 if priority > 0:
                     file_data['priority'] = priority
