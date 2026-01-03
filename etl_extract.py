@@ -90,11 +90,14 @@ def process_file(file_item, drive_service, output_folder_id, report_buffer):
             report_row = format_candidate_row(parsed_data, md_link)
             report_buffer.append(report_row)
             logger.info(f"Added to Report Buffer: {file_name}")
+            return True
         except Exception as e:
             logger.error(f"Failed to generate report row for {file_name}: {e}")
+            return False
 
     except Exception as e:
         logger.error(f"Error processing {file_name}: {e}", exc_info=True)
+        return False
 
 def main():
     load_dotenv()
@@ -132,35 +135,50 @@ def main():
         except Exception as e:
             logger.error(f"Failed to ensure headers: {e}")
 
-    # 2. List files in Index Folder
+    # 1.5. Initialize Processed Folder
+    processed_folder_id = get_or_create_folder(drive_service, "_Processed_JSON", parent_id=index_folder_id)
+    logger.info(f"Processed Folder ID: {processed_folder_id}")
+
+    # 2. List files in Index Folder (Source)
     logger.info(f"Listing files in Index Folder...")
     try:
-        files = list_files_in_folder(drive_service, index_folder_id, mime_types=['text/markdown'])
+        source_files = list_files_in_folder(drive_service, index_folder_id, mime_types=['text/markdown'])
     except Exception as e:
         logger.critical(f"Error listing files in folder {index_folder_id}: {e}")
         return
     
-    if not files:
-        logger.info("No files found in Index Folder.")
-        return
-        
-    logger.info(f"Found {len(files)} files to process.")
+    source_file_map = {f['id']: f for f in source_files}
+    logger.info(f"Found {len(source_files)} files in Source Folder.")
 
-    # 2.5. Check "Action" Column (Retraiter / Supprimer)
+    # 2.5. Controller Logic (Sync with Excel)
+    existing_files_in_excel = set()
     files_to_reprocess = set()
+    
     if sheets_service and email_sheet_id:
         try:
-            logger.info("Checking 'Action' column in 'Candidats'...")
+            logger.info("Reading 'Candidats' sheet for Controller Logic...")
             rows = get_sheet_values(sheets_service, email_sheet_id, "Candidats")
             
             if rows:
-                # Identify rows to delete or reprocess
-                # Column K (Action) is index 10. Column J (MD Link) is index 9.
-                rows_to_delete = [] # Indices to delete
+                # Column Mapping (0-based):
+                # J (Index 9) = MD Link (contains File ID)
+                # K (Index 10) = Action
+                
+                rows_to_delete = [] 
                 
                 for i, row in enumerate(rows):
                     if i == 0: continue # Skip header
                     
+                    # Extract File ID from MD Link
+                    file_id = None
+                    if len(row) > 9:
+                        md_link = row[9]
+                        match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
+                        if match:
+                            file_id = match.group(1)
+                            existing_files_in_excel.add(file_id)
+                    
+                    # Check Action
                     action = ""
                     if len(row) > 10:
                         action = row[10].strip().lower()
@@ -170,24 +188,22 @@ def main():
                         logger.info(f"Row {i+1} marked for DELETION.")
                         
                     elif action == "retraiter":
-                        rows_to_delete.append(i) # Delete from sheet to re-add later
-                        # Extract File ID from MD Link (Index 9)
-                        if len(row) > 9:
-                            md_link = row[9]
-                            # Link format: https://drive.google.com/file/d/{file_id}/view
-                            match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
-                            if match:
-                                file_id = match.group(1)
+                        rows_to_delete.append(i)
+                        if file_id:
+                            # Move file BACK to Source (if it's in Processed)
+                            # We don't know where it is exactly, but we try to move it to Source
+                            try:
+                                move_file(drive_service, file_id, processed_folder_id, index_folder_id)
+                                logger.info(f"Moved file {file_id} back to Source for reprocessing.")
                                 files_to_reprocess.add(file_id)
-                                logger.info(f"Row {i+1} marked for REPROCESSING (File ID: {file_id}).")
-                
-                # Execute Deletions (if any)
+                                # Remove from existing set so it gets picked up
+                                if file_id in existing_files_in_excel:
+                                    existing_files_in_excel.remove(file_id)
+                            except Exception as move_err:
+                                logger.warning(f"Failed to move file {file_id} back to source: {move_err}")
+
+                # Execute Deletions
                 if rows_to_delete:
-                    # Group into ranges (reverse order handled by remove_empty_rows logic, but here we do it manually or use batch_update)
-                    # Actually, let's use a custom delete logic or just delete one by one? No, batch is better.
-                    # We can reuse the logic from remove_empty_rows but passing specific indices.
-                    # Or simpler: Just delete them.
-                    # IMPORTANT: Delete from bottom to top!
                     rows_to_delete.sort(reverse=True)
                     
                     # Get Sheet ID
@@ -215,32 +231,49 @@ def main():
                     if requests:
                         body = {'requests': requests}
                         sheets_service.spreadsheets().batchUpdate(spreadsheetId=email_sheet_id, body=body).execute()
-                        logger.info(f"Executed {len(requests)} row deletions (Supprimer/Retraiter).")
+                        logger.info(f"Executed {len(requests)} row deletions.")
 
         except Exception as e:
-            logger.error(f"Error processing Action column: {e}")
+            logger.error(f"Error in Controller Logic: {e}")
 
-    # 3. Process files (Batch Limit: 50)
-    # Prioritize files_to_reprocess
+    # 2.6. Pre-flight Sync: Move files already in Excel to Processed
+    logger.info("Running Pre-flight Sync...")
     files_to_process = []
     
-    # First, add reprocess files
-    for f in files:
-        if f['id'] in files_to_reprocess:
-            files_to_process.append(f)
-            
-    # Then add others up to limit
-    remaining_slots = 50 - len(files_to_process)
-    if remaining_slots > 0:
-        others = [f for f in files if f['name'].endswith('.md') and f['id'] not in files_to_reprocess][:remaining_slots]
-        files_to_process.extend(others)
+    for f in source_files:
+        f_id = f['id']
         
+        # If file is in Excel AND NOT marked for reprocessing -> Move to Processed
+        if f_id in existing_files_in_excel and f_id not in files_to_reprocess:
+            try:
+                move_file(drive_service, f_id, index_folder_id, processed_folder_id)
+                # logger.info(f"Moved already processed file {f['name']} to _Processed_JSON")
+            except Exception as e:
+                logger.warning(f"Failed to move {f['name']} to processed: {e}")
+        else:
+            # File is NOT in Excel (or is reprocessed) -> Add to queue
+            if f['name'].endswith('.md'):
+                files_to_process.append(f)
+
+    # 3. Process files (Batch Limit: 50)
+    # Sort: Reprocess files first? They are already in the list.
+    # Just apply limit.
+    files_to_process = files_to_process[:50]
     logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 50)...")
 
     report_buffer = []
 
     for file_item in files_to_process:
-        process_file(file_item, drive_service, json_output_folder_id, report_buffer)
+        # Process
+        success = process_file(file_item, drive_service, json_output_folder_id, report_buffer)
+        
+        # If success, move to Processed
+        if success: # process_file needs to return True/False
+             try:
+                move_file(drive_service, file_item['id'], index_folder_id, processed_folder_id)
+                logger.info(f"Moved {file_item['name']} to _Processed_JSON")
+             except Exception as e:
+                logger.error(f"Failed to move {file_item['name']} after processing: {e}")
 
     # Flush Report Buffer
     if report_buffer and sheets_service and email_sheet_id:
