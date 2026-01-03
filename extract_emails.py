@@ -379,33 +379,9 @@ date_processed: "{os.environ.get('GITHUB_RUN_ID', 'local')}"
             # --- END INDEXING ---
 
             # --- START JSON EXTRACTION & REPORTING ---
+            # REMOVED: JSON extraction is now handled by Pipeline 2 (etl_extract.py)
+            # to avoid unnecessary AI calls and credit usage in Pipeline 1.
             json_data = {}
-            report_row = []
-            try:
-                # 1. Extract JSON
-                logger.info(f"Extracting structured JSON for {clean_filename}...")
-                json_data = parse_cv_full_text(text)
-                
-                # 2. Save JSON locally
-                if not os.path.exists(JSON_DIR):
-                    os.makedirs(JSON_DIR)
-                
-                json_path = os.path.join(JSON_DIR, f"{file_id}.json")
-                with open(json_path, 'w', encoding='utf-8') as f:
-                    json.dump(json_data, f, indent=2, ensure_ascii=False)
-                    
-                # 3. Generate Report Row
-                # We need the MD link. If we just created it, we don't have the Drive Link yet.
-                # But we can pass a placeholder or the local path, and update it later?
-                # Actually, the user wants the link to the MD file.
-                # In `process_folder`, we upload the MD and get the link.
-                # So we can't fully generate the final row here because we lack the MD Link.
-                # STRATEGY: Return the JSON data, and let `process_folder` generate the row 
-                # AFTER it uploads the MD file and gets the link.
-                pass
-
-            except Exception as e:
-                logger.error(f"Error extracting JSON for {clean_filename}: {e}")
             # --- END JSON EXTRACTION ---
 
             if row_index_to_update != -1:
