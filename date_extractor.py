@@ -88,8 +88,8 @@ def extract_date_anchors(text: str) -> List[DateAnchor]:
     month_digit_pat = r'(?:0?[1-9]|1[0-2])'
     
     # Date Part: "Jan 2020", "01/2020", "2020"
-    # We make month optional but grouped
-    date_part_pat = fr'(?:(?P<month>{month_pat}|{month_digit_pat})[\s/]+)?(?P<year>{year_pat})'
+    # We remove inner named groups to avoid redefinition error when used multiple times
+    date_part_pat = fr'(?:(?:{month_pat}|{month_digit_pat})[\s/]+)?(?:{year_pat})'
     
     # 1. Ranges: "Date - Date" or "Date - Present"
     # Separators: " - ", " – ", " to ", " à "
