@@ -21,7 +21,7 @@ MAX_RETRIES_PER_MODEL = 2
 
 # Rate Limiting Configuration (OpenRouter usually handles this, but we keep a safety buffer)
 RATE_LIMITS = {
-    "google/gemini-2.0-flash-exp:free": {"rpm": 10}, 
+    "google/gemini-2.0-flash-exp:free": {"rpm": 5},  # Very conservative to avoid 429s (1 req/12s)
     "meta-llama/llama-3.3-70b-instruct:free": {"rpm": 10},
     "meta-llama/llama-3.1-405b-instruct:free": {"rpm": 5},
     "qwen/qwen-2.5-vl-7b-instruct:free": {"rpm": 20},
