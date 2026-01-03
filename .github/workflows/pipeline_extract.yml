@@ -41,4 +41,5 @@ jobs:
         CV_TO_JSON_FOLDER_ID: ${{ secrets.CV_TO_JSON_FOLDER_ID }}
         OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         JSON_OUTPUT_FOLDER_ID: ${{ secrets.JSON_OUTPUT_FOLDER_ID }}
+        EMAIL_SHEET_ID: ${{ secrets.EMAIL_SHEET_ID }}
       run: python etl_extract.py
