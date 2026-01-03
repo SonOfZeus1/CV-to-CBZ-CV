@@ -1120,7 +1120,9 @@ def build_row_index_from_sheet_rows(rows):
 
 def ensure_report_headers(service, sheet_id, sheet_name):
     """
-    Checks if the report sheet has headers. If not (or if empty), writes them.
+    Checks if the report sheet exists and has headers. 
+    If it doesn't exist, creates it and writes headers.
+    If it exists but is empty, writes headers.
     """
     logger.info(f"Checking headers for sheet '{sheet_name}'...")
     
@@ -1138,7 +1140,7 @@ def ensure_report_headers(service, sheet_id, sheet_name):
         values = result.get('values', [])
         
         if not values:
-            logger.info(f"Sheet '{sheet_name}' is empty. Writing headers...")
+            logger.info(f"Sheet '{sheet_name}' exists but is empty. Writing headers...")
             body = {'values': [headers]}
             service.spreadsheets().values().update(
                 spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1",
@@ -1149,7 +1151,31 @@ def ensure_report_headers(service, sheet_id, sheet_name):
             logger.info(f"Sheet '{sheet_name}' already has headers.")
             
     except Exception as e:
-        logger.error(f"Error ensuring headers: {e}")
+        # If error is likely "Sheet not found"
+        logger.warning(f"Sheet '{sheet_name}' not found or inaccessible ({e}). Attempting to create it...")
+        try:
+            body = {
+                'requests': [{
+                    'addSheet': {
+                        'properties': {
+                            'title': sheet_name
+                        }
+                    }
+                }]
+            }
+            service.spreadsheets().batchUpdate(spreadsheetId=sheet_id, body=body).execute()
+            logger.info(f"Created new sheet '{sheet_name}'.")
+            
+            # Now write headers
+            body = {'values': [headers]}
+            service.spreadsheets().values().update(
+                spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1",
+                valueInputOption="USER_ENTERED", body=body
+            ).execute()
+            logger.info("Headers written to new sheet.")
+            
+        except Exception as create_error:
+            logger.error(f"Failed to create sheet '{sheet_name}': {create_error}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract emails from CVs in a Google Drive folder.")
