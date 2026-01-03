@@ -174,13 +174,26 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
     
     # 3. Map to Internal Schema (CVData)
     # Contact Info -> Basics
+    # Contact Info -> Basics
     contact = extracted_data.get("contact_info", {})
+    
+    # Language Fallback
+    languages = contact.get("languages", [])
+    if not languages and metadata and metadata.get("language"):
+        lang_code = metadata.get("language").upper()
+        if lang_code == "EN":
+            languages = ["Anglais"]
+        elif lang_code == "FR":
+            languages = ["Français"]
+        else:
+            languages = [metadata.get("language")]
+
     basics = {
         "name": f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip(),
         "email": contact.get("email", ""),
         "phone": contact.get("phone", ""),
         "address": contact.get("address", ""),
-        "languages": contact.get("languages", []),
+        "languages": languages,
         "summary": extracted_data.get("summary", "")
     }
     

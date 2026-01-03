@@ -12,15 +12,20 @@ logger = logging.getLogger(__name__)
 # Constants
 # Priority list of models (Quality -> Speed/Quota)
 MODELS = [
-    "openai/gpt-oss-120b:free",       # Primary: Intelligent, Robust (Working)
-    "xiaomi/mimo-v2-flash:free",      # Secondary: Fast (Currently Unstable/404)
+    "google/gemini-2.0-flash-exp:free",          # Primary: Huge Context, Smart, Fast
+    "meta-llama/llama-3.3-70b-instruct:free",    # Secondary: Very Reliable, Strong
+    "meta-llama/llama-3.1-405b-instruct:free",   # Tertiary: Extremely Powerful
+    "qwen/qwen-2.5-vl-7b-instruct:free"          # Quaternary: Fast Fallback
 ]
 MAX_RETRIES_PER_MODEL = 2
 
 # Rate Limiting Configuration (OpenRouter usually handles this, but we keep a safety buffer)
 RATE_LIMITS = {
-    "xiaomi/mimo-v2-flash:free": {"rpm": 60}, 
-    "openai/gpt-oss-120b:free": {"rpm": 30},
+    "google/gemini-2.0-flash-exp:free": {"rpm": 10}, 
+    "meta-llama/llama-3.3-70b-instruct:free": {"rpm": 10},
+    "meta-llama/llama-3.1-405b-instruct:free": {"rpm": 5},
+    "qwen/qwen-2.5-vl-7b-instruct:free": {"rpm": 20},
+    "xiaomi/mimo-v2-flash:free": {"rpm": 60}
 }
 
 class RateLimiter:

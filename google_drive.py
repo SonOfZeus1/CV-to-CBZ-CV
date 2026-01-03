@@ -733,6 +733,82 @@ def ensure_report_headers(service, sheet_id, sheet_name):
             print(f"Failed to create sheet '{sheet_name}': {create_error}")
         raise
 
+def remove_empty_rows(service, sheet_id, sheet_name):
+    """
+    Finds and removes empty rows from the specified sheet.
+    Deletes rows that have no values.
+    """
+    print(f"Checking for empty rows in '{sheet_name}'...")
+    
+    # 1. Get all values
+    values = get_sheet_values(service, sheet_id, sheet_name)
+    if not values:
+        print("Sheet is empty.")
+        return
+
+    # 2. Identify empty rows (0-based index)
+    empty_row_indices = []
+    for i, row in enumerate(values):
+        # Check if row is empty or all cells are empty strings
+        if not row or all(str(cell).strip() == "" for cell in row):
+            empty_row_indices.append(i)
+            
+    if not empty_row_indices:
+        print("No empty rows found.")
+        return
+
+    print(f"Found {len(empty_row_indices)} empty rows. Removing...")
+
+    # 3. Group into contiguous ranges to minimize requests
+    # e.g. [2, 3, 4, 8, 10] -> [(2, 4), (8, 8), (10, 10)]
+    ranges = []
+    if empty_row_indices:
+        start = empty_row_indices[0]
+        end = start
+        for i in empty_row_indices[1:]:
+            if i == end + 1:
+                end = i
+            else:
+                ranges.append((start, end))
+                start = i
+                end = i
+        ranges.append((start, end))
+
+    # 4. Create Delete Requests (Reverse Order is CRITICAL)
+    # We must delete from bottom to top so indices of earlier rows don't change
+    ranges.sort(key=lambda x: x[0], reverse=True)
+    
+    # Get sheetId
+    sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+    sheets = sheet_metadata.get('sheets', '')
+    sheet_int_id = 0
+    for s in sheets:
+        if s.get("properties", {}).get("title") == sheet_name:
+            sheet_int_id = s.get("properties", {}).get("sheetId")
+            break
+
+    requests = []
+    for start_idx, end_idx in ranges:
+        # deleteDimension uses startIndex (inclusive) and endIndex (exclusive)
+        requests.append({
+            "deleteDimension": {
+                "range": {
+                    "sheetId": sheet_int_id,
+                    "dimension": "ROWS",
+                    "startIndex": start_idx,
+                    "endIndex": end_idx + 1
+                }
+            }
+        })
+
+    body = {'requests': requests}
+    
+    try:
+        service.spreadsheets().batchUpdate(spreadsheetId=sheet_id, body=body).execute()
+        print(f"Successfully removed {len(empty_row_indices)} empty rows.")
+    except Exception as e:
+        print(f"Error removing empty rows: {e}")
+
 def batch_update_rows(service, sheet_id, updates, sheet_name="Feuille 1", start_col='A', retries=10):
     """
     Updates multiple rows in one batchUpdate call.
