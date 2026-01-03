@@ -650,6 +650,14 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
 
         # --- PRE-FLIGHT CHECK: Move files already in Excel to _processed ---
         logger.info("Running Pre-flight Check: Moving files already in Excel to _processed...")
+        
+        # --- ENSURE REPORT HEADERS ---
+        # User requested automatic header creation for the "Candidats" tab
+        try:
+            ensure_report_headers(sheets_service, sheet_id, "Candidats")
+        except Exception as e:
+            logger.warning(f"Failed to ensure headers for 'Candidats': {e}")
+            
         files_to_process = []
         moved_file_ids = set()
         
@@ -808,6 +816,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                         # We can generate the full row for the report
                         report_row = format_candidate_row(result['json_data'], final_md_link)
                         report_buffer.append(report_row)
+                        logger.info(f"Added row to Report Buffer. Buffer size: {len(report_buffer)}")
                     except Exception as e:
                         logger.error(f"Failed to format report row for {result['filename']}: {e}")
                         
@@ -829,12 +838,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     indexed_buffer = []
 
                 if len(report_buffer) >= BATCH_SIZE:
-                    logger.info(f"Flushing {len(report_buffer)} rows to Detailed Report...")
-                    # We need a target sheet for this. Let's assume a new tab "Candidats"
-                    # We should create it if it doesn't exist? Or just append to it.
-                    # For now, let's append to "Candidats"
+                    logger.info(f"Flushing {len(report_buffer)} rows to Detailed Report (Sheet ID: {sheet_id}, Tab: 'Candidats')...")
                     try:
                         append_batch_to_sheet(sheets_service, sheet_id, report_buffer, sheet_name="Candidats")
+                        logger.info("Successfully flushed batch to 'Candidats'.")
                     except Exception as e:
                         logger.warning(f"Could not write to 'Candidats' (maybe tab missing?): {e}")
                     report_buffer = []
@@ -853,9 +860,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             batch_update_rows(sheets_service, sheet_id, indexed_buffer, sheet_name, start_col='G')
 
         if report_buffer:
-            logger.info(f"Flushing remaining {len(report_buffer)} rows to Detailed Report...")
+            logger.info(f"Flushing remaining {len(report_buffer)} rows to Detailed Report (Sheet ID: {sheet_id}, Tab: 'Candidats')...")
             try:
                 append_batch_to_sheet(sheets_service, sheet_id, report_buffer, sheet_name="Candidats")
+                logger.info("Successfully flushed remaining rows to 'Candidats'.")
             except Exception as e:
                 logger.warning(f"Could not write to 'Candidats': {e}")
 
@@ -1109,6 +1117,39 @@ def build_row_index_from_sheet_rows(rows):
             }
             
     return index_map, data_map
+
+def ensure_report_headers(service, sheet_id, sheet_name):
+    """
+    Checks if the report sheet has headers. If not (or if empty), writes them.
+    """
+    logger.info(f"Checking headers for sheet '{sheet_name}'...")
+    
+    headers = [
+        "Prénom", "Nom", "Email", "Téléphone", "Adresse", 
+        "Langues", "Années Expérience", "Dernier Titre", 
+        "Dernière Localisation", "Lien MD"
+    ]
+    
+    try:
+        # Check first row
+        result = service.spreadsheets().values().get(
+            spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1:J1"
+        ).execute()
+        values = result.get('values', [])
+        
+        if not values:
+            logger.info(f"Sheet '{sheet_name}' is empty. Writing headers...")
+            body = {'values': [headers]}
+            service.spreadsheets().values().update(
+                spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1",
+                valueInputOption="USER_ENTERED", body=body
+            ).execute()
+            logger.info("Headers written successfully.")
+        else:
+            logger.info(f"Sheet '{sheet_name}' already has headers.")
+            
+    except Exception as e:
+        logger.error(f"Error ensuring headers: {e}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract emails from CVs in a Google Drive folder.")
