@@ -184,14 +184,6 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         "summary": extracted_data.get("summary", "")
     }
     
-    # Calculate Total Experience
-    total_months = 0
-    for exp in structured_experiences:
-        months = calculate_months_between(exp.date_start, exp.date_end, exp.is_current)
-        total_months += months
-        
-    basics["total_experience"] = round(total_months / 12, 1)
-    
     # Experiences
     structured_experiences = []
     for item in extracted_data.get("experiences", []):
@@ -214,6 +206,14 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
             anchor_ids=item.get("anchor_ids", [])
         )
         structured_experiences.append(entry)
+
+    # Calculate Total Experience
+    total_months = 0
+    for exp in structured_experiences:
+        months = calculate_months_between(exp.date_start, exp.date_end, exp.is_current)
+        total_months += months
+        
+    basics["total_experience"] = round(total_months / 12, 1)
         
     # Education
     education_entries = []
