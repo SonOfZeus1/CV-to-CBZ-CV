@@ -782,6 +782,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                         logger.error(f"Failed to upload index for {result['filename']}: {e}")
 
                 # Collect Index Updates
+                # Collect Index Updates
                 if md_link:
                     # Create Hyperlink Formula
                     # =LIEN_HYPERTEXTE("url"; "name.md")
@@ -797,15 +798,18 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                         # [Filename, Email, Phone, Status, Emplacement, Language, Lien Index]
                         result['data'].append(formula)
                         
-                    # --- GENERATE REPORT ROW ---
-                    if 'json_data' in result and result['json_data']:
-                        try:
-                            # Now we have the MD Link (md_link) and the JSON data
-                            # We can generate the full row for the report
-                            report_row = format_candidate_row(result['json_data'], md_link)
-                            report_buffer.append(report_row)
-                        except Exception as e:
-                            logger.error(f"Failed to format report row for {result['filename']}: {e}")
+                # --- GENERATE REPORT ROW ---
+                # Independent of MD Link success (though we prefer having it)
+                if 'json_data' in result and result['json_data']:
+                    try:
+                        # Use md_link if we have it, otherwise empty
+                        final_md_link = md_link if md_link else ""
+                        
+                        # We can generate the full row for the report
+                        report_row = format_candidate_row(result['json_data'], final_md_link)
+                        report_buffer.append(report_row)
+                    except Exception as e:
+                        logger.error(f"Failed to format report row for {result['filename']}: {e}")
                         
                 # Batch Write
                 if len(append_buffer) >= BATCH_SIZE:
