@@ -43,12 +43,11 @@ class EducationEntry:
 class CVData:
     meta: Dict[str, Any]
     basics: Dict[str, Any]
-    links: List[str]
     summary: str
     skills_tech: List[str]
     experience: List[ExperienceEntry]
     education: List[EducationEntry]
-    languages: List[str]
+    projects: List[Dict[str, Any]]
     extra_info: List[str]
     unmapped: List[str]
 
@@ -56,12 +55,11 @@ class CVData:
         return {
             "meta": self.meta,
             "basics": self.basics,
-            "links": self.links,
             "summary": self.summary,
             "skills_tech": self.skills_tech,
             "experience": [asdict(e) for e in self.experience],
             "education": [asdict(e) for e in self.education],
-            "languages": self.languages,
+            "projects": self.projects,
             "extra_info": self.extra_info,
             "unmapped": self.unmapped
         }
@@ -125,8 +123,8 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         "name": f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip(),
         "email": contact.get("email", ""),
         "phone": contact.get("phone", ""),
-        "linkedin": contact.get("linkedin", ""),
         "address": contact.get("address", ""),
+        "languages": contact.get("languages", []),
         "summary": extracted_data.get("summary", "")
     }
     
@@ -146,7 +144,7 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
             duration="", # Can calculate if needed
             summary=item.get("summary", ""),
             tasks=item.get("tasks", []),
-            skills=[],
+            skills=item.get("skills", []),
             full_text="Generated via Single-Shot"
         )
         structured_experiences.append(entry)
@@ -162,19 +160,28 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
             full_text=str(item)
         ))
         
-    # Skills
-    skills_tech = extracted_data.get("skills", [])
+    # Skills (Aggregated from Experiences)
+    # The user wants skills_tech to be ONLY based on skills from experiences.
+    # So we iterate through structured_experiences and collect all skills.
+    all_skills = set()
+    for exp in structured_experiences:
+        for skill in exp.skills:
+            all_skills.add(skill)
+            
+    skills_tech = sorted(list(all_skills))
     
+    # Projects
+    projects = extracted_data.get("projects", [])
+
     # Assemble CVData
     cv_data = CVData(
-        meta={"filename": filename, "ocr_applied": str(metadata.get("ocr_applied", "False") if metadata else "False")},
+        meta={"filename": filename},
         basics=basics,
-        links=[basics.get("linkedin")] if basics.get("linkedin") else [],
         summary=basics.get("summary", ""),
         skills_tech=skills_tech,
         experience=structured_experiences,
         education=education_entries,
-        languages=[], # Could extract from skills if labeled
+        projects=projects,
         extra_info=[],
         unmapped=[]
     )

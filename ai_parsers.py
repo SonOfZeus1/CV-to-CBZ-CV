@@ -12,14 +12,16 @@ You are an expert CV Parser. Your goal is to extract ALL structured data from a 
 Output STRICT JSON matching the schema below.
 
 CRITICAL RULES:
-1. Extract Contact Info (Email, Phone, Name, LinkedIn).
+1. Extract Contact Info (Email, Phone, Name, Languages).
+   - DO NOT extract LinkedIn or Social Links.
 2. Extract Professional Summary (or generate one if missing).
 3. Extract ALL Experience entries.
    - Use "dates_raw" for the exact text found in the CV.
    - Try to normalize "date_start" and "date_end" to YYYY-MM or YYYY.
    - If "Present" or "Aujourd'hui", set "is_current": true.
+   - CRITICAL: Extract specific technologies and skills used in EACH experience.
 4. Extract Education entries.
-5. Extract Skills (Technical, Languages, Soft Skills).
+5. Extract Projects (if any specific projects are listed outside of experiences).
 
 JSON SCHEMA:
 {
@@ -28,8 +30,8 @@ JSON SCHEMA:
     "last_name": "...",
     "email": "...",
     "phone": "...",
-    "linkedin": "...",
-    "address": "..."
+    "address": "...",
+    "languages": ["French", "English"]
   },
   "summary": "...",
   "experiences": [
@@ -42,7 +44,16 @@ JSON SCHEMA:
       "date_end": "YYYY-MM",
       "is_current": boolean,
       "summary": "...",
-      "tasks": ["Task 1", "Task 2"]
+      "tasks": ["Task 1", "Task 2"],
+      "skills": ["Java", "Python", "Project Management"]
+    }
+  ],
+  "projects": [
+    {
+      "name": "...",
+      "description": "...",
+      "technologies": ["Tech 1", "Tech 2"],
+      "dates": "..."
     }
   ],
   "education": [
@@ -51,8 +62,7 @@ JSON SCHEMA:
       "school": "...",
       "year": "..."
     }
-  ],
-  "skills": ["Skill 1", "Skill 2"]
+  ]
 }
 """
 

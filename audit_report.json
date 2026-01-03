@@ -1,0 +1,12 @@
+{
+  "summary": {
+    "total_md_files": 0,
+    "missing_json": 0,
+    "invalid_json": 0,
+    "empty_extraction": 0,
+    "technical_failures": 0,
+    "success_candidates": 0
+  },
+  "failures": [],
+  "successes": []
+}
