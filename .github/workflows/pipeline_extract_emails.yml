@@ -113,4 +113,5 @@ jobs:
         EMAIL_SHEET_ID: ${{ secrets.EMAIL_SHEET_ID }}
         EMAIL_SOURCE_FOLDER_ID: ${{ secrets.EMAIL_SOURCE_FOLDER_ID }}
         EMAIL_SHEET_NAME: ${{ secrets.EMAIL_SHEET_NAME }}
+        OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       run: python extract_emails.py --folder_id "$EMAIL_SOURCE_FOLDER_ID" --sheet_id "$EMAIL_SHEET_ID" --sheet_name "${EMAIL_SHEET_NAME:-Feuille 1}"

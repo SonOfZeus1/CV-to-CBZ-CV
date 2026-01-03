@@ -12,6 +12,8 @@ from google_drive import (
 import re
 import difflib
 from simple_parsers import extract_text_from_pdf, extract_text_from_docx, heuristic_parse_contact
+from ai_parsers import parse_cv_full_text
+from report_generator import format_candidate_row
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Configure logging
@@ -20,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 TEMP_DIR = "temp_cvs"
 INDEX_DIR = "index_cvs"
+JSON_DIR = "output_jsons"
 INDEXED_COL_IDX = 6 # Column G (0-based index)
 
 def select_best_email(emails, filename):
@@ -375,10 +378,40 @@ date_processed: "{os.environ.get('GITHUB_RUN_ID', 'local')}"
                 # Don't fail the whole process for indexing error
             # --- END INDEXING ---
 
+            # --- START JSON EXTRACTION & REPORTING ---
+            json_data = {}
+            report_row = []
+            try:
+                # 1. Extract JSON
+                logger.info(f"Extracting structured JSON for {clean_filename}...")
+                json_data = parse_cv_full_text(text)
+                
+                # 2. Save JSON locally
+                if not os.path.exists(JSON_DIR):
+                    os.makedirs(JSON_DIR)
+                
+                json_path = os.path.join(JSON_DIR, f"{file_id}.json")
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(json_data, f, indent=2, ensure_ascii=False)
+                    
+                # 3. Generate Report Row
+                # We need the MD link. If we just created it, we don't have the Drive Link yet.
+                # But we can pass a placeholder or the local path, and update it later?
+                # Actually, the user wants the link to the MD file.
+                # In `process_folder`, we upload the MD and get the link.
+                # So we can't fully generate the final row here because we lack the MD Link.
+                # STRATEGY: Return the JSON data, and let `process_folder` generate the row 
+                # AFTER it uploads the MD file and gets the link.
+                pass
+
+            except Exception as e:
+                logger.error(f"Error extracting JSON for {clean_filename}: {e}")
+            # --- END JSON EXTRACTION ---
+
             if row_index_to_update != -1:
-                return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename, 'md_path': md_path, 'is_indexed': True, 'md_link': md_link}
+                return {'action': 'UPDATE', 'row_index': row_index_to_update, 'data': row_data, 'filename': clean_filename, 'md_path': md_path, 'is_indexed': True, 'md_link': md_link, 'json_data': json_data}
             else:
-                return {'action': 'APPEND', 'data': row_data, 'filename': clean_filename, 'md_path': md_path, 'is_indexed': True, 'md_link': md_link}
+                return {'action': 'APPEND', 'data': row_data, 'filename': clean_filename, 'md_path': md_path, 'is_indexed': True, 'md_link': md_link, 'json_data': json_data}
                 
         except Exception as e:
             logger.error(f"Error processing {clean_filename}: {e}")
@@ -681,6 +714,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         append_buffer = []
         update_buffer = []
         indexed_buffer = [] # Buffer for "Indexé" column updates
+        report_buffer = [] # Buffer for the new Detailed Report Sheet
         BATCH_SIZE = 50
         MAX_WORKERS = 5
         
@@ -750,6 +784,16 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                         # [Filename, Email, Phone, Status, Emplacement, Language, Lien Index]
                         result['data'].append(formula)
                         
+                    # --- GENERATE REPORT ROW ---
+                    if 'json_data' in result and result['json_data']:
+                        try:
+                            # Now we have the MD Link (md_link) and the JSON data
+                            # We can generate the full row for the report
+                            report_row = format_candidate_row(result['json_data'], md_link)
+                            report_buffer.append(report_row)
+                        except Exception as e:
+                            logger.error(f"Failed to format report row for {result['filename']}: {e}")
+                        
                 # Batch Write
                 if len(append_buffer) >= BATCH_SIZE:
                     logger.info(f"Flushing {len(append_buffer)} new rows to Sheet...")
@@ -766,6 +810,17 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     logger.info(f"Flushing {len(indexed_buffer)} index status updates...")
                     batch_update_rows(sheets_service, sheet_id, indexed_buffer, sheet_name, start_col='G')
                     indexed_buffer = []
+
+                if len(report_buffer) >= BATCH_SIZE:
+                    logger.info(f"Flushing {len(report_buffer)} rows to Detailed Report...")
+                    # We need a target sheet for this. Let's assume a new tab "Candidats Détaillés"
+                    # We should create it if it doesn't exist? Or just append to it.
+                    # For now, let's append to "Candidats Détaillés"
+                    try:
+                        append_batch_to_sheet(sheets_service, sheet_id, report_buffer, sheet_name="Candidats Détaillés")
+                    except Exception as e:
+                        logger.warning(f"Could not write to 'Candidats Détaillés' (maybe tab missing?): {e}")
+                    report_buffer = []
         
         # Flush remaining
         if append_buffer:
@@ -780,6 +835,13 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             logger.info(f"Flushing remaining {len(indexed_buffer)} index status updates...")
             batch_update_rows(sheets_service, sheet_id, indexed_buffer, sheet_name, start_col='G')
 
+        if report_buffer:
+            logger.info(f"Flushing remaining {len(report_buffer)} rows to Detailed Report...")
+            try:
+                append_batch_to_sheet(sheets_service, sheet_id, report_buffer, sheet_name="Candidats Détaillés")
+            except Exception as e:
+                logger.warning(f"Could not write to 'Candidats Détaillés': {e}")
+
     finally:
         # 6. Cleanup
         if os.path.exists(TEMP_DIR):
@@ -789,6 +851,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         if os.path.exists(INDEX_DIR):
             shutil.rmtree(INDEX_DIR)
             logger.info("Index directory cleaned up.")
+            
+        if os.path.exists(JSON_DIR):
+            shutil.rmtree(JSON_DIR)
+            logger.info("JSON directory cleaned up.")
             
         # 7. Set Data Validation for Status Column (Column D, index 3)
         logger.info("Setting data validation for Status column...")

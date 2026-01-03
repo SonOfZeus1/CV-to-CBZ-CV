@@ -122,3 +122,21 @@ def ai_generate_summary(experiences: List[Dict[str, Any]]) -> Dict[str, str]:
         
     prompt = SUMMARY_USER_PROMPT.format(experiences_text=exp_text)
     return call_ai(prompt, SUMMARY_SYSTEM_PROMPT, expect_json=True)
+
+def parse_cv_full_text(text: str) -> Dict[str, Any]:
+    """
+    Parses the full text of a CV into structured JSON using the Single-Shot prompt.
+    """
+    if not text:
+        return {}
+        
+    # We don't have an anchor map in this simple flow, so we pass an empty one or modify the prompt.
+    # The prompt expects {anchor_map}, so we must provide it.
+    # For now, we'll pass a placeholder saying "No anchors provided".
+    
+    prompt = FULL_CV_EXTRACTION_USER_PROMPT.format(
+        anchor_map="No pre-computed anchors available.",
+        text=text
+    )
+    
+    return call_ai(prompt, FULL_CV_EXTRACTION_SYSTEM_PROMPT, expect_json=True)
