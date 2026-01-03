@@ -106,10 +106,10 @@ class AIClient:
                         model=model,
                         messages=messages,
                         temperature=0.1 if expect_json else 0.3,
-                        response_format={"type": "json_object"} if expect_json else None,
+                        # response_format={"type": "json_object"} if expect_json else None, # REMOVED: Causes 400 errors on free providers
                         extra_headers={
-                            "HTTP-Referer": "https://github.com/SonOfZeus1/CV-to-CBZ-CV", # Optional, for OpenRouter rankings
-                            "X-Title": "CV Extraction Pipeline", # Optional
+                            "HTTP-Referer": "https://github.com/SonOfZeus1/CV-to-CBZ-CV", 
+                            "X-Title": "CV Extraction Pipeline", 
                         },
                     )
                     
