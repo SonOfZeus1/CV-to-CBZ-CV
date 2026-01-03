@@ -94,12 +94,12 @@ def extract_date_anchors(text: str) -> List[DateAnchor]:
     # 1. Ranges: "Date - Date" or "Date - Present"
     # Separators: " - ", " – ", " to ", " à "
     separator = r'\s*(?:-|–|to|à)\s*'
-    present_pat = r'(?i)(?:present|aujourd\'hui|now|actuel|current|en cours)'
+    present_pat = r'(?:present|aujourd\'hui|now|actuel|current|en cours)'
     
     range_regex = fr'(?P<start>{date_part_pat}){separator}(?P<end>{date_part_pat}|{present_pat})'
     
     # 2. Since: "Depuis Date"
-    since_regex = fr'(?i)(?:depuis|since)\s+(?P<start>{date_part_pat})'
+    since_regex = fr'(?:depuis|since)\s+(?P<start>{date_part_pat})'
     
     # 3. Single Dates (Isolated) - We'll do a separate pass or careful regex
     # For now, let's capture them if they haven't been captured by ranges
