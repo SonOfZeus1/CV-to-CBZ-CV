@@ -158,10 +158,10 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str) -> List[str]:
         last_name,
         email,
         phone,
-        address,
         languages,
-        str(total_exp),
+        total_exp,
         latest_title,
         latest_location,
-        md_link
+        md_link,
+        "" # Action Column (Empty by default)
     ]

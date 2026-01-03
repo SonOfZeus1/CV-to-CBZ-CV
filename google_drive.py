@@ -684,13 +684,13 @@ def ensure_report_headers(service, sheet_id, sheet_name):
     headers = [
         "Prénom", "Nom", "Email", "Téléphone", "Adresse", 
         "Langues", "Années Expérience", "Dernier Titre", 
-        "Dernière Localisation", "Lien MD"
+        "Dernière Localisation", "Lien MD", "Action"
     ]
     
     try:
         # Check first row
         result = service.spreadsheets().values().get(
-            spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1:J1"
+            spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1:K1"
         ).execute()
         values = result.get('values', [])
         
@@ -703,7 +703,19 @@ def ensure_report_headers(service, sheet_id, sheet_name):
             ).execute()
             print("Headers written successfully.")
         else:
-            print(f"Sheet '{sheet_name}' already has headers.")
+            # Check if "Action" header is present (index 10)
+            if len(values[0]) < 11 or values[0][10] != "Action":
+                 print("Adding missing 'Action' header...")
+                 service.spreadsheets().values().update(
+                    spreadsheetId=sheet_id, range=f"'{sheet_name}'!K1",
+                    valueInputOption="USER_ENTERED", body={'values': [["Action"]]}
+                 ).execute()
+            print(f"Sheet '{sheet_name}' headers checked.")
+            
+        # Set Validation for Action Column (K)
+        set_column_validation(service, sheet_id, sheet_name, 
+                            col_index=10, # K is index 10 (0-based)
+                            options=["Retraiter", "Supprimer"])
             
     except Exception as e:
         # If error is likely "Sheet not found"
@@ -728,6 +740,11 @@ def ensure_report_headers(service, sheet_id, sheet_name):
                 valueInputOption="USER_ENTERED", body=body
             ).execute()
             print("Headers written to new sheet.")
+            
+            # Set Validation
+            set_column_validation(service, sheet_id, sheet_name, 
+                                col_index=10, 
+                                options=["Retraiter", "Supprimer"])
             
         except Exception as create_error:
             print(f"Failed to create sheet '{sheet_name}': {create_error}")

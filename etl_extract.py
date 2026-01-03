@@ -146,9 +146,96 @@ def main():
         
     logger.info(f"Found {len(files)} files to process.")
 
-    # 3. Process each file (Limit to 1 for testing)
-    files_to_process = [f for f in files if f['name'].endswith('.md')][:1]
-    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 1)...")
+    # 2.5. Check "Action" Column (Retraiter / Supprimer)
+    files_to_reprocess = set()
+    if sheets_service and email_sheet_id:
+        try:
+            logger.info("Checking 'Action' column in 'Candidats'...")
+            rows = get_sheet_values(sheets_service, email_sheet_id, "Candidats")
+            
+            if rows:
+                # Identify rows to delete or reprocess
+                # Column K (Action) is index 10. Column J (MD Link) is index 9.
+                rows_to_delete = [] # Indices to delete
+                
+                for i, row in enumerate(rows):
+                    if i == 0: continue # Skip header
+                    
+                    action = ""
+                    if len(row) > 10:
+                        action = row[10].strip().lower()
+                    
+                    if action == "supprimer":
+                        rows_to_delete.append(i)
+                        logger.info(f"Row {i+1} marked for DELETION.")
+                        
+                    elif action == "retraiter":
+                        rows_to_delete.append(i) # Delete from sheet to re-add later
+                        # Extract File ID from MD Link (Index 9)
+                        if len(row) > 9:
+                            md_link = row[9]
+                            # Link format: https://drive.google.com/file/d/{file_id}/view
+                            match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
+                            if match:
+                                file_id = match.group(1)
+                                files_to_reprocess.add(file_id)
+                                logger.info(f"Row {i+1} marked for REPROCESSING (File ID: {file_id}).")
+                
+                # Execute Deletions (if any)
+                if rows_to_delete:
+                    # Group into ranges (reverse order handled by remove_empty_rows logic, but here we do it manually or use batch_update)
+                    # Actually, let's use a custom delete logic or just delete one by one? No, batch is better.
+                    # We can reuse the logic from remove_empty_rows but passing specific indices.
+                    # Or simpler: Just delete them.
+                    # IMPORTANT: Delete from bottom to top!
+                    rows_to_delete.sort(reverse=True)
+                    
+                    # Get Sheet ID
+                    sheet_metadata = sheets_service.spreadsheets().get(spreadsheetId=email_sheet_id).execute()
+                    sheets = sheet_metadata.get('sheets', '')
+                    sheet_int_id = 0
+                    for s in sheets:
+                        if s.get("properties", {}).get("title") == "Candidats":
+                            sheet_int_id = s.get("properties", {}).get("sheetId")
+                            break
+                    
+                    requests = []
+                    for row_idx in rows_to_delete:
+                        requests.append({
+                            "deleteDimension": {
+                                "range": {
+                                    "sheetId": sheet_int_id,
+                                    "dimension": "ROWS",
+                                    "startIndex": row_idx,
+                                    "endIndex": row_idx + 1
+                                }
+                            }
+                        })
+                    
+                    if requests:
+                        body = {'requests': requests}
+                        sheets_service.spreadsheets().batchUpdate(spreadsheetId=email_sheet_id, body=body).execute()
+                        logger.info(f"Executed {len(requests)} row deletions (Supprimer/Retraiter).")
+
+        except Exception as e:
+            logger.error(f"Error processing Action column: {e}")
+
+    # 3. Process files (Batch Limit: 50)
+    # Prioritize files_to_reprocess
+    files_to_process = []
+    
+    # First, add reprocess files
+    for f in files:
+        if f['id'] in files_to_reprocess:
+            files_to_process.append(f)
+            
+    # Then add others up to limit
+    remaining_slots = 50 - len(files_to_process)
+    if remaining_slots > 0:
+        others = [f for f in files if f['name'].endswith('.md') and f['id'] not in files_to_reprocess][:remaining_slots]
+        files_to_process.extend(others)
+        
+    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 50)...")
 
     report_buffer = []
 
