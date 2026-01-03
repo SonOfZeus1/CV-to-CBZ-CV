@@ -826,13 +826,13 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
 
                 if len(report_buffer) >= BATCH_SIZE:
                     logger.info(f"Flushing {len(report_buffer)} rows to Detailed Report...")
-                    # We need a target sheet for this. Let's assume a new tab "Candidats Détaillés"
+                    # We need a target sheet for this. Let's assume a new tab "Candidats"
                     # We should create it if it doesn't exist? Or just append to it.
-                    # For now, let's append to "Candidats Détaillés"
+                    # For now, let's append to "Candidats"
                     try:
-                        append_batch_to_sheet(sheets_service, sheet_id, report_buffer, sheet_name="Candidats Détaillés")
+                        append_batch_to_sheet(sheets_service, sheet_id, report_buffer, sheet_name="Candidats")
                     except Exception as e:
-                        logger.warning(f"Could not write to 'Candidats Détaillés' (maybe tab missing?): {e}")
+                        logger.warning(f"Could not write to 'Candidats' (maybe tab missing?): {e}")
                     report_buffer = []
         
         # Flush remaining
@@ -851,9 +851,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
         if report_buffer:
             logger.info(f"Flushing remaining {len(report_buffer)} rows to Detailed Report...")
             try:
-                append_batch_to_sheet(sheets_service, sheet_id, report_buffer, sheet_name="Candidats Détaillés")
+                append_batch_to_sheet(sheets_service, sheet_id, report_buffer, sheet_name="Candidats")
             except Exception as e:
-                logger.warning(f"Could not write to 'Candidats Détaillés': {e}")
+                logger.warning(f"Could not write to 'Candidats': {e}")
 
     finally:
         # 6. Cleanup

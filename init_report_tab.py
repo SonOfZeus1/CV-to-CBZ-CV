@@ -13,7 +13,7 @@ SPREADSHEET_ID = "1g3hL-j4w-v8t-5z-2x-1c-3v-4b-5n-6m" # REPLACE WITH ACTUAL ID F
 
 def initialize_report_tab(sheet_id):
     service = get_sheets_service()
-    sheet_name = "Candidats Détaillés"
+    sheet_name = "Candidats"
     
     headers = [
         "Prénom", "Nom", "Email", "Téléphone", "Adresse", 
