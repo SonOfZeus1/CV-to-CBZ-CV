@@ -3,6 +3,7 @@ import os
 import re
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Any, Optional
+from datetime import datetime
 
 from ai_client import call_ai
 from ai_parsers import (
@@ -10,6 +11,11 @@ from ai_parsers import (
     FULL_CV_EXTRACTION_USER_PROMPT
 )
 from text_processor import preprocess_markdown
+from date_extractor import extract_date_anchors
+from entity_extractor import extract_entity_anchors
+from segmenter import segment_cv
+from validator import validate_extraction
+import json
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -30,6 +36,8 @@ class ExperienceEntry:
     tasks: List[str] = field(default_factory=list)
     skills: List[str] = field(default_factory=list)
     full_text: str = ""
+    block_id: str = ""
+    anchor_ids: List[str] = field(default_factory=list)
 
 @dataclass
 class EducationEntry:
@@ -64,14 +72,47 @@ class CVData:
             "unmapped": self.unmapped
         }
 
-def parse_cv_full_text(text: str) -> Dict[str, Any]:
+def calculate_months_between(start_str: str, end_str: str, is_current: bool) -> int:
+    """Calculates months between two dates (YYYY-MM or YYYY)."""
+    if not start_str:
+        return 0
+        
+    try:
+        # Normalize start
+        if len(start_str) == 4:
+            start_date = datetime.strptime(start_str, "%Y")
+        else:
+            start_date = datetime.strptime(start_str, "%Y-%m")
+            
+        # Determine end
+        if is_current:
+            end_date = datetime.now()
+        elif end_str:
+            if len(end_str) == 4:
+                end_date = datetime.strptime(end_str, "%Y")
+            else:
+                end_date = datetime.strptime(end_str, "%Y-%m")
+        else:
+            return 0 # No end date and not current -> cannot calculate
+            
+        # Calculate difference
+        months = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month)
+        return max(0, months)
+        
+    except ValueError:
+        return 0
+
+def parse_cv_full_text(text: str, anchor_map: Dict[str, Any] = None) -> Dict[str, Any]:
     """
     Parses the entire CV in a single pass using OpenRouter (MiMo/GPT-OSS).
     """
     logger.info("Step 2: Single-Shot Full CV Extraction...")
     
-    # Call AI with the full text
-    prompt = FULL_CV_EXTRACTION_USER_PROMPT.format(text=text[:100000]) # Huge context limit
+    # Format Anchor Map
+    anchor_map_str = json.dumps(anchor_map, indent=2, ensure_ascii=False) if anchor_map else "{}"
+    
+    # Call AI with the full text and anchor map
+    prompt = FULL_CV_EXTRACTION_USER_PROMPT.format(text=text[:100000], anchor_map=anchor_map_str) # Huge context limit
     raw_data = call_ai(prompt, FULL_CV_EXTRACTION_SYSTEM_PROMPT, expect_json=True)
     
     # Validate and Normalize Data
@@ -98,8 +139,23 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
     # 1. Preprocess Text
     clean_text = preprocess_markdown(text)
     
-    # 2. Extract Data (Single Shot)
-    extracted_data = parse_cv_full_text(clean_text)
+    # 2. Rich Anchor Extraction & Segmentation
+    logger.info("Extracting Anchors and Segments...")
+    date_anchors = extract_date_anchors(clean_text)
+    entity_anchors = extract_entity_anchors(clean_text)
+    blocks = segment_cv(clean_text, date_anchors, entity_anchors)
+    
+    # Build Anchor Map
+    anchor_map = {
+        "anchors": {
+            "dates": [asdict(a) for a in date_anchors],
+            "entities": [asdict(a) for a in entity_anchors]
+        },
+        "blocks": [asdict(b) for b in blocks]
+    }
+    
+    # 3. Extract Data (Single Shot with Anchors)
+    extracted_data = parse_cv_full_text(clean_text, anchor_map=anchor_map)
     
     if not extracted_data:
         logger.warning("Single-Shot failed completely. Returning empty structure.")
@@ -128,6 +184,14 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         "summary": extracted_data.get("summary", "")
     }
     
+    # Calculate Total Experience
+    total_months = 0
+    for exp in structured_experiences:
+        months = calculate_months_between(exp.date_start, exp.date_end, exp.is_current)
+        total_months += months
+        
+    basics["total_experience"] = round(total_months / 12, 1)
+    
     # Experiences
     structured_experiences = []
     for item in extracted_data.get("experiences", []):
@@ -145,7 +209,9 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
             summary=item.get("summary", ""),
             tasks=item.get("tasks", []),
             skills=item.get("skills", []),
-            full_text="Generated via Single-Shot"
+            full_text="Generated via Single-Shot",
+            block_id=item.get("block_id", ""),
+            anchor_ids=item.get("anchor_ids", [])
         )
         structured_experiences.append(entry)
         
@@ -190,6 +256,16 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
     
     # Quality Check
     logger.info(f"Successfully extracted {len(structured_experiences)} experiences.")
+    
+    # 4. Validation
+    validation_issues = validate_extraction(result_dict, anchor_map)
+    if validation_issues:
+        logger.warning(f"Validation Issues found: {len(validation_issues)}")
+        for issue in validation_issues:
+            logger.warning(f"- {issue}")
+            
+    # Add issues to meta
+    result_dict["meta"]["validation_issues"] = validation_issues
     
     return result_dict
 

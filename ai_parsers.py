@@ -69,6 +69,22 @@ JSON SCHEMA:
 FULL_CV_EXTRACTION_USER_PROMPT = """
 Here is the full text of a CV. Parse it completely into the requested JSON format.
 
+*** STRICT ANCHORING INSTRUCTIONS ***
+You are provided with an "ANCHOR MAP" below. This map contains:
+1. "anchors": Validated Dates, Roles, and Companies found in the text.
+2. "blocks": Pre-segmented text blocks (especially for Experience).
+
+RULES:
+1. For each "experience" entry, you MUST reference the `block_id` it comes from.
+2. You MUST use the `date_anchor_id` if the date matches an anchor.
+3. DO NOT invent dates. If a date is not in the anchors, be very careful.
+4. The `skills` list for an experience must be derived ONLY from the text in that block.
+
+ANCHOR MAP:
+---
+{anchor_map}
+---
+
 CV TEXT:
 \"\"\"{text}\"\"\"
 """
