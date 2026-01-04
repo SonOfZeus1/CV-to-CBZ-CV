@@ -620,6 +620,9 @@ def upsert_batch_to_sheet(service, sheet_id, rows, sheet_name="Candidats", email
                     'range': range_name,
                     'values': [new_row]
                 })
+                # Debug: Print first update details
+                if len(updates) == 1:
+                    print(f"DEBUG: Updating row {row_index+1}. Row Len: {len(new_row)}. Range: {range_name}. Last Val: {new_row[-1]}")
             else:
                 # New row
                 rows_to_append.append(new_row)
@@ -640,6 +643,8 @@ def upsert_batch_to_sheet(service, sheet_id, rows, sheet_name="Candidats", email
             'range': range_name,
             'values': [new_row]
         })
+        if len(updates) == 1 or len(updates) == len(rows_to_append):
+             print(f"DEBUG: Appending row {next_row}. Row Len: {len(new_row)}. Range: {range_name}. Last Val: {new_row[-1]}")
         next_row += 1
 
     # 3. Perform Batch Updates (All in one go)
@@ -1043,17 +1048,3 @@ def create_hyperlink_formula(url, text):
     # Escape double quotes in text
     text = text.replace('"', '""')
     return f'=LIEN_HYPERTEXTE("{url}"; "{text}")'
-        
-    body = {'requests': requests}
-    
-    body = {'requests': requests}
-    
-    try:
-        execute_with_retry(lambda: service.spreadsheets().batchUpdate(
-            spreadsheetId=sheet_id,
-            body=body
-        ).execute())
-        print(f"Deleted {len(row_indices)} rows.")
-    except Exception as e:
-        print(f"Error deleting rows: {e}")
-        raise
