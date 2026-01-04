@@ -158,6 +158,10 @@ def process_file(file_item, drive_service, output_folder_id, report_buffer):
         # 6. Upload JSON to Drive
         json_file_id, json_link = upload_file_to_folder(drive_service, json_output_path, output_folder_id)
         
+        # Fallback if webViewLink is missing
+        if not json_link and json_file_id:
+            json_link = f"https://drive.google.com/file/d/{json_file_id}/view"
+
         logger.info(f"SUCCESS: Extracted {file_name} -> {json_filename} ({json_link})")
         
         # 7. Generate Report Row
@@ -165,7 +169,10 @@ def process_file(file_item, drive_service, output_folder_id, report_buffer):
         md_url = f"https://drive.google.com/file/d/{file_id}/view"
         md_link_formula = create_hyperlink_formula(md_url, "Voir MD")
         
-        json_link_formula = create_hyperlink_formula(json_link, "Voir JSON")
+        if json_link:
+             json_link_formula = create_hyperlink_formula(json_link, "Voir JSON")
+        else:
+             json_link_formula = ""
         
         try:
             # We assume the file will be moved to Processed if successful
