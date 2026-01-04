@@ -280,7 +280,12 @@ def main():
                         match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
                         if match:
                             file_id = match.group(1)
-                            existing_files_in_excel.add(file_id)
+                            
+                            # CRITICAL FIX: Only mark as "existing" if JSON Link is present!
+                            # Otherwise, we want to re-process it to generate the JSON.
+                            json_link_val = row[12] if len(row) > 12 else ""
+                            if json_link_val:
+                                existing_files_in_excel.add(file_id)
                     
                     # Check Action
                     action = ""
