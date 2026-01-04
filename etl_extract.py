@@ -364,14 +364,14 @@ def main():
     # 3. Process files (Batch Limit: 10)
     # Sort: Reprocess files first? They are already in the list.
     # Just apply limit.
-    files_to_process = files_to_process[:10]
-    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 10)...")
+    files_to_process = files_to_process[:25]
+    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 25)...")
 
     report_buffer = []
 
     # --- PARALLEL EXECUTION START ---
     max_workers = 5
-    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 10) with Parallel Execution (Workers: {max_workers})...")
+    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 25) with Parallel Execution (Workers: {max_workers})...")
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit tasks
