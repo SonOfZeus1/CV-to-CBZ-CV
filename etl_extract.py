@@ -161,15 +161,20 @@ def process_file(file_item, drive_service, output_folder_id, report_buffer):
         logger.info(f"SUCCESS: Extracted {file_name} -> {json_filename} ({json_link})")
         
         # 7. Generate Report Row
-        # We need the MD link. If we don't have it explicitly, we can construct it or leave it empty.
-        # The MD file is in the Index Folder. We can try to construct a link if we know the ID.
-        # file_item['webViewLink'] might be available if we requested fields.
-        # For now, let's use a placeholder or try to get it.
-        md_link = f"https://drive.google.com/file/d/{file_id}/view"
+        # Format Links
+        md_url = f"https://drive.google.com/file/d/{file_id}/view"
+        md_link_formula = create_hyperlink_formula(md_url, "Voir MD")
+        
+        json_link_formula = create_hyperlink_formula(json_link, "Voir JSON")
         
         try:
             # We assume the file will be moved to Processed if successful
-            report_row = format_candidate_row(parsed_data, md_link, emplacement="Processed")
+            report_row = format_candidate_row(
+                parsed_data, 
+                md_link=md_link_formula, 
+                emplacement="Processed",
+                json_link=json_link_formula
+            )
             report_buffer.append(report_row)
             logger.info(f"Added to Report Buffer: {file_name}")
             return True

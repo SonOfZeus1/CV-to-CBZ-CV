@@ -101,7 +101,7 @@ def get_latest_experience(experiences: List[Dict[str, Any]]) -> Dict[str, Any]:
     sorted_exps = sorted(experiences, key=sort_key, reverse=True)
     return sorted_exps[0]
 
-def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: str = "Processed") -> List[str]:
+def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: str = "Processed", json_link: str = "") -> List[str]:
     """
     Formats the extracted JSON data into a list of strings for the Excel row.
     Columns: 
@@ -178,5 +178,6 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
         latest_location,
         md_link,
         "", # Action Column (Empty by default)
-        emplacement # Emplacement Column
+        emplacement, # Emplacement Column
+        json_link # Lien JSON Column
     ]

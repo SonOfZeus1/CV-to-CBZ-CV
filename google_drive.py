@@ -695,13 +695,13 @@ def ensure_report_headers(service, sheet_id, sheet_name):
     headers = [
         "Prénom", "Nom", "Email", "Téléphone", "Adresse", 
         "Langues", "Années Expérience", "Dernier Titre", 
-        "Dernière Localisation", "Lien MD", "Action", "Emplacement"
+        "Dernière Localisation", "Lien MD", "Action", "Emplacement", "Lien JSON"
     ]
     
     try:
         # Check first row
         result = service.spreadsheets().values().get(
-            spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1:L1"
+            spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1:M1"
         ).execute()
         values = result.get('values', [])
         
@@ -728,6 +728,14 @@ def ensure_report_headers(service, sheet_id, sheet_name):
                  service.spreadsheets().values().update(
                     spreadsheetId=sheet_id, range=f"'{sheet_name}'!L1",
                     valueInputOption="USER_ENTERED", body={'values': [["Emplacement"]]}
+                 ).execute()
+
+            # Check if "Lien JSON" header is present (index 12)
+            if len(values[0]) < 13 or values[0][12] != "Lien JSON":
+                 print("Adding missing 'Lien JSON' header...")
+                 service.spreadsheets().values().update(
+                    spreadsheetId=sheet_id, range=f"'{sheet_name}'!M1",
+                    valueInputOption="USER_ENTERED", body={'values': [["Lien JSON"]]}
                  ).execute()
 
             print(f"Sheet '{sheet_name}' headers checked.")
