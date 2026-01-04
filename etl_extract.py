@@ -4,6 +4,7 @@ import logging
 import io
 import yaml
 import re
+import concurrent.futures
 from dotenv import load_dotenv
 from googleapiclient.http import MediaIoBaseDownload
 
@@ -22,6 +23,85 @@ from report_generator import format_candidate_row
 # Configuration
 DOWNLOADS_DIR = "downloads"
 JSON_OUTPUT_DIR = "output_jsons"
+
+def process_file_concurrent(file_item, json_output_folder_id):
+    """
+    Thread-safe version of process_file.
+    Instantiates its own Drive service.
+    Returns: (Success: bool, ReportRow: list|None, FileItem: dict)
+    """
+    file_id = file_item['id']
+    file_name = file_item['name']
+    
+    # Create thread-local service
+    try:
+        drive_service = get_drive_service()
+    except Exception as e:
+        logger.error(f"Thread failed to auth for {file_name}: {e}")
+        return False, None, file_item
+
+    logger.info(f"Processing file (Thread): {file_name} ({file_id})")
+    
+    try:
+        # 1. Download MD File
+        local_path = download_file(drive_service, file_id, file_name, DOWNLOADS_DIR)
+        if not local_path:
+            logger.error(f"Failed to download {file_name}")
+            return False, None, file_item
+
+        # 2. Read Content
+        with open(local_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        # 3. Parse Frontmatter
+        metadata = {}
+        body_text = content
+        
+        if content.startswith("---"):
+            try:
+                parts = content.split("---", 2)
+                if len(parts) >= 3:
+                    frontmatter = parts[1]
+                    body_text = parts[2]
+                    metadata = yaml.safe_load(frontmatter)
+            except Exception as e:
+                logger.warning(f"Failed to parse frontmatter for {file_name}: {e}")
+        
+        # 4. Parse (AI Extraction)
+        parsed_data = parse_cv_from_text(body_text, file_name, metadata=metadata)
+        
+        if not parsed_data:
+            logger.error(f"Failed to parse {file_name}")
+            return False, None, file_item
+
+        # 5. Save JSON Locally
+        base_name = os.path.splitext(file_name)[0]
+        json_filename = f"{base_name}_extracted.json"
+        if not os.path.exists(JSON_OUTPUT_DIR):
+            os.makedirs(JSON_OUTPUT_DIR)
+        json_output_path = os.path.join(JSON_OUTPUT_DIR, json_filename)
+        
+        with open(json_output_path, 'w', encoding='utf-8') as f:
+            json.dump(parsed_data, f, ensure_ascii=False, indent=4)
+            
+        # 6. Upload JSON to Drive
+        json_file_id, json_link = upload_file_to_folder(drive_service, json_output_path, json_output_folder_id)
+        
+        logger.info(f"SUCCESS: Extracted {file_name} -> {json_filename} ({json_link})")
+        
+        # 7. Generate Report Row
+        md_link = f"https://drive.google.com/file/d/{file_id}/view"
+        
+        try:
+            report_row = format_candidate_row(parsed_data, md_link, emplacement="Processed")
+            return True, report_row, file_item
+        except Exception as e:
+            logger.error(f"Failed to generate report row for {file_name}: {e}")
+            return False, None, file_item
+
+    except Exception as e:
+        logger.error(f"Error processing {file_name}: {e}", exc_info=True)
+        return False, None, file_item
 
 def process_file(file_item, drive_service, output_folder_id, report_buffer):
     """
@@ -264,17 +344,38 @@ def main():
 
     report_buffer = []
 
-    for file_item in files_to_process:
-        # Process
-        success = process_file(file_item, drive_service, json_output_folder_id, report_buffer)
+    # --- PARALLEL EXECUTION START ---
+    max_workers = 5
+    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 10) with Parallel Execution (Workers: {max_workers})...")
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit tasks
+        future_to_file = {
+            executor.submit(process_file_concurrent, f, json_output_folder_id): f 
+            for f in files_to_process
+        }
         
-        # If success, move to Processed
-        if success: # process_file needs to return True/False
-             try:
-                move_file(drive_service, file_item['id'], index_folder_id, processed_folder_id)
-                logger.info(f"Moved {file_item['name']} to _Processed_JSON")
-             except Exception as e:
-                logger.error(f"Failed to move {file_item['name']} after processing: {e}")
+        for future in concurrent.futures.as_completed(future_to_file):
+            file_item = future_to_file[future]
+            try:
+                success, report_row, f_item = future.result()
+                
+                if success and report_row:
+                    report_buffer.append(report_row)
+                    
+                    # Move to Processed (using main thread's service, or create new one? Main thread is safe here)
+                    try:
+                        move_file(drive_service, f_item['id'], index_folder_id, processed_folder_id)
+                        logger.info(f"Moved {f_item['name']} to _Processed_JSON")
+                    except Exception as e:
+                        logger.error(f"Failed to move {f_item['name']} after processing: {e}")
+                else:
+                    logger.warning(f"Processing failed for {file_item['name']}")
+                    
+            except Exception as exc:
+                logger.error(f"Thread exception for {file_item['name']}: {exc}")
+
+    # --- PARALLEL EXECUTION END ---
 
     # Flush Report Buffer
     if report_buffer and sheets_service and email_sheet_id:
