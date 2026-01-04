@@ -215,16 +215,20 @@ def main():
         try:
             ensure_report_headers(sheets_service, email_sheet_id, "Candidats")
             
-            # 1.2. Deduplicate Sheet (New Optimization)
-            logger.info("Running Deduplication on 'Candidats' sheet...")
-            remove_duplicates_by_column(sheets_service, email_sheet_id, "Candidats", col_index=2) # Email is index 2
+            # 1.2. Deduplication DISABLED (Manual Control Strategy)
+            # logger.info("Running Deduplication on 'Candidats' sheet...")
+            # remove_duplicates_by_column(sheets_service, email_sheet_id, "Candidats", col_index=2) 
             
         except Exception as e:
-            logger.error(f"Failed to ensure headers or deduplicate: {e}")
+            logger.error(f"Failed to ensure headers: {e}")
 
     # 1.5. Initialize Processed Folder
     processed_folder_id = get_or_create_folder(drive_service, "_Processed_JSON", parent_id=index_folder_id)
     logger.info(f"Processed Folder ID: {processed_folder_id}")
+
+    # 1.6. Initialize Trash Folder
+    trash_folder_id = get_or_create_folder(drive_service, "_Trash", parent_id=index_folder_id)
+    logger.info(f"Trash Folder ID: {trash_folder_id}")
 
     # 2. List files in Index Folder (Source)
     logger.info(f"Listing files in Index Folder...")
@@ -273,6 +277,21 @@ def main():
                     if action == "supprimer":
                         rows_to_delete.append(i)
                         logger.info(f"Row {i+1} marked for DELETION.")
+                        
+                        if file_id:
+                            try:
+                                # Move to Trash (Robust: Remove from ALL current parents)
+                                file_meta = drive_service.files().get(fileId=file_id, fields='parents').execute()
+                                previous_parents = ",".join(file_meta.get('parents', []))
+                                
+                                drive_service.files().update(
+                                    fileId=file_id, 
+                                    addParents=trash_folder_id, 
+                                    removeParents=previous_parents
+                                ).execute()
+                                logger.info(f"Moved {file_id} to Trash.")
+                            except Exception as e:
+                                logger.error(f"Failed to trash file {file_id}: {e}")
                         
                     elif action == "retraiter":
                         rows_to_delete.append(i)
