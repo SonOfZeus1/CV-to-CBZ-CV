@@ -255,11 +255,11 @@ def main():
             if f['name'].endswith('.md'):
                 files_to_process.append(f)
 
-    # 3. Process files (Batch Limit: 50)
+    # 3. Process files (Batch Limit: 10)
     # Sort: Reprocess files first? They are already in the list.
     # Just apply limit.
-    files_to_process = files_to_process[:50]
-    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 50)...")
+    files_to_process = files_to_process[:10]
+    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 10)...")
 
     report_buffer = []
 
