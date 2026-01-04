@@ -276,22 +276,7 @@ def main():
                     
                     if action == "supprimer":
                         rows_to_delete.append(i)
-                        logger.info(f"Row {i+1} marked for DELETION.")
-                        
-                        if file_id:
-                            try:
-                                # Move to Trash (Robust: Remove from ALL current parents)
-                                file_meta = drive_service.files().get(fileId=file_id, fields='parents').execute()
-                                previous_parents = ",".join(file_meta.get('parents', []))
-                                
-                                drive_service.files().update(
-                                    fileId=file_id, 
-                                    addParents=trash_folder_id, 
-                                    removeParents=previous_parents
-                                ).execute()
-                                logger.info(f"Moved {file_id} to Trash.")
-                            except Exception as e:
-                                logger.error(f"Failed to trash file {file_id}: {e}")
+                        logger.info(f"Row {i+1} marked for DELETION (Excel only). File remains untouched.")
                         
                     elif action == "retraiter":
                         rows_to_delete.append(i)
