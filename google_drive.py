@@ -949,6 +949,52 @@ def delete_rows(service, sheet_id, row_indices, sheet_name="Feuille 1", retries=
                 }
             }
         })
+    
+    if requests:
+        body = {'requests': requests}
+        try:
+            service.spreadsheets().batchUpdate(spreadsheetId=sheet_id, body=body).execute()
+            print(f"Deleted {len(row_indices)} rows.")
+        except Exception as e:
+            print(f"Error deleting rows: {e}")
+
+def remove_duplicates_by_column(service, sheet_id, sheet_name, col_index=2):
+    """
+    Removes rows that have duplicate values in the specified column.
+    Keeps the FIRST occurrence.
+    col_index: 0-based index of the column to check (default 2 for Email).
+    """
+    print(f"Removing duplicates based on column index {col_index}...")
+    rows = get_sheet_values(service, sheet_id, sheet_name)
+    
+    if not rows:
+        return
+
+    seen = set()
+    rows_to_delete = []
+    
+    for i, row in enumerate(rows):
+        if i == 0: continue # Skip header
+        
+        if len(row) > col_index:
+            val = str(row[col_index]).strip().lower()
+            if val:
+                if val in seen:
+                    rows_to_delete.append(i)
+                else:
+                    seen.add(val)
+    
+    if rows_to_delete:
+        print(f"Found {len(rows_to_delete)} duplicates. Deleting...")
+        delete_rows(service, sheet_id, rows_to_delete, sheet_name)
+    else:
+        print("No duplicates found.")
+
+def create_hyperlink_formula(url, text):
+    """Creates a Google Sheets HYPERLINK formula (French format)."""
+    # Escape double quotes in text
+    text = text.replace('"', '""')
+    return f'=LIEN_HYPERTEXTE("{url}"; "{text}")'
         
     body = {'requests': requests}
     

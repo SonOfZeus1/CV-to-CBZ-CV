@@ -15,7 +15,7 @@ from google_drive import (
     get_drive_service, list_files_in_folder, download_file, 
     upload_file_to_folder, get_or_create_folder,
     get_sheets_service, append_batch_to_sheet, upsert_batch_to_sheet, ensure_report_headers,
-    remove_empty_rows
+    remove_empty_rows, remove_duplicates_by_column, create_hyperlink_formula
 )
 from parsers import parse_cv_from_text
 from report_generator import format_candidate_row
@@ -90,7 +90,8 @@ def process_file_concurrent(file_item, json_output_folder_id):
         logger.info(f"SUCCESS: Extracted {file_name} -> {json_filename} ({json_link})")
         
         # 7. Generate Report Row
-        md_link = f"https://drive.google.com/file/d/{file_id}/view"
+        raw_link = f"https://drive.google.com/file/d/{file_id}/view"
+        md_link = create_hyperlink_formula(raw_link, file_name)
         
         try:
             report_row = format_candidate_row(parsed_data, md_link, emplacement="Processed")
@@ -213,8 +214,13 @@ def main():
     if sheets_service and email_sheet_id:
         try:
             ensure_report_headers(sheets_service, email_sheet_id, "Candidats")
+            
+            # 1.2. Deduplicate Sheet (New Optimization)
+            logger.info("Running Deduplication on 'Candidats' sheet...")
+            remove_duplicates_by_column(sheets_service, email_sheet_id, "Candidats", col_index=2) # Email is index 2
+            
         except Exception as e:
-            logger.error(f"Failed to ensure headers: {e}")
+            logger.error(f"Failed to ensure headers or deduplicate: {e}")
 
     # 1.5. Initialize Processed Folder
     processed_folder_id = get_or_create_folder(drive_service, "_Processed_JSON", parent_id=index_folder_id)
