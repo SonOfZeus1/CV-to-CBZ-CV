@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 # Constants
 # Priority list of models (Quality -> Speed/Quota)
-# Priority list of models (Quality -> Speed/Quota)
 MODELS = [
     # 1️⃣ 🏆 Modèle principal recommandé (équilibre parfait)
     "meta-llama/llama-3.3-70b-instruct:free",
@@ -31,7 +30,13 @@ MODELS = [
 
 MAX_RETRIES_PER_MODEL = 2
 
-# ... (Rate Limits remain mostly same, just ensuring keys exist) ...
+# Rate Limiting Configuration (OpenRouter usually handles this, but we keep a safety buffer)
+# ============================================================
+# Rate Limiting Configuration
+# Conservative, production-safe for OpenRouter (free tier)
+# Focus: long prompts, structured JSON extraction
+# ============================================================
+
 RATE_LIMITS = {
     "meta-llama/llama-3.3-70b-instruct:free": {"rpm": 8},
     "google/gemini-2.0-flash-exp:free": {"rpm": 10},
@@ -40,8 +45,79 @@ RATE_LIMITS = {
     "nousresearch/hermes-3-llama-3.1-405b:free": {"rpm": 2},
 }
 
-# ...
 
+class RateLimiter:
+    def __init__(self):
+        self.last_request_time = {}
+        
+    def wait_for_token(self, model_name):
+        limits = RATE_LIMITS.get(model_name, {"rpm": 30})
+        rpm = limits["rpm"]
+        interval = 60.0 / rpm
+        
+        now = time.time()
+        last = self.last_request_time.get(model_name, 0)
+        
+        elapsed = now - last
+        if elapsed < interval:
+            sleep_time = interval - elapsed
+            logger.info(f"Rate Limit: Sleeping {sleep_time:.2f}s for {model_name}")
+            time.sleep(sleep_time)
+            
+        self.last_request_time[model_name] = time.time()
+
+rate_limiter = RateLimiter()
+
+class AIClient:
+    _instance = None
+
+    def __init__(self):
+        # OpenRouter uses OpenAI client structure
+        api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("GROQ_API_KEY") # Fallback to GROQ key if user hasn't updated env yet (though they should)
+        
+        if not api_key:
+            logger.warning("OPENROUTER_API_KEY not found. AI features will be disabled.")
+            self.client = None
+        else:
+            self.client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=api_key,
+            )
+            logger.info("OpenRouter Client initialized successfully.")
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def call_ai(self, prompt: str, system_prompt: str = "You are a helpful assistant.", expect_json: bool = False) -> Union[str, Dict[str, Any]]:
+        """
+        Generic function to call the AI with Multi-Model Fallback via OpenRouter.
+        """
+        if not self.client:
+            logger.error("AI call attempted but client is not initialized (missing key).")
+            return {} if expect_json else ""
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ]
+
+        if expect_json:
+             messages.append({"role": "system", "content": "IMPORTANT: Output ONLY valid JSON. No markdown, no explanations."})
+
+        logger.info(f"Calling AI (JSON={expect_json}). Prompt length: {len(prompt)}")
+        
+        start_time = time.time()
+
+        # Iterate through models in priority order
+        for model in MODELS:
+            # Rate Limit Check
+            rate_limiter.wait_for_token(model)
+            
+            logger.info(f"Trying model: {model}")
+            
             for attempt in range(MAX_RETRIES_PER_MODEL):
                 try:
                     completion = self.client.chat.completions.create(
