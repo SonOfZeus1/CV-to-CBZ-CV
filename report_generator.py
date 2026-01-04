@@ -136,6 +136,10 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
     # 3-6. Contact Info
     email = basics.get('email', '')
     phone = basics.get('phone', '')
+    # Fix for Excel interpreting + as formula
+    if phone and phone.strip().startswith('+'):
+        phone = f"'{phone}"
+        
     address = basics.get('address', '')
     
     langs = basics.get('languages', [])
