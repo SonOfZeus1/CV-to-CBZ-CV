@@ -672,7 +672,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 if status == "DELETE":
                     continue
                 elif status == "NON":
-                    priority = 20 # Status "NON" (Second Priority) - Retry failed ones
+                    priority = 10 # Status "NON" (Third Priority) - Retry failed ones
                 elif status == "":
                     # priority = 1 # Empty status is now low priority or handled elsewhere?
                     # User didn't specify what to do with empty status now. 
@@ -686,7 +686,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     priority = 1
                 
                 elif not data.get('is_indexed'):
-                    priority = 10 # Indexing (Third Priority)
+                    priority = 20 # Indexing (Second Priority)
                     
                 if priority > 0:
                     file_data['priority'] = priority
