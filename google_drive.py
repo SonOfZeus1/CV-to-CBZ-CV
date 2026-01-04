@@ -1047,4 +1047,4 @@ def create_hyperlink_formula(url, text):
     """Creates a Google Sheets HYPERLINK formula (French format)."""
     # Escape double quotes in text
     text = text.replace('"', '""')
-    return f'=LIEN_HYPERTEXTE("{url}"; "{text}")'
+    return f'=HYPERLINK("{url}", "{text}")'
