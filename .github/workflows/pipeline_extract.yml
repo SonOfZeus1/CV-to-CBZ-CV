@@ -5,6 +5,10 @@ on:
   schedule:
     - cron: '*/15 * * * *' # Run every 15 minutes
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 
 jobs:
   extract-cvs:
