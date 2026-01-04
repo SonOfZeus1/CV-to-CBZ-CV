@@ -352,85 +352,11 @@ def main():
                             }
                         })
                     
-                    if requests:
-                        body = {'requests': requests}
+                # Execute Deletions
+                if rows_to_delete:
+                    body = {'requests': requests}
+                    try:
                         sheets_service.spreadsheets().batchUpdate(spreadsheetId=email_sheet_id, body=body).execute()
-                        logger.info(f"Executed {len(requests)} row deletions.")
-
-                # --- JSON LINK BACKFILL (Repair Strategy) ---
-                logger.info("Running JSON Link Backfill...")
-                rows_to_update = []
-                
-                # 1. List all JSON files in Processed Folder
-                try:
-                    # Fetch ALL files and filter by name/extension in Python to be safe against MimeType issues
-                    json_files = list_files_in_folder(drive_service, processed_folder_id, mime_types=None)
-                    logger.info(f"Backfill: Scanned {len(json_files)} files in Processed folder ({processed_folder_id}).")
-                    
-                    # Map: BaseName -> WebViewLink
-                    json_map = {}
-                    for jf in json_files:
-                        # Name format: {basename}_extracted.json
-                        if jf['name'].endswith('_extracted.json'):
-                            base_name = jf['name'].replace('_extracted.json', '')
-                            # Fallback if webViewLink is missing
-                            link = jf.get('webViewLink')
-                            if not link:
-                                link = f"https://drive.google.com/file/d/{jf['id']}/view"
-                            json_map[base_name] = link
-                            
-                    logger.info(f"Backfill: Identified {len(json_map)} valid JSON candidates.")
-                except Exception as e:
-                    logger.warning(f"Failed to list JSON files for backfill: {e}")
-                    json_map = {}
-
-                if json_map:
-                    for i, row in enumerate(rows):
-                        if i == 0: continue
-                        
-                        # Check if Lien JSON (Index 12) is missing
-                        json_link_val = row[12] if len(row) > 12 else ""
-                        
-                        if not json_link_val:
-                            # We need to find the file name.
-                            # We have the File ID from MD Link (Index 9)
-                            md_link = row[9] if len(row) > 9 else ""
-                            match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
-                            if match:
-                                f_id = match.group(1)
-                                
-                                # Try to find name in Source Map
-                                f_name = ""
-                                if f_id in source_file_map:
-                                    f_name = source_file_map[f_id]['name']
-                                else:
-                                    # Fetch metadata (might be slow if many, but usually few missing)
-                                    try:
-                                        f_meta = drive_service.files().get(fileId=f_id, fields='name').execute()
-                                        f_name = f_meta.get('name', '')
-                                    except:
-                                        pass
-                                
-                                if f_name:
-                                    base_name = os.path.splitext(f_name)[0]
-                                    # logger.info(f"Backfill: Checking {base_name}...")
-                                    if base_name in json_map:
-                                        link = json_map[base_name]
-                                        formula = create_hyperlink_formula(link, "Voir JSON")
-                                        
-                                        rows_to_update.append({
-                                            "range": f"Candidats!M{i+1}",
-                                            "values": [[formula]]
-                                        })
-                                        # logger.info(f"Backfill: Match found for {base_name} at row {i+1}")
-                
-                if rows_to_update:
-                    logger.info(f"Found {len(rows_to_update)} rows to backfill with JSON links.")
-                    data = []
-                    for item in rows_to_update:
-                        data.append({
-                            "range": item['range'],
-                            "values": item['values']
                         })
                     
                     body = {
