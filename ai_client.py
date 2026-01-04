@@ -13,9 +13,7 @@ logger = logging.getLogger(__name__)
 # Priority list of models (Quality -> Speed/Quota)
 MODELS = [
     # 1️⃣ 🏆 MEILLEURE QUALITÉ ABSOLUE (si quota OK)
-    "openai/gpt-oss-120b:free",
-
-    # 2️⃣ Raisonnement supérieur, très discipliné
+    # "openai/gpt-oss-120b:free", # REMOVED due to 404 errors
     "nousresearch/hermes-3-llama-3.1-405b:free",
 
     # 3️⃣ Modèle principal recommandé (équilibre parfait)

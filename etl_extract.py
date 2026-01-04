@@ -13,9 +13,9 @@ logger = logging.getLogger(__name__)
 
 from google_drive import (
     get_drive_service, list_files_in_folder, download_file, 
-    upload_file_to_folder, get_or_create_folder,
+    upload_file_to_folder, get_or_create_folder, move_file,
     get_sheets_service, append_batch_to_sheet, upsert_batch_to_sheet, ensure_report_headers,
-    remove_empty_rows, remove_duplicates_by_column, create_hyperlink_formula
+    remove_empty_rows, remove_duplicates_by_column, create_hyperlink_formula, get_sheet_values
 )
 from parsers import parse_cv_from_text
 from report_generator import format_candidate_row
