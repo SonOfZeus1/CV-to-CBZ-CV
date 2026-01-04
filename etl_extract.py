@@ -351,6 +351,7 @@ def main():
                 # 1. List all JSON files in Processed Folder
                 try:
                     json_files = list_files_in_folder(drive_service, processed_folder_id, mime_types=['application/json'])
+                    logger.info(f"Backfill: Found {len(json_files)} JSON files in Processed folder.")
                     # Map: BaseName -> WebViewLink
                     json_map = {}
                     for jf in json_files:
@@ -391,6 +392,7 @@ def main():
                                 
                                 if f_name:
                                     base_name = os.path.splitext(f_name)[0]
+                                    # logger.info(f"Backfill: Checking {base_name}...")
                                     if base_name in json_map:
                                         link = json_map[base_name]
                                         formula = create_hyperlink_formula(link, "Voir JSON")
@@ -399,6 +401,7 @@ def main():
                                             "range": f"Candidats!M{i+1}",
                                             "values": [[formula]]
                                         })
+                                        # logger.info(f"Backfill: Match found for {base_name} at row {i+1}")
                 
                 if rows_to_update:
                     logger.info(f"Found {len(rows_to_update)} rows to backfill with JSON links.")
