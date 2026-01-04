@@ -358,15 +358,23 @@ def main():
                 
                 # 1. List all JSON files in Processed Folder
                 try:
-                    json_files = list_files_in_folder(drive_service, processed_folder_id, mime_types=['application/json'])
-                    logger.info(f"Backfill: Found {len(json_files)} JSON files in Processed folder.")
+                    # Fetch ALL files and filter by name/extension in Python to be safe against MimeType issues
+                    json_files = list_files_in_folder(drive_service, processed_folder_id, mime_types=None)
+                    logger.info(f"Backfill: Scanned {len(json_files)} files in Processed folder ({processed_folder_id}).")
+                    
                     # Map: BaseName -> WebViewLink
                     json_map = {}
                     for jf in json_files:
                         # Name format: {basename}_extracted.json
                         if jf['name'].endswith('_extracted.json'):
                             base_name = jf['name'].replace('_extracted.json', '')
-                            json_map[base_name] = jf.get('webViewLink', '')
+                            # Fallback if webViewLink is missing
+                            link = jf.get('webViewLink')
+                            if not link:
+                                link = f"https://drive.google.com/file/d/{jf['id']}/view"
+                            json_map[base_name] = link
+                            
+                    logger.info(f"Backfill: Identified {len(json_map)} valid JSON candidates.")
                 except Exception as e:
                     logger.warning(f"Failed to list JSON files for backfill: {e}")
                     json_map = {}
