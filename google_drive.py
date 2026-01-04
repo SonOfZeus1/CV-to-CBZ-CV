@@ -125,7 +125,7 @@ def list_files_in_folder(service, folder_id, order_by=None, page_size=1000, mime
 def download_file(service, file_id, file_name, download_path):
     """Downloads a single file from Google Drive."""
     if not os.path.exists(download_path):
-        os.makedirs(download_path)
+        os.makedirs(download_path, exist_ok=True)
         
     file_path = os.path.join(download_path, file_name)
     
