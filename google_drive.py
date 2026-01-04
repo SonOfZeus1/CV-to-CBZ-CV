@@ -627,7 +627,22 @@ def upsert_batch_to_sheet(service, sheet_id, rows, sheet_name="Candidats", email
             # No email, treat as new? Or skip? Let's append.
             rows_to_append.append(new_row)
 
-    # 2. Perform Batch Updates
+    # 2. Prepare Updates (Existing + New)
+    # Calculate next available row for appends
+    next_row = len(existing_values) + 1
+    
+    for new_row in rows_to_append:
+        # Calculate range for new row (A{next_row}:...)
+        end_col_char = chr(ord('A') + len(new_row) - 1)
+        range_name = f"'{sheet_name}'!A{next_row}:{end_col_char}{next_row}"
+        
+        updates.append({
+            'range': range_name,
+            'values': [new_row]
+        })
+        next_row += 1
+
+    # 3. Perform Batch Updates (All in one go)
     if updates:
         data = []
         for u in updates:
@@ -645,13 +660,9 @@ def upsert_batch_to_sheet(service, sheet_id, rows, sheet_name="Candidats", email
             execute_with_retry(lambda: service.spreadsheets().values().batchUpdate(
                 spreadsheetId=sheet_id, body=body
             ).execute())
-            print(f"Updated {len(updates)} existing rows.")
+            print(f"Upserted {len(updates)} rows (Updates + Appends).")
         except Exception as e:
             print(f"Error batch updating: {e}")
-
-    # 3. Perform Batch Append
-    if rows_to_append:
-        append_batch_to_sheet(service, sheet_id, rows_to_append, sheet_name)
 
 def append_batch_to_sheet(service, sheet_id, rows, sheet_name="Feuille 1", retries=10):
     """
