@@ -87,7 +87,8 @@ def process_file(file_item, drive_service, output_folder_id, report_buffer):
         md_link = f"https://drive.google.com/file/d/{file_id}/view"
         
         try:
-            report_row = format_candidate_row(parsed_data, md_link)
+            # We assume the file will be moved to Processed if successful
+            report_row = format_candidate_row(parsed_data, md_link, emplacement="Processed")
             report_buffer.append(report_row)
             logger.info(f"Added to Report Buffer: {file_name}")
             return True

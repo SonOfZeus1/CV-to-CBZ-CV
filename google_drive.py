@@ -695,13 +695,13 @@ def ensure_report_headers(service, sheet_id, sheet_name):
     headers = [
         "Prénom", "Nom", "Email", "Téléphone", "Adresse", 
         "Langues", "Années Expérience", "Dernier Titre", 
-        "Dernière Localisation", "Lien MD", "Action"
+        "Dernière Localisation", "Lien MD", "Action", "Emplacement"
     ]
     
     try:
         # Check first row
         result = service.spreadsheets().values().get(
-            spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1:K1"
+            spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1:L1"
         ).execute()
         values = result.get('values', [])
         
@@ -721,6 +721,15 @@ def ensure_report_headers(service, sheet_id, sheet_name):
                     spreadsheetId=sheet_id, range=f"'{sheet_name}'!K1",
                     valueInputOption="USER_ENTERED", body={'values': [["Action"]]}
                  ).execute()
+            
+            # Check if "Emplacement" header is present (index 11)
+            if len(values[0]) < 12 or values[0][11] != "Emplacement":
+                 print("Adding missing 'Emplacement' header...")
+                 service.spreadsheets().values().update(
+                    spreadsheetId=sheet_id, range=f"'{sheet_name}'!L1",
+                    valueInputOption="USER_ENTERED", body={'values': [["Emplacement"]]}
+                 ).execute()
+
             print(f"Sheet '{sheet_name}' headers checked.")
             
         # Set Validation for Action Column (K)
