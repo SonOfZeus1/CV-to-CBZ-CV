@@ -253,7 +253,8 @@ def main():
     if sheets_service and email_sheet_id:
         try:
             logger.info("Reading 'Candidats' sheet for Controller Logic...")
-            rows = get_sheet_values(sheets_service, email_sheet_id, "Candidats")
+            # Use FORMULA to get the actual Hyperlink formula, so we can extract the File ID
+            rows = get_sheet_values(sheets_service, email_sheet_id, "Candidats", value_render_option='FORMULA')
             
             if rows:
                 # Column Mapping (0-based):
