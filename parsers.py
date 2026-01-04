@@ -58,6 +58,7 @@ class CVData:
     projects: List[Dict[str, Any]]
     extra_info: List[str]
     unmapped: List[str]
+    is_cv: bool = True # New field
 
     def to_dict(self):
         return {
@@ -69,8 +70,83 @@ class CVData:
             "education": [asdict(e) for e in self.education],
             "projects": self.projects,
             "extra_info": self.extra_info,
-            "unmapped": self.unmapped
+            "unmapped": self.unmapped,
+            "is_cv": self.is_cv
         }
+
+# ... (calculate_months_between remains same)
+
+def parse_cv_from_text(text: str, filename: str, metadata: Dict = None) -> Dict[str, Any]:
+    """
+    Parses CV text using Single-Shot AI extraction.
+    Returns a dictionary representation of CVData.
+    """
+    if not text:
+        return {}
+
+    # 1. Call AI
+    try:
+        response = call_ai(
+            system_prompt=FULL_CV_EXTRACTION_SYSTEM_PROMPT,
+            user_prompt=FULL_CV_EXTRACTION_USER_PROMPT.format(anchor_map="{}", text=text),
+            model_id="xiaomi/mimo-v2-flash", # Use fast model
+            response_format={"type": "json_object"}
+        )
+        
+        if not response:
+            logger.error(f"AI returned empty response for {filename}")
+            return {}
+            
+        data = json.loads(response)
+        
+    except Exception as e:
+        logger.error(f"AI Extraction failed for {filename}: {e}")
+        return {}
+
+    # 2. Map to CVData
+    is_cv = data.get("is_cv", True)
+    
+    # ... (rest of mapping)
+    
+    cv_data = CVData(
+        meta=metadata or {},
+        basics=data.get("contact_info", {}),
+        summary=data.get("summary", ""),
+        skills_tech=[], # Extracted from experiences if needed
+        experience=[ExperienceEntry(**e) for e in data.get("experiences", [])], # Need to handle mismatch fields?
+        # ExperienceEntry has many fields. AI returns subset. We need robust mapping.
+        # Actually, let's just pass the dict and let dataclass handle it? 
+        # No, dataclass constructor needs exact args or we need to filter.
+        # Let's use a helper or simple mapping.
+        education=[EducationEntry(**e) for e in data.get("education", [])],
+        projects=data.get("projects", []),
+        extra_info=[],
+        unmapped=[],
+        is_cv=is_cv
+    )
+    
+    # Fix Experience Mapping (AI returns 'tasks', 'skills', etc. matching dataclass)
+    # But we need to be careful about extra fields or missing fields.
+    # Let's do a safe mapping for Experience.
+    experiences = []
+    for exp_raw in data.get("experiences", []):
+        # Filter keys to match ExperienceEntry
+        valid_keys = ExperienceEntry.__annotations__.keys()
+        filtered_exp = {k: v for k, v in exp_raw.items() if k in valid_keys}
+        experiences.append(ExperienceEntry(**filtered_exp))
+    
+    cv_data.experience = experiences
+    
+    # Fix Education Mapping
+    educations = []
+    for edu_raw in data.get("education", []):
+        valid_keys = EducationEntry.__annotations__.keys()
+        filtered_edu = {k: v for k, v in edu_raw.items() if k in valid_keys}
+        educations.append(EducationEntry(**filtered_edu))
+        
+    cv_data.education = educations
+
+    return cv_data.to_dict()
 
 def calculate_months_between(start_str: str, end_str: str, is_current: bool) -> int:
     """Calculates months between two dates (YYYY-MM or YYYY)."""

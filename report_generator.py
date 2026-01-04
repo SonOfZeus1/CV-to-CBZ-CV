@@ -151,9 +151,16 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
         total_exp = calculate_total_experience(experiences)
 
     # 8-9. Latest Role
-    latest_exp = get_latest_experience(experiences)
-    latest_title = latest_exp.get('job_title', '')
-    latest_location = latest_exp.get('location', '')
+    # Check is_cv flag
+    is_cv = json_data.get('is_cv', True)
+    
+    if not is_cv:
+        latest_title = "NON-CV"
+        latest_location = ""
+    else:
+        latest_exp = get_latest_experience(experiences)
+        latest_title = latest_exp.get('job_title', '')
+        latest_location = latest_exp.get('location', '')
 
     return [
         first_name,

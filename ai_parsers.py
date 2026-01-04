@@ -12,6 +12,9 @@ You are an expert CV Parser. Your goal is to extract ALL structured data from a 
 Output STRICT JSON matching the schema below.
 
 CRITICAL RULES:
+0. CLASSIFICATION: Determine if the document is a CV. 
+   - If it is a CV, set "is_cv": true.
+   - If it is NOT a CV (e.g., cover letter, invoice, code, empty file), set "is_cv": false. You may leave other fields empty or minimal.
 1. Extract Contact Info (Email, Phone, Name, Languages).
    - DO NOT extract LinkedIn or Social Links.
 2. Extract Professional Summary (or generate one if missing).
@@ -25,6 +28,7 @@ CRITICAL RULES:
 
 JSON SCHEMA:
 {
+  "is_cv": boolean,
   "contact_info": {
     "first_name": "...",
     "last_name": "...",

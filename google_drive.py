@@ -961,17 +961,20 @@ def delete_rows(service, sheet_id, row_indices, sheet_name="Feuille 1", retries=
 def remove_duplicates_by_column(service, sheet_id, sheet_name, col_index=2):
     """
     Removes rows that have duplicate values in the specified column.
-    Keeps the FIRST occurrence.
+    Smart Logic:
+    1. If duplicates exist, check "Dernier Titre" (Column H, Index 7).
+    2. If one is "NON-CV" and another is a real CV, delete the "NON-CV".
+    3. Otherwise, keep the FIRST occurrence.
     col_index: 0-based index of the column to check (default 2 for Email).
     """
-    print(f"Removing duplicates based on column index {col_index}...")
+    print(f"Removing duplicates based on column index {col_index} (Smart Mode)...")
     rows = get_sheet_values(service, sheet_id, sheet_name)
     
     if not rows:
         return
 
-    seen = set()
-    rows_to_delete = []
+    # Map: Email -> List of (row_index, is_non_cv)
+    email_map = {}
     
     for i, row in enumerate(rows):
         if i == 0: continue # Skip header
@@ -979,13 +982,50 @@ def remove_duplicates_by_column(service, sheet_id, sheet_name, col_index=2):
         if len(row) > col_index:
             val = str(row[col_index]).strip().lower()
             if val:
-                if val in seen:
-                    rows_to_delete.append(i)
-                else:
-                    seen.add(val)
+                # Check if NON-CV (Column H / Index 7)
+                is_non_cv = False
+                if len(row) > 7:
+                    title = str(row[7]).strip().upper()
+                    if title == "NON-CV":
+                        is_non_cv = True
+                
+                if val not in email_map:
+                    email_map[val] = []
+                email_map[val].append({'index': i, 'is_non_cv': is_non_cv})
+    
+    rows_to_delete = []
+    
+    for email, entries in email_map.items():
+        if len(entries) > 1:
+            # Check if we have a mix of CV and NON-CV
+            has_cv = any(not e['is_non_cv'] for e in entries)
+            has_non_cv = any(e['is_non_cv'] for e in entries)
+            
+            if has_cv and has_non_cv:
+                # Delete ALL NON-CVs
+                for e in entries:
+                    if e['is_non_cv']:
+                        rows_to_delete.append(e['index'])
+                
+                # If we still have multiple CVs left, keep only the first one
+                cv_entries = [e for e in entries if not e['is_non_cv']]
+                if len(cv_entries) > 1:
+                    # Keep first (lowest index), delete others
+                    # Sort by index just in case
+                    cv_entries.sort(key=lambda x: x['index'])
+                    for e in cv_entries[1:]:
+                        rows_to_delete.append(e['index'])
+                        
+            else:
+                # All are CVs OR All are NON-CVs -> Keep First
+                entries.sort(key=lambda x: x['index'])
+                for e in entries[1:]:
+                    rows_to_delete.append(e['index'])
     
     if rows_to_delete:
-        print(f"Found {len(rows_to_delete)} duplicates. Deleting...")
+        # Remove duplicates from list and sort reverse
+        rows_to_delete = sorted(list(set(rows_to_delete)), reverse=True)
+        print(f"Found {len(rows_to_delete)} rows to delete (Smart Deduplication).")
         delete_rows(service, sheet_id, rows_to_delete, sheet_name)
     else:
         print("No duplicates found.")
