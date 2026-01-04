@@ -357,19 +357,87 @@ def main():
                     body = {'requests': requests}
                     try:
                         sheets_service.spreadsheets().batchUpdate(spreadsheetId=email_sheet_id, body=body).execute()
-                        })
-                    
-                    body = {
-                        "valueInputOption": "USER_ENTERED",
-                        "data": data
-                    }
-                    sheets_service.spreadsheets().values().batchUpdate(
-                        spreadsheetId=email_sheet_id, body=body
-                    ).execute()
-                    logger.info("Backfill complete.")
+                        logger.info(f"Deleted {len(rows_to_delete)} rows from Excel.")
+                    except Exception as e:
+                        logger.error(f"Failed to delete rows: {e}")
 
         except Exception as e:
             logger.error(f"Error in Controller Logic: {e}")
+
+    # 2.6. ROBUST SYNCHRONIZATION (Rescue Zombies)
+    # Check files in _Processed_JSON. If they are NOT in Excel (with JSON link), we must fix them.
+    logger.info("Running Synchronization (Processed Folder <-> Excel)...")
+    try:
+        processed_files = list_files_in_folder(drive_service, processed_folder_id, mime_types=['text/markdown'])
+        logger.info(f"Sync: Found {len(processed_files)} files in Processed Folder.")
+        
+        zombies_moved = 0
+        zombies_recovered = 0
+        
+        for f in processed_files:
+            if f['id'] not in existing_files_in_excel:
+                logger.info(f"Sync: Checking {f['name']} (ID: {f['id']}) - Not in Excel/Missing Link.")
+                
+                # This file is in Processed but NOT in Excel (or missing JSON link).
+                # Check if JSON exists in Drive
+                base_name = os.path.splitext(f['name'])[0]
+                json_name = f"{base_name}_extracted.json"
+                
+                # Search for JSON
+                q = f"name = '{json_name}' and '{json_output_folder_id}' in parents and trashed = false"
+                results = drive_service.files().list(q=q, fields="files(id, webViewLink)").execute()
+                json_files = results.get('files', [])
+                
+                if json_files:
+                    # Case A: JSON exists! We just need to add it to Excel.
+                    json_file = json_files[0]
+                    logger.info(f"  -> JSON found ({json_file['id']}). Recovering to Excel...")
+                    
+                    try:
+                        # Download JSON content to memory
+                        json_content = drive_service.files().get_media(fileId=json_file['id']).execute()
+                        parsed_data = json.loads(json_content)
+                        
+                        # Generate Report Row
+                        md_url = f"https://drive.google.com/file/d/{f['id']}/view"
+                        md_link_formula = create_hyperlink_formula(md_url, "Voir MD")
+                        
+                        json_link_url = json_file.get('webViewLink')
+                        if not json_link_url:
+                             json_link_url = f"https://drive.google.com/file/d/{json_file['id']}/view"
+
+                        json_link_formula = create_hyperlink_formula(json_link_url, "Voir JSON")
+                        
+                        report_row = format_candidate_row(
+                            parsed_data, 
+                            md_link=md_link_formula, 
+                            emplacement="Processed",
+                            json_link=json_link_formula
+                        )
+                        report_buffer.append(report_row)
+                        zombies_recovered += 1
+                        
+                        # Add to existing set to prevent re-processing if it was somehow in queue
+                        existing_files_in_excel.add(f['id'])
+                        logger.info(f"  -> Added to Report Buffer.")
+                        
+                    except Exception as e:
+                        logger.error(f"  -> Failed to recover {f['name']}: {e}")
+                
+                else:
+                    # Case B: JSON missing. Move back to Source for reprocessing.
+                    logger.warning(f"  -> JSON missing. Moving back to Source for reprocessing...")
+                    try:
+                        move_file(drive_service, f['id'], processed_folder_id, index_folder_id)
+                        zombies_moved += 1
+                        logger.info(f"  -> Moved to Source.")
+                    except Exception as e:
+                        logger.error(f"  -> Failed to move zombie {f['name']}: {e}")
+
+        logger.info(f"Sync Result: {zombies_recovered} recovered to Excel, {zombies_moved} moved back to Source.")
+
+    except Exception as e:
+        logger.error(f"Synchronization Error: {e}")
 
     # 2.6. Pre-flight Sync: Move files already in Excel to Processed
     logger.info("Running Pre-flight Sync...")
