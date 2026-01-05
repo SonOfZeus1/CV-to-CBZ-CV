@@ -286,7 +286,12 @@ def main():
                 logger.warning("EMAIL_SOURCE_FOLDER_ID not set. Searching globally for MD folder...")
                 q = f"mimeType='application/vnd.google-apps.folder' and name='{md_folder_name}' and trashed=false"
                 
-            results = drive_service.files().list(q=q, fields="files(id, name)").execute()
+            results = drive_service.files().list(
+                q=q, 
+                fields="files(id, name)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
+            ).execute()
             folders = results.get('files', [])
             
             if folders:
@@ -309,7 +314,12 @@ def main():
                 # FALLBACK: Global Search
                 logger.info("Attempting Global Search for folder...")
                 q_global = f"mimeType='application/vnd.google-apps.folder' and name='{md_folder_name}' and trashed=false"
-                results_global = drive_service.files().list(q=q_global, fields="files(id, name, parents)").execute()
+                results_global = drive_service.files().list(
+                    q=q_global, 
+                    fields="files(id, name, parents)",
+                    supportsAllDrives=True,
+                    includeItemsFromAllDrives=True
+                ).execute()
                 folders_global = results_global.get('files', [])
                 
                 if folders_global:
