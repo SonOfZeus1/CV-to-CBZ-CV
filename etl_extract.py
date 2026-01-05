@@ -304,7 +304,19 @@ def main():
                     
                 logger.info(f"Indexed {len(md_file_map)} MD files for recovery.")
             else:
-                logger.warning(f"Folder '{md_folder_name}' not found. Auto-recovery disabled.")
+                logger.warning(f"Folder '{md_folder_name}' not found inside {source_folder_id}.")
+                # DEBUG: List what IS there
+                try:
+                    list_q = f"'{source_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+                    debug_res = drive_service.files().list(q=list_q, fields="files(id, name)").execute()
+                    visible_folders = [f['name'] for f in debug_res.get('files', [])]
+                    logger.info(f"Visible folders in SOURCE_FOLDER_ID: {visible_folders}")
+                    if not visible_folders:
+                         logger.warning("No folders visible. Check if Service Account has access to SOURCE_FOLDER_ID.")
+                except Exception as debug_e:
+                    logger.error(f"Failed to list contents of SOURCE_FOLDER_ID: {debug_e}")
+                
+                logger.warning("Auto-recovery disabled.")
                 
         except Exception as e:
             logger.warning(f"Auto-recovery setup failed: {e}")
