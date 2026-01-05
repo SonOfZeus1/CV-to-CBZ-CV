@@ -93,8 +93,13 @@ def process_file_concurrent(file_item, json_output_folder_id, index=0, total=0):
         raw_link = f"https://drive.google.com/file/d/{file_id}/view"
         md_link = create_hyperlink_formula(raw_link, file_name)
         
+        # Generate JSON Link
+        if not json_link:
+             json_link = f"https://drive.google.com/file/d/{json_file_id}/view"
+        json_link_formula = create_hyperlink_formula(json_link, "Voir JSON")
+
         try:
-            report_row = format_candidate_row(parsed_data, md_link, emplacement="Processed")
+            report_row = format_candidate_row(parsed_data, md_link, emplacement="Processed", json_link=json_link_formula)
             return True, report_row, file_item
         except Exception as e:
             logger.error(f"Failed to generate report row for {file_name}: {e}")
