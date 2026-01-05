@@ -247,10 +247,12 @@ def main():
     # 1. Configuration
     json_output_folder_id = os.environ.get('JSON_OUTPUT_FOLDER_ID')
     # Load Config
+    # Load Config
     json_output_folder_id = os.getenv('JSON_OUTPUT_FOLDER_ID')
     email_sheet_id = os.getenv('EMAIL_SHEET_ID')
     source_sheet_name = os.getenv('EMAIL_SHEET_NAME', 'Contacts') # Default to 'Contacts' (Plural)
     dest_sheet_name = "Candidats"
+    source_folder_id = os.getenv('SOURCE_FOLDER_ID') # Parent folder for _cv_index_v2
     
     # Fallback for JSON Folder
     if not json_output_folder_id:
@@ -279,8 +281,13 @@ def main():
         md_file_map = {} # {normalized_name: file_id}
         
         try:
-            logger.info(f"Searching for MD folder '{md_folder_name}'...")
-            q = f"mimeType='application/vnd.google-apps.folder' and name='{md_folder_name}' and trashed=false"
+            if source_folder_id:
+                logger.info(f"Searching for MD folder '{md_folder_name}' inside SOURCE_FOLDER_ID ({source_folder_id})...")
+                q = f"'{source_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and name='{md_folder_name}' and trashed=false"
+            else:
+                logger.warning("SOURCE_FOLDER_ID not set. Searching globally for MD folder...")
+                q = f"mimeType='application/vnd.google-apps.folder' and name='{md_folder_name}' and trashed=false"
+                
             results = drive_service.files().list(q=q, fields="files(id, name)").execute()
             folders = results.get('files', [])
             
@@ -289,8 +296,6 @@ def main():
                 logger.info(f"Found '{md_folder_name}' (ID: {md_folder_id}). Indexing files for auto-recovery...")
                 
                 # List all MD files in this folder
-                # We import list_files_in_folder locally to avoid circular deps if any, 
-                # but it should be available from google_drive
                 from google_drive import list_files_in_folder
                 md_files = list_files_in_folder(drive_service, md_folder_id, mime_types=['text/markdown'])
                 
