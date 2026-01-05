@@ -46,7 +46,7 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
     # Fetch File Metadata
     file_item = None
     try:
-        file_item = drive_service.files().get(fileId=file_id, fields='id, name').execute()
+        file_item = drive_service.files().get(fileId=file_id, fields='id, name', supportsAllDrives=True).execute()
         file_name = file_item['name']
     except Exception as e:
         logger.warning(f"Failed to fetch metadata for {file_id}: {e}")
@@ -82,7 +82,7 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
             if recovered_id:
                 file_id = recovered_id # Switch to new ID
                 try:
-                    file_item = drive_service.files().get(fileId=file_id, fields='id, name').execute()
+                    file_item = drive_service.files().get(fileId=file_id, fields='id, name', supportsAllDrives=True).execute()
                     file_name = file_item['name']
                 except Exception as e2:
                     logger.error(f"Recovery failed on second attempt: {e2}")
