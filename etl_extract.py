@@ -422,14 +422,10 @@ def main():
             
             # Source Indices
             # Col A (0) = CV Link
-            # Col B (1) = Prénom
-            # Col C (2) = Nom
             # Col F (5) = Languages (was Col E Emplacement)
             # Col G (6) = MD Link
             
             src_cv = src_row[0] if len(src_row) > 0 else ""
-            src_first = src_row[1] if len(src_row) > 1 else ""
-            src_last = src_row[2] if len(src_row) > 2 else ""
             src_lang = src_row[5] if len(src_row) > 5 else "" # Col F is Index 5
             src_md = src_row[6] if len(src_row) > 6 else ""
             
@@ -438,32 +434,17 @@ def main():
                 dst_row = dest_rows[i]
                 
                 # Dest Indices (New Layout)
-                # Col A (0) = Prénom
-                # Col B (1) = Nom
                 # Col J (9) = Languages (Source)
                 # Col L (11) = MD Link
                 # Col N (13) = CV Link
                 
-                dst_first = dst_row[0] if len(dst_row) > 0 else ""
-                dst_last = dst_row[1] if len(dst_row) > 1 else ""
                 dst_lang = dst_row[9] if len(dst_row) > 9 else ""
                 dst_md = dst_row[11] if len(dst_row) > 11 else ""
                 dst_cv = dst_row[13] if len(dst_row) > 13 else ""
                 
                 # Compare
-                if (src_cv != dst_cv) or (src_lang != dst_lang) or (src_md != dst_md) or (src_first != dst_first) or (src_last != dst_last):
+                if (src_cv != dst_cv) or (src_lang != dst_lang) or (src_md != dst_md):
                     # Update Needed!
-                    
-                    # Update Prénom (A)
-                    updates.append({
-                        'range': f"'{dest_sheet_name}'!A{i+1}",
-                        'values': [[src_first]]
-                    })
-                    # Update Nom (B)
-                    updates.append({
-                        'range': f"'{dest_sheet_name}'!B{i+1}",
-                        'values': [[src_last]]
-                    })
                     # Update Languages (J)
                     updates.append({
                         'range': f"'{dest_sheet_name}'!J{i+1}",
@@ -483,8 +464,6 @@ def main():
                 # Dest row does not exist -> Append
                 # Create skeleton row
                 new_row = [""] * 14
-                new_row[0] = src_first
-                new_row[1] = src_last
                 new_row[9] = src_lang
                 new_row[11] = src_md
                 new_row[13] = src_cv
@@ -568,6 +547,20 @@ def main():
                         first_name = row[0] if len(row) > 0 else ""
                         last_name = row[1] if len(row) > 1 else ""
                         candidate_name = f"{first_name} {last_name}".strip()
+                        
+                        # FALLBACK: If Name is empty, try to extract from CV Link (Filename)
+                        if not candidate_name and cv_link:
+                            # CV Link might be a formula: =HYPERLINK("url", "name")
+                            # Or just a URL.
+                            # Regex to extract name from formula
+                            name_match = re.search(r'"([^"]+)"\)$', cv_link)
+                            if name_match:
+                                raw_name = name_match.group(1)
+                                # Clean up extension
+                                raw_name = re.sub(r'\.(pdf|docx|doc)$', '', raw_name, flags=re.IGNORECASE)
+                                # Clean up underscores/dashes
+                                candidate_name = raw_name.replace('_', ' ').replace('-', ' ').strip()
+                                logger.info(f"Auto-Recovery: Extracted name '{candidate_name}' from CV Link.")
                         
                         tasks.append({
                             'file_id': file_id,
