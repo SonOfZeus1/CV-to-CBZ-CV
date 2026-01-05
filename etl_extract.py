@@ -24,21 +24,25 @@ from report_generator import format_candidate_row
 DOWNLOADS_DIR = "downloads"
 JSON_OUTPUT_DIR = "output_jsons"
 
-def process_file_concurrent(file_item, json_output_folder_id, index=0, total=0):
+def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0):
     """
-    Process a single MD file in a separate thread.
-    Instantiates its own Drive service.
-    Returns: (Success: bool, ReportRow: list|None, FileItem: dict)
+    Process a single MD file by ID in a separate thread.
+    Fetches metadata, downloads, extracts, and returns report row.
     """
-    file_id = file_item['id']
-    file_name = file_item['name']
-    
     # Create thread-local service
     try:
         drive_service = get_drive_service()
     except Exception as e:
-        logger.error(f"Thread failed to auth for {file_name}: {e}")
-        return False, None, file_item
+        logger.error(f"Thread failed to auth for {file_id}: {e}")
+        return False, None, {'id': file_id, 'name': 'Unknown'}
+
+    # Fetch File Metadata
+    try:
+        file_item = drive_service.files().get(fileId=file_id, fields='id, name').execute()
+        file_name = file_item['name']
+    except Exception as e:
+        logger.error(f"Failed to fetch metadata for {file_id}: {e}")
+        return False, None, {'id': file_id, 'name': 'Unknown'}
 
     logger.info(f"[{index}/{total}] Processing file (Thread): {file_name} ({file_id})")
     
@@ -99,7 +103,13 @@ def process_file_concurrent(file_item, json_output_folder_id, index=0, total=0):
         json_link_formula = create_hyperlink_formula(json_link, "Voir JSON")
 
         try:
-            report_row = format_candidate_row(parsed_data, md_link, emplacement="Processed", json_link=json_link_formula)
+            report_row = format_candidate_row(
+                parsed_data, 
+                md_link, 
+                emplacement="Processed", 
+                json_link=json_link_formula,
+                cv_link=cv_link
+            )
             return True, report_row, file_item
         except Exception as e:
             logger.error(f"Failed to generate report row for {file_name}: {e}")
@@ -200,332 +210,185 @@ def process_file(file_item, drive_service, output_folder_id, report_buffer):
 
 def main():
     load_dotenv()
-    logger.info("--- Starting Pipeline 2: EXTRACTION (Markdown -> JSON + Excel Report) ---")
+    logger.info("--- Starting Pipeline 2: EXTRACTION (Excel-Driven) ---")
 
-    # 1. Use CV_TO_JSON_FOLDER_ID directly as the Index Folder
-    index_folder_id = os.environ.get('CV_TO_JSON_FOLDER_ID')
-    if not index_folder_id:
-        logger.error("Missing CV_TO_JSON_FOLDER_ID in .env")
-        return
-        
-    logger.info(f"Using Index Folder ID from env: {index_folder_id}")
-
+    # 1. Configuration
     json_output_folder_id = os.environ.get('JSON_OUTPUT_FOLDER_ID')
     if not json_output_folder_id:
-        logger.warning("JSON_OUTPUT_FOLDER_ID not set. Using CV_TO_JSON_FOLDER_ID as fallback.")
-        json_output_folder_id = index_folder_id
+        # Fallback to CV_TO_JSON_FOLDER_ID if set, or error
+        json_output_folder_id = os.environ.get('CV_TO_JSON_FOLDER_ID')
+        if not json_output_folder_id:
+             logger.error("Missing JSON_OUTPUT_FOLDER_ID in .env")
+             return
 
-    # Excel Configuration
     email_sheet_id = os.environ.get('EMAIL_SHEET_ID')
+    source_sheet_name = os.environ.get('EMAIL_SHEET_NAME', 'Contact') # Default to Contact if not set
+    dest_sheet_name = "Candidats"
+
     if not email_sheet_id:
-        logger.warning("EMAIL_SHEET_ID not set. Excel reporting will be skipped.")
-    
+        logger.critical("EMAIL_SHEET_ID not set. Cannot run Excel-driven pipeline.")
+        return
+
     try:
         drive_service = get_drive_service()
-        sheets_service = get_sheets_service() if email_sheet_id else None
+        sheets_service = get_sheets_service()
     except Exception as e:
         logger.critical(f"Auth Error: {e}")
         return
 
-    # Ensure Headers
-    if sheets_service and email_sheet_id:
-        try:
-            ensure_report_headers(sheets_service, email_sheet_id, "Candidats")
-            
-            # 1.2. Deduplication DISABLED (Manual Control Strategy)
-            # logger.info("Running Deduplication on 'Candidats' sheet...")
-            # remove_duplicates_by_column(sheets_service, email_sheet_id, "Candidats", col_index=2) 
-            
-        except Exception as e:
-            logger.error(f"Failed to ensure headers: {e}")
-
-    # 1.5. Initialize Processed Folder
-    processed_folder_id = get_or_create_folder(drive_service, "_Processed_JSON", parent_id=index_folder_id)
-    logger.info(f"Processed Folder ID: {processed_folder_id}")
-
-    # 1.6. Initialize Trash Folder
-    trash_folder_id = get_or_create_folder(drive_service, "_Trash", parent_id=index_folder_id)
-    logger.info(f"Trash Folder ID: {trash_folder_id}")
-
-    # 2. List files in Index Folder (Source)
-    logger.info(f"Listing files in Index Folder...")
+    # Ensure Headers in Dest Sheet
     try:
-        source_files = list_files_in_folder(drive_service, index_folder_id, mime_types=['text/markdown'])
+        ensure_report_headers(sheets_service, email_sheet_id, dest_sheet_name)
     except Exception as e:
-        logger.critical(f"Error listing files in folder {index_folder_id}: {e}")
-        return
-    
-    source_file_map = {f['id']: f for f in source_files}
-    logger.info(f"Found {len(source_files)} files in Source Folder.")
+        logger.error(f"Failed to ensure headers: {e}")
 
-    # 2.5. Controller Logic (Sync with Excel)
-    existing_files_in_excel = set()
-    files_to_reprocess = set()
+    # 2. Sync Step: Source (Contact) -> Dest (Candidats)
+    logger.info(f"Reading Source Sheet '{source_sheet_name}'...")
+    source_rows = get_sheet_values(sheets_service, email_sheet_id, source_sheet_name, value_render_option='FORMULA')
     
-    if sheets_service and email_sheet_id:
-        try:
-            logger.info("Reading 'Candidats' sheet for Controller Logic...")
-            # Use FORMULA to get the actual Hyperlink formula, so we can extract the File ID
-            rows = get_sheet_values(sheets_service, email_sheet_id, "Candidats", value_render_option='FORMULA')
+    logger.info(f"Reading Dest Sheet '{dest_sheet_name}'...")
+    dest_rows = get_sheet_values(sheets_service, email_sheet_id, dest_sheet_name, value_render_option='FORMULA')
+
+    # Build Map of Dest Rows (Key: MD Link or File ID)
+    dest_map = {} # {file_id: row_index}
+    if dest_rows:
+        for i, row in enumerate(dest_rows):
+            if i == 0: continue
+            # Col J (Index 9) is MD Link
+            if len(row) > 9:
+                md_link = row[9]
+                match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
+                if match:
+                    dest_map[match.group(1)] = i
+
+    # Identify Missing Rows
+    rows_to_append = []
+    if source_rows:
+        for i, row in enumerate(source_rows):
+            if i == 0: continue
             
-            if rows:
-                # Column Mapping (0-based):
-                # J (Index 9) = MD Link (contains File ID)
-                # K (Index 10) = Action
-                
-                rows_to_delete = [] 
-                
-                for i, row in enumerate(rows):
-                    if i == 0: continue # Skip header
-                    
-                    # Extract File ID from MD Link
-                    file_id = None
-                    if len(row) > 9:
-                        md_link = row[9]
-                        match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
-                        if match:
-                            file_id = match.group(1)
-                            
-                            # CRITICAL FIX: Only mark as "existing" if JSON Link is present!
-                            # Otherwise, we want to re-process it to generate the JSON.
-                            json_link_val = row[12] if len(row) > 12 else ""
-                            if json_link_val:
-                                existing_files_in_excel.add(file_id)
-                    
-                    # Check Action
-                    action = ""
-                    if len(row) > 10:
-                        action = row[10].strip().lower()
-                    
-                    if action == "supprimer":
-                        rows_to_delete.append(i)
-                        logger.info(f"Row {i+1} marked for DELETION.")
-                        
-                        if file_id:
-                            try:
-                                # Move to Trash (Robust: Remove from ALL current parents)
-                                file_meta = drive_service.files().get(fileId=file_id, fields='parents').execute()
-                                previous_parents = ",".join(file_meta.get('parents', []))
-                                
-                                drive_service.files().update(
-                                    fileId=file_id, 
-                                    addParents=trash_folder_id, 
-                                    removeParents=previous_parents
-                                ).execute()
-                                logger.info(f"Moved {file_id} to Trash.")
-                            except Exception as e:
-                                logger.error(f"Failed to trash file {file_id}: {e}")
-                        
-                    elif action == "retraiter":
-                        rows_to_delete.append(i)
-                        if file_id:
-                            # Move file BACK to Source (if it's in Processed)
-                            # We don't know where it is exactly, but we try to move it to Source
-                            try:
-                                move_file(drive_service, file_id, processed_folder_id, index_folder_id)
-                                logger.info(f"Moved file {file_id} back to Source for reprocessing.")
-                                files_to_reprocess.add(file_id)
-                                # Remove from existing set so it gets picked up
-                                if file_id in existing_files_in_excel:
-                                    existing_files_in_excel.remove(file_id)
-                            except Exception as move_err:
-                                logger.warning(f"Failed to move file {file_id} back to source: {move_err}")
+            # Source: Col A (CV Link), Col E (Emplacement), Col G (MD Link)
+            # Check bounds
+            cv_link = row[0] if len(row) > 0 else ""
+            emplacement = row[4] if len(row) > 4 else "" # Col E is Index 4
+            md_link = row[6] if len(row) > 6 else "" # Col G is Index 6
+            
+            if not md_link:
+                continue # Skip if no MD link (not indexed yet)
 
-                # Execute Deletions
-                if rows_to_delete:
-                    rows_to_delete.sort(reverse=True)
-                    
-                    # Get Sheet ID
-                    sheet_metadata = sheets_service.spreadsheets().get(spreadsheetId=email_sheet_id).execute()
-                    sheets = sheet_metadata.get('sheets', '')
-                    sheet_int_id = 0
-                    for s in sheets:
-                        if s.get("properties", {}).get("title") == "Candidats":
-                            sheet_int_id = s.get("properties", {}).get("sheetId")
-                            break
-                    
-                    requests = []
-                    for row_idx in rows_to_delete:
-                        requests.append({
-                            "deleteDimension": {
-                                "range": {
-                                    "sheetId": sheet_int_id,
-                                    "dimension": "ROWS",
-                                    "startIndex": row_idx,
-                                    "endIndex": row_idx + 1
-                                }
-                            }
+            # Extract File ID
+            match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
+            if match:
+                file_id = match.group(1)
+                if file_id not in dest_map:
+                    # New Row!
+                    # Create a skeleton row. 
+                    # Format: [First, Last, Email, Phone, Addr, Lang, Exp, Title, Loc, MD_Link, Action, Emplacement, JSON_Link, CV_Link]
+                    # We only fill MD_Link (9), Emplacement (11), CV_Link (13). Others empty.
+                    new_row = [""] * 14
+                    new_row[9] = md_link
+                    new_row[11] = emplacement
+                    new_row[13] = cv_link
+                    rows_to_append.append(new_row)
+                    dest_map[file_id] = -1 # Mark as added
+
+    if rows_to_append:
+        logger.info(f"Sync: Found {len(rows_to_append)} new candidates in Source. Appending to Dest...")
+        append_batch_to_sheet(sheets_service, email_sheet_id, rows_to_append, dest_sheet_name)
+        # Re-read dest rows to get updated state? Or just proceed.
+        # We need to process them, so we should add them to our processing queue.
+    else:
+        logger.info("Sync: Dest sheet is up to date with Source.")
+
+    # 3. Process Step: Identify Rows needing JSON
+    # We need to re-read Dest if we appended, or just use what we have + appended.
+    # Simplest is to re-read to get correct row indices if needed (though upsert handles matching by email... wait).
+    # UPSERT matches by EMAIL. But our new rows have NO EMAIL yet!
+    # CRITICAL: Upsert logic relies on Email. If Email is empty, it appends.
+    # But we just appended rows with empty emails.
+    # If we process them, we generate a row WITH Email.
+    # If we use upsert, it will check if Email exists. It won't find it (unless duplicate).
+    # So it will APPEND AGAIN?
+    # NO. We need to UPDATE the existing row that has the MD Link.
+    
+    # PROBLEM: `upsert_batch_to_sheet` uses Email as key.
+    # We need a way to update based on MD Link (File ID) if Email is missing.
+    # OR, we can just use `batch_update_rows` using the Row Index if we know it.
+    
+    # Let's re-read the sheet to get the exact state.
+    logger.info("Re-reading Dest sheet to identify pending tasks...")
+    dest_rows = get_sheet_values(sheets_service, email_sheet_id, dest_sheet_name, value_render_option='FORMULA')
+    
+    tasks = [] # List of (file_id, cv_link, row_index)
+    
+    if dest_rows:
+        for i, row in enumerate(dest_rows):
+            if i == 0: continue
+            
+            # Check JSON Link (Col M, Index 12)
+            json_link = row[12] if len(row) > 12 else ""
+            
+            if not json_link:
+                # Needs Processing!
+                # Get File ID from MD Link (Col J, Index 9)
+                if len(row) > 9:
+                    md_link = row[9]
+                    match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
+                    if match:
+                        file_id = match.group(1)
+                        cv_link = row[13] if len(row) > 13 else ""
+                        tasks.append({
+                            'file_id': file_id,
+                            'cv_link': cv_link,
+                            'row_index': i # 0-based index in 'values' list. Excel row is i+1.
                         })
-                    
-                # Execute Deletions
-                if rows_to_delete:
-                    body = {'requests': requests}
-                    try:
-                        sheets_service.spreadsheets().batchUpdate(spreadsheetId=email_sheet_id, body=body).execute()
-                        logger.info(f"Deleted {len(rows_to_delete)} rows from Excel.")
-                    except Exception as e:
-                        logger.error(f"Failed to delete rows: {e}")
 
-        except Exception as e:
-            logger.error(f"Error in Controller Logic: {e}")
-
-    # 2.6. ROBUST SYNCHRONIZATION (Rescue Zombies)
-    # Check files in _Processed_JSON. If they are NOT in Excel (with JSON link), we must fix them.
-    logger.info("Running Synchronization (Processed Folder <-> Excel)...")
-    try:
-        processed_files = list_files_in_folder(drive_service, processed_folder_id, mime_types=['text/markdown'])
-        logger.info(f"Sync: Found {len(processed_files)} files in Processed Folder.")
-        
-        zombies_moved = 0
-        zombies_recovered = 0
-        
-        for f in processed_files:
-            if f['id'] not in existing_files_in_excel:
-                logger.info(f"Sync: Checking {f['name']} (ID: {f['id']}) - Not in Excel/Missing Link.")
-                
-                # This file is in Processed but NOT in Excel (or missing JSON link).
-                # Check if JSON exists in Drive
-                base_name = os.path.splitext(f['name'])[0]
-                json_name = f"{base_name}_extracted.json"
-                
-                # Search for JSON
-                q = f"name = '{json_name}' and '{json_output_folder_id}' in parents and trashed = false"
-                results = drive_service.files().list(q=q, fields="files(id, webViewLink)").execute()
-                json_files = results.get('files', [])
-                
-                if json_files:
-                    # Case A: JSON exists! We just need to add it to Excel.
-                    json_file = json_files[0]
-                    logger.info(f"  -> JSON found ({json_file['id']}). Recovering to Excel...")
-                    
-                    try:
-                        # Download JSON content to memory
-                        json_content = drive_service.files().get_media(fileId=json_file['id']).execute()
-                        parsed_data = json.loads(json_content)
-                        
-                        # Generate Report Row
-                        md_url = f"https://drive.google.com/file/d/{f['id']}/view"
-                        md_link_formula = create_hyperlink_formula(md_url, "Voir MD")
-                        
-                        json_link_url = json_file.get('webViewLink')
-                        if not json_link_url:
-                             json_link_url = f"https://drive.google.com/file/d/{json_file['id']}/view"
-
-                        json_link_formula = create_hyperlink_formula(json_link_url, "Voir JSON")
-                        
-                        report_row = format_candidate_row(
-                            parsed_data, 
-                            md_link=md_link_formula, 
-                            emplacement="Processed",
-                            json_link=json_link_formula
-                        )
-                        logger.info(f"DEBUG: Report Row Generated. JSON Link Index 12: '{report_row[12] if len(report_row) > 12 else 'MISSING'}'")
-                        report_buffer.append(report_row)
-                        zombies_recovered += 1
-                        
-                        # Add to existing set to prevent re-processing if it was somehow in queue
-                        existing_files_in_excel.add(f['id'])
-                        logger.info(f"  -> Added to Report Buffer.")
-                        
-                    except Exception as e:
-                        logger.error(f"  -> Failed to recover {f['name']}: {e}")
-                
-                else:
-                    # Case B: JSON missing. Move back to Source for reprocessing.
-                    logger.warning(f"  -> JSON missing. Moving back to Source for reprocessing...")
-                    try:
-                        move_file(drive_service, f['id'], processed_folder_id, index_folder_id)
-                        zombies_moved += 1
-                        logger.info(f"  -> Moved to Source.")
-                    except Exception as e:
-                        logger.error(f"  -> Failed to move zombie {f['name']}: {e}")
-
-        logger.info(f"Sync Result: {zombies_recovered} recovered to Excel, {zombies_moved} moved back to Source.")
-
-    except Exception as e:
-        logger.error(f"Synchronization Error: {e}")
-
-    # 2.6. Pre-flight Sync: Move files already in Excel to Processed
-    logger.info("Running Pre-flight Sync...")
-    files_to_process = []
+    logger.info(f"Found {len(tasks)} rows missing JSON link.")
     
-    for f in source_files:
-        f_id = f['id']
-        
-        # If file is in Excel AND NOT marked for reprocessing -> Move to Processed
-        if f_id in existing_files_in_excel and f_id not in files_to_reprocess:
-            try:
-                move_file(drive_service, f_id, index_folder_id, processed_folder_id)
-                # logger.info(f"Moved already processed file {f['name']} to _Processed_JSON")
-            except Exception as e:
-                logger.warning(f"Failed to move {f['name']} to processed: {e}")
-        else:
-            # File is NOT in Excel (or is reprocessed) -> Add to queue
-            if f['name'].endswith('.md'):
-                files_to_process.append(f)
-
-    # 3. Process files (Batch Limit: 10)
-    # Sort: Reprocess files first? They are already in the list.
-    # Just apply limit.
-    files_to_process = files_to_process[:1]
-    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 1)...")
+    # Batch Limit
+    batch_limit = 25 # Increased as requested
+    tasks_to_process = tasks[:batch_limit]
+    logger.info(f"Processing {len(tasks_to_process)} tasks (Batch Limit: {batch_limit})...")
 
     report_buffer = []
-    files_to_move_on_success = []
-
-    # --- PARALLEL EXECUTION START ---
-    max_workers = 5
-    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 25) with Parallel Execution (Workers: {max_workers})...")
     
+    # Parallel Execution
+    max_workers = 5
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit tasks
-        future_to_file = {
-            executor.submit(process_file_concurrent, f, json_output_folder_id, i+1, len(files_to_process)): f 
-            for i, f in enumerate(files_to_process)
+        future_to_task = {
+            executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process)): t
+            for i, t in enumerate(tasks_to_process)
         }
         
-        for future in concurrent.futures.as_completed(future_to_file):
-            file_item = future_to_file[future]
+        for future in concurrent.futures.as_completed(future_to_task):
+            task = future_to_task[future]
             try:
-                success, report_row, f_item = future.result()
-                
+                success, report_row, _ = future.result()
                 if success and report_row:
-                    report_buffer.append(report_row)
-                    
-                    # Defer move until after Excel write
-                    files_to_move_on_success.append(f_item)
-                    logger.info(f"  -> Queued {f_item['name']} for move (pending Excel write)")
-                else:
-                    logger.warning(f"Processing failed for {file_item['name']}")
-                    
-            except Exception as exc:
-                logger.error(f"Thread exception for {file_item['name']}: {exc}")
+                    # We have a full report row.
+                    # We want to UPDATE the specific row index `task['row_index']`.
+                    # But `report_row` is a list of values.
+                    # We can construct a batch update for this specific row.
+                    report_buffer.append({
+                        'range': f"'{dest_sheet_name}'!A{task['row_index'] + 1}", # A(i+1)
+                        'values': [report_row]
+                    })
+            except Exception as e:
+                logger.error(f"Task failed for {task['file_id']}: {e}")
 
-    # --- PARALLEL EXECUTION END ---
-
-    # Flush Report Buffer
-    if report_buffer and sheets_service and email_sheet_id:
-        logger.info(f"Flushing {len(report_buffer)} rows to 'Candidats'...")
+    # Flush Updates
+    if report_buffer:
+        logger.info(f"Flushing {len(report_buffer)} updates to '{dest_sheet_name}'...")
+        # We can't use upsert_batch_to_sheet because we are updating specific rows by index.
+        # We need a simple batch update.
+        body = {'data': report_buffer, 'valueInputOption': 'USER_ENTERED'}
         try:
-            # Use Upsert (Update if exists, Append if new)
-            # Email is at index 2 (Name, Surname, Email...)
-            upsert_batch_to_sheet(sheets_service, email_sheet_id, report_buffer, sheet_name="Candidats", email_col_index=2)
-            logger.info("Report flush successful.")
-            
-            # NOW move files
-            logger.info(f"Moving {len(files_to_move_on_success)} files to Processed folder...")
-            for f_item in files_to_move_on_success:
-                try:
-                    move_file(drive_service, f_item['id'], index_folder_id, processed_folder_id)
-                    logger.info(f"Moved {f_item['name']} to _Processed_JSON")
-                except Exception as e:
-                    logger.error(f"Failed to move {f_item['name']} after processing: {e}")
-            
-            # Clean up empty rows
-            remove_empty_rows(sheets_service, email_sheet_id, "Candidats")
-            
+            sheets_service.spreadsheets().values().batchUpdate(
+                spreadsheetId=email_sheet_id, body=body
+            ).execute()
+            logger.info("Updates successful.")
         except Exception as e:
-            logger.error(f"Failed to flush report: {e}")
+            logger.error(f"Failed to flush updates: {e}")
 
     logger.info("--- Extraction Pipeline Finished ---")
 
