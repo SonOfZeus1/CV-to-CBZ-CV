@@ -7,6 +7,7 @@ import re
 import concurrent.futures
 from dotenv import load_dotenv
 from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.errors import HttpError
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -244,7 +245,21 @@ def main():
 
     # 2. Sync Step: Source (Contact) -> Dest (Candidats)
     logger.info(f"Reading Source Sheet '{source_sheet_name}'...")
-    source_rows = get_sheet_values(sheets_service, email_sheet_id, source_sheet_name, value_render_option='FORMULA')
+    try:
+        source_rows = get_sheet_values(sheets_service, email_sheet_id, source_sheet_name, value_render_option='FORMULA')
+    except HttpError as e:
+        if e.resp.status == 400:
+            logger.error(f"Failed to read sheet '{source_sheet_name}'. It might not exist.")
+            # List available sheets
+            try:
+                sheet_metadata = sheets_service.spreadsheets().get(spreadsheetId=email_sheet_id).execute()
+                sheets = sheet_metadata.get('sheets', '')
+                sheet_names = [s.get("properties", {}).get("title") for s in sheets]
+                logger.info(f"Available Sheets: {sheet_names}")
+                logger.info("Please update EMAIL_SHEET_NAME in .env to match one of the above.")
+            except Exception as meta_err:
+                logger.error(f"Failed to list sheets: {meta_err}")
+        raise e
     
     logger.info(f"Reading Dest Sheet '{dest_sheet_name}'...")
     dest_rows = get_sheet_values(sheets_service, email_sheet_id, dest_sheet_name, value_render_option='FORMULA')
