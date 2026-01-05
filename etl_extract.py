@@ -414,6 +414,7 @@ def main():
                             emplacement="Processed",
                             json_link=json_link_formula
                         )
+                        logger.info(f"DEBUG: Report Row Generated. JSON Link Index 12: '{report_row[12] if len(report_row) > 12 else 'MISSING'}'")
                         report_buffer.append(report_row)
                         zombies_recovered += 1
                         

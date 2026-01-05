@@ -622,7 +622,8 @@ def upsert_batch_to_sheet(service, sheet_id, rows, sheet_name="Candidats", email
                 })
                 # Debug: Print first update details
                 if len(updates) == 1:
-                    print(f"DEBUG: Updating row {row_index+1}. Row Len: {len(new_row)}. Range: {range_name}. Last Val: {new_row[-1]}")
+                    print(f"DEBUG: Updating row {row_index+1}. Row Len: {len(new_row)}. Range: {range_name}.")
+                    print(f"DEBUG: Last Val (JSON Link): '{new_row[-1]}'")
             else:
                 # New row
                 rows_to_append.append(new_row)
@@ -644,7 +645,8 @@ def upsert_batch_to_sheet(service, sheet_id, rows, sheet_name="Candidats", email
             'values': [new_row]
         })
         if len(updates) == 1 or len(updates) == len(rows_to_append):
-             print(f"DEBUG: Appending row {next_row}. Row Len: {len(new_row)}. Range: {range_name}. Last Val: {new_row[-1]}")
+             print(f"DEBUG: Appending row {next_row}. Row Len: {len(new_row)}. Range: {range_name}.")
+             print(f"DEBUG: Last Val (JSON Link): '{new_row[-1]}'")
         next_row += 1
 
     # 3. Perform Batch Updates (All in one go)
@@ -1050,4 +1052,6 @@ def create_hyperlink_formula(url, name):
     """
     # Escape double quotes in name if necessary
     safe_name = name.replace('"', '""')
-    return f'=LIEN_HYPERTEXTE("{url}"; "{safe_name}")'
+    formula = f'=LIEN_HYPERTEXTE("{url}"; "{safe_name}")'
+    print(f"DEBUG: Generated Formula: {formula}")
+    return formula
