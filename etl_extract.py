@@ -309,12 +309,19 @@ def main():
                 # FALLBACK: Global Search
                 logger.info("Attempting Global Search for folder...")
                 q_global = f"mimeType='application/vnd.google-apps.folder' and name='{md_folder_name}' and trashed=false"
-                results_global = drive_service.files().list(q=q_global, fields="files(id, name)").execute()
+                results_global = drive_service.files().list(q=q_global, fields="files(id, name, parents)").execute()
                 folders_global = results_global.get('files', [])
                 
                 if folders_global:
                     md_folder_id = folders_global[0]['id']
-                    logger.info(f"GLOBAL FALLBACK SUCCESS: Found '{md_folder_name}' (ID: {md_folder_id}) outside of expected parent.")
+                    actual_parents = folders_global[0].get('parents', [])
+                    actual_parent = actual_parents[0] if actual_parents else "Unknown"
+                    
+                    logger.info(f"GLOBAL FALLBACK SUCCESS: Found '{md_folder_name}' (ID: {md_folder_id}).")
+                    logger.info(f"Actual Parent ID: {actual_parent}")
+                    
+                    if source_folder_id and actual_parent != source_folder_id:
+                        logger.warning(f"MISMATCH: Configured EMAIL_SOURCE_FOLDER_ID ({source_folder_id}) != Actual Parent ({actual_parent})")
                     
                     # Index files
                     from google_drive import list_files_in_folder
