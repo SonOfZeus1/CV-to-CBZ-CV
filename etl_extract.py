@@ -25,7 +25,7 @@ from report_generator import format_candidate_row
 DOWNLOADS_DIR = "downloads"
 JSON_OUTPUT_DIR = "output_jsons"
 
-def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0, languages_source=""):
+def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0, languages_source="", md_file_map=None, candidate_name=""):
     """
     Process a single MD file by ID in a separate thread.
     Fetches metadata, downloads, extracts, and returns report row.
@@ -38,12 +38,43 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         return False, None, {'id': file_id, 'name': 'Unknown'}
 
     # Fetch File Metadata
+    file_item = None
     try:
         file_item = drive_service.files().get(fileId=file_id, fields='id, name').execute()
         file_name = file_item['name']
     except Exception as e:
-        logger.error(f"Failed to fetch metadata for {file_id}: {e}")
-        return False, None, {'id': file_id, 'name': 'Unknown'}
+        logger.warning(f"Failed to fetch metadata for {file_id}: {e}")
+        
+        # AUTO-RECOVERY
+        if md_file_map and candidate_name:
+            logger.info(f"Attempting auto-recovery for '{candidate_name}'...")
+            # Normalize candidate name
+            norm_name = re.sub(r'[^a-z0-9]', '', candidate_name.lower())
+            
+            # Try to find partial match in map keys
+            # Keys are normalized filenames (e.g. "johnsmithcv")
+            # Candidate name is "John Smith" -> "johnsmith"
+            
+            recovered_id = None
+            for fname, fid in md_file_map.items():
+                if norm_name in fname:
+                    recovered_id = fid
+                    break
+            
+            if recovered_id:
+                logger.info(f"RECOVERY SUCCESS: Found matching file for '{candidate_name}' -> {recovered_id}")
+                file_id = recovered_id # Switch to new ID
+                try:
+                    file_item = drive_service.files().get(fileId=file_id, fields='id, name').execute()
+                    file_name = file_item['name']
+                except Exception as e2:
+                    logger.error(f"Recovery failed on second attempt: {e2}")
+                    return False, None, {'id': file_id, 'name': 'Unknown'}
+            else:
+                logger.error(f"Recovery failed: No matching file found for '{candidate_name}' in map.")
+                return False, None, {'id': file_id, 'name': 'Unknown'}
+        else:
+            return False, None, {'id': file_id, 'name': 'Unknown'}
 
     logger.info(f"[{index}/{total}] Processing file (Thread): {file_name} ({file_id})")
     
@@ -239,9 +270,41 @@ def main():
             about = drive_service.about().get(fields="user").execute()
             sa_email = about.get('user', {}).get('emailAddress')
             logger.info(f"Authenticated as: {sa_email}")
-            logger.info("Ensure this email has 'Editor' access to your Google Drive folder and Sheet.")
         except Exception as e:
             logger.warning(f"Could not determine Service Account email: {e}")
+
+        # AUTO-RECOVERY: Search for '_cv_index_v2' folder
+        # This helps recover from 404 errors if links are dead but files exist in this folder.
+        md_folder_name = "_cv_index_v2"
+        md_file_map = {} # {normalized_name: file_id}
+        
+        try:
+            logger.info(f"Searching for MD folder '{md_folder_name}'...")
+            q = f"mimeType='application/vnd.google-apps.folder' and name='{md_folder_name}' and trashed=false"
+            results = drive_service.files().list(q=q, fields="files(id, name)").execute()
+            folders = results.get('files', [])
+            
+            if folders:
+                md_folder_id = folders[0]['id']
+                logger.info(f"Found '{md_folder_name}' (ID: {md_folder_id}). Indexing files for auto-recovery...")
+                
+                # List all MD files in this folder
+                # We import list_files_in_folder locally to avoid circular deps if any, 
+                # but it should be available from google_drive
+                from google_drive import list_files_in_folder
+                md_files = list_files_in_folder(drive_service, md_folder_id, mime_types=['text/markdown'])
+                
+                for f in md_files:
+                    # Normalize: lowercase, remove non-alphanumeric
+                    norm_name = re.sub(r'[^a-z0-9]', '', f['name'].lower())
+                    md_file_map[norm_name] = f['id']
+                    
+                logger.info(f"Indexed {len(md_file_map)} MD files for recovery.")
+            else:
+                logger.warning(f"Folder '{md_folder_name}' not found. Auto-recovery disabled.")
+                
+        except Exception as e:
+            logger.warning(f"Auto-recovery setup failed: {e}")
             
     except Exception as e:
         logger.error(f"Failed to initialize Google Services: {e}")
@@ -422,10 +485,17 @@ def main():
                         file_id = match.group(1)
                         cv_link = row[13] if len(row) > 13 else ""
                         languages_source = row[9] if len(row) > 9 else "" # Preserve synced value
+                        
+                        # Extract Name for Auto-Recovery
+                        first_name = row[0] if len(row) > 0 else ""
+                        last_name = row[1] if len(row) > 1 else ""
+                        candidate_name = f"{first_name} {last_name}".strip()
+                        
                         tasks.append({
                             'file_id': file_id,
                             'cv_link': cv_link,
                             'languages_source': languages_source,
+                            'candidate_name': candidate_name,
                             'row_index': i # 0-based index in 'values' list. Excel row is i+1.
                         })
 
@@ -453,7 +523,7 @@ def main():
     max_workers = 5
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_task = {
-            executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process), t['languages_source']): t
+            executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process), t['languages_source'], md_file_map, t['candidate_name']): t
             for i, t in enumerate(tasks_to_process)
         }
         
