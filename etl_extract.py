@@ -279,9 +279,9 @@ def main():
     if dest_rows:
         for i, row in enumerate(dest_rows):
             if i == 0: continue
-            # Col J (Index 9) is MD Link
-            if len(row) > 9:
-                md_link = row[9]
+            # Col L (Index 11) is MD Link (Swapped from J)
+            if len(row) > 11:
+                md_link = row[11]
                 match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
                 if match:
                     dest_map[match.group(1)] = i
@@ -308,39 +308,22 @@ def main():
                 if file_id not in dest_map:
                     # New Row!
                     # Create a skeleton row. 
-                    # Format: [First, Last, Email, Phone, Addr, Lang, Exp, Title, Loc, MD_Link, Action, Emplacement, JSON_Link, CV_Link]
-                    # We only fill MD_Link (9), Emplacement (11), CV_Link (13). Others empty.
+                    # Format: [First, Last, Email, Phone, Addr, Lang, Exp, Title, Loc, Emplacement, Action, MD_Link, JSON_Link, CV_Link]
+                    # Indices: 0-8 (Data), 9 (Emplacement), 10 (Action), 11 (MD_Link), 12 (JSON_Link), 13 (CV_Link)
                     new_row = [""] * 14
-                    new_row[9] = md_link
-                    new_row[11] = emplacement
-                    new_row[13] = cv_link
+                    new_row[9] = emplacement # Col J
+                    new_row[11] = md_link    # Col L
+                    new_row[13] = cv_link    # Col N
                     rows_to_append.append(new_row)
                     dest_map[file_id] = -1 # Mark as added
 
     if rows_to_append:
         logger.info(f"Sync: Found {len(rows_to_append)} new candidates in Source. Appending to Dest...")
         append_batch_to_sheet(sheets_service, email_sheet_id, rows_to_append, dest_sheet_name)
-        # Re-read dest rows to get updated state? Or just proceed.
-        # We need to process them, so we should add them to our processing queue.
     else:
         logger.info("Sync: Dest sheet is up to date with Source.")
 
     # 3. Process Step: Identify Rows needing JSON
-    # We need to re-read Dest if we appended, or just use what we have + appended.
-    # Simplest is to re-read to get correct row indices if needed (though upsert handles matching by email... wait).
-    # UPSERT matches by EMAIL. But our new rows have NO EMAIL yet!
-    # CRITICAL: Upsert logic relies on Email. If Email is empty, it appends.
-    # But we just appended rows with empty emails.
-    # If we process them, we generate a row WITH Email.
-    # If we use upsert, it will check if Email exists. It won't find it (unless duplicate).
-    # So it will APPEND AGAIN?
-    # NO. We need to UPDATE the existing row that has the MD Link.
-    
-    # PROBLEM: `upsert_batch_to_sheet` uses Email as key.
-    # We need a way to update based on MD Link (File ID) if Email is missing.
-    # OR, we can just use `batch_update_rows` using the Row Index if we know it.
-    
-    # Let's re-read the sheet to get the exact state.
     logger.info("Re-reading Dest sheet to identify pending tasks...")
     dest_rows = get_sheet_values(sheets_service, email_sheet_id, dest_sheet_name, value_render_option='FORMULA')
     
@@ -355,9 +338,9 @@ def main():
             
             if not json_link:
                 # Needs Processing!
-                # Get File ID from MD Link (Col J, Index 9)
-                if len(row) > 9:
-                    md_link = row[9]
+                # Get File ID from MD Link (Col L, Index 11)
+                if len(row) > 11:
+                    md_link = row[11]
                     match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
                     if match:
                         file_id = match.group(1)

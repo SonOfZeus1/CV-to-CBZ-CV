@@ -176,9 +176,9 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
         total_exp,
         latest_title,
         latest_location,
-        md_link,
+        emplacement, # Emplacement Column (Now Index 9)
         "", # Action Column (Empty by default)
-        emplacement, # Emplacement Column
+        md_link, # MD Source Link (Now Index 11)
         json_link, # Lien JSON Column
         cv_link # Lien CV Column
     ]
