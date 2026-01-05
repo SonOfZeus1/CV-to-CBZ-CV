@@ -419,28 +419,44 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     missing_id_map = {} # Store rows with missing IDs (Broken Links)
     
     if existing_rows:
-        # --- RESET STATUS TO "Non" (User Request) ---
-        # We want "Oui" to mean "Touched in this run" and "Non" to mean "Not touched".
-        # So we reset everything to "Non" first (preserving "DELETE").
-        logger.info("Resetting Status column to 'Non' (except DELETE)...")
+    if existing_rows:
+        # --- STATUS AGING (User Request) ---
+        # "Oui" -> "Oui -1"
+        # "Oui -N" -> "Oui -(N+1)"
+        # "Non" remains "Non"
+        logger.info("Aging Status column (Oui -> Oui -1)...")
         status_updates = []
         for i, row in enumerate(existing_rows):
             if i == 0: continue # Skip header
             
-            current_status = row[3] if len(row) > 3 else ""
-            if str(current_status).strip().upper() == "DELETE":
+            current_status = str(row[3]).strip() if len(row) > 3 else ""
+            
+            if current_status.upper() == "DELETE":
                 continue
-                
-            # If it's not "Non", set it to "Non"
-            if str(current_status).strip().capitalize() != "Non":
-                # Row index is i+1 (1-based)
+            
+            new_status = current_status
+            
+            if current_status == "Oui":
+                new_status = "Oui -1"
+            elif current_status.startswith("Oui -"):
+                try:
+                    # Extract number
+                    parts = current_status.split('-')
+                    if len(parts) == 2:
+                        num = int(parts[1].strip())
+                        new_status = f"Oui -{num + 1}"
+                except:
+                    pass # Keep original if parse fails
+            
+            # Only update if changed
+            if new_status != current_status:
                 status_updates.append({
                     'range': f"'{sheet_name}'!D{i+1}",
-                    'values': [["Non"]]
+                    'values': [[new_status]]
                 })
         
         if status_updates:
-            # Batch update in chunks of 500 to avoid payload limits
+            # Batch update in chunks of 500
             chunk_size = 500
             for k in range(0, len(status_updates), chunk_size):
                 chunk = status_updates[k:k+chunk_size]
@@ -450,9 +466,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                         spreadsheetId=sheet_id, body=body
                     ).execute()
                 except Exception as e:
-                    logger.error(f"Error resetting status: {e}")
-            logger.info(f"Reset {len(status_updates)} rows to 'Non'.")
-        # --- END RESET ---
+                    logger.error(f"Error aging status: {e}")
+            logger.info(f"Aged {len(status_updates)} rows.")
+        # --- END AGING ---
         
         # Re-iterate for main processing
         for i, row in enumerate(existing_rows):
