@@ -25,7 +25,7 @@ from report_generator import format_candidate_row
 DOWNLOADS_DIR = "downloads"
 JSON_OUTPUT_DIR = "output_jsons"
 
-def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0, languages_source="", md_file_map=None, candidate_name=""):
+def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0, languages_source="", md_file_map=None, candidate_name="", pdf_file_id=""):
     """
     Process a single MD file by ID in a separate thread.
     Fetches metadata, downloads, extracts, and returns report row.
@@ -39,9 +39,9 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
 
     # DEBUG: Check Auto-Recovery Args
     if md_file_map:
-        logger.info(f"Thread received md_file_map with {len(md_file_map)} entries. Candidate: '{candidate_name}'")
+        logger.info(f"Thread received md_file_map with {len(md_file_map)} entries. PDF ID: '{pdf_file_id}'")
     else:
-        logger.warning(f"Thread received EMPTY md_file_map. Candidate: '{candidate_name}'")
+        logger.warning(f"Thread received EMPTY md_file_map. PDF ID: '{pdf_file_id}'")
 
     # Fetch File Metadata
     file_item = None
@@ -52,23 +52,29 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         logger.warning(f"Failed to fetch metadata for {file_id}: {e}")
         
         # AUTO-RECOVERY
-        if md_file_map and candidate_name:
-            logger.info(f"Attempting auto-recovery for '{candidate_name}'...")
-            # Normalize candidate name
-            norm_name = re.sub(r'[^a-z0-9]', '', candidate_name.lower())
-            
-            # Try to find partial match in map keys
-            # Keys are normalized filenames (e.g. "johnsmithcv")
-            # Candidate name is "John Smith" -> "johnsmith"
+        if md_file_map:
+            logger.info(f"Attempting auto-recovery for PDF ID '{pdf_file_id}' or Name '{candidate_name}'...")
             
             recovered_id = None
-            for fname, fid in md_file_map.items():
-                if norm_name in fname:
-                    recovered_id = fid
-                    break
+            
+            # Strategy 1: PDF ID Match (Exact)
+            # MD files are named "{pdf_file_id}.md"
+            if pdf_file_id:
+                target_key = f"{pdf_file_id}md".lower() # Normalized key
+                if target_key in md_file_map:
+                    recovered_id = md_file_map[target_key]
+                    logger.info(f"Auto-Recovery SUCCESS (Strategy 1): Found by PDF ID. New ID: {recovered_id}")
+            
+            # Strategy 2: Name Match (Fuzzy/Normalized)
+            if not recovered_id and candidate_name:
+                norm_name = re.sub(r'[^a-z0-9]', '', candidate_name.lower())
+                for fname, fid in md_file_map.items():
+                    if norm_name in fname:
+                        recovered_id = fid
+                        logger.info(f"Auto-Recovery SUCCESS (Strategy 2): Found by Name. New ID: {recovered_id}")
+                        break
             
             if recovered_id:
-                logger.info(f"RECOVERY SUCCESS: Found matching file for '{candidate_name}' -> {recovered_id}")
                 file_id = recovered_id # Switch to new ID
                 try:
                     file_item = drive_service.files().get(fileId=file_id, fields='id, name').execute()
@@ -77,7 +83,7 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                     logger.error(f"Recovery failed on second attempt: {e2}")
                     return False, None, {'id': file_id, 'name': 'Unknown'}
             else:
-                logger.error(f"Recovery failed: No matching file found for '{candidate_name}' in map.")
+                logger.error(f"Recovery failed: No matching file found for PDF ID '{pdf_file_id}' or Name '{candidate_name}'.")
                 return False, None, {'id': file_id, 'name': 'Unknown'}
         else:
             return False, None, {'id': file_id, 'name': 'Unknown'}
@@ -543,31 +549,28 @@ def main():
                         cv_link = row[13] if len(row) > 13 else ""
                         languages_source = row[9] if len(row) > 9 else "" # Preserve synced value
                         
-                        # Extract Name for Auto-Recovery
+                        # Extract Name for Auto-Recovery (Secondary)
                         first_name = row[0] if len(row) > 0 else ""
                         last_name = row[1] if len(row) > 1 else ""
                         candidate_name = f"{first_name} {last_name}".strip()
                         
-                        # FALLBACK: If Name is empty, try to extract from CV Link (Filename)
-                        if not candidate_name and cv_link:
-                            # CV Link might be a formula: =HYPERLINK("url", "name")
-                            # Or just a URL.
-                            # Regex to extract name from formula
-                            name_match = re.search(r'"([^"]+)"\)$', cv_link)
-                            if name_match:
-                                raw_name = name_match.group(1)
-                                # Clean up extension
-                                raw_name = re.sub(r'\.(pdf|docx|doc)$', '', raw_name, flags=re.IGNORECASE)
-                                # Clean up underscores/dashes
-                                candidate_name = raw_name.replace('_', ' ').replace('-', ' ').strip()
-                                logger.info(f"Auto-Recovery: Extracted name '{candidate_name}' from CV Link.")
+                        # PRIMARY RECOVERY: Extract PDF File ID from CV Link
+                        # The MD files are named "{PDF_FILE_ID}.md"
+                        pdf_file_id = ""
+                        if cv_link:
+                            # Extract ID from URL: /d/([a-zA-Z0-9_-]+)
+                            match_id = re.search(r'/d/([a-zA-Z0-9_-]+)', cv_link)
+                            if match_id:
+                                pdf_file_id = match_id.group(1)
+                                logger.info(f"Auto-Recovery: Extracted PDF ID '{pdf_file_id}' from CV Link.")
                         
                         tasks.append({
-                            'file_id': file_id,
+                            'file_id': file_id, # The (broken) MD File ID
                             'cv_link': cv_link,
                             'languages_source': languages_source,
                             'candidate_name': candidate_name,
-                            'row_index': i # 0-based index in 'values' list. Excel row is i+1.
+                            'pdf_file_id': pdf_file_id, # The Original PDF ID (Key for lookup)
+                            'row_index': i 
                         })
 
     # Execute Clears
@@ -594,7 +597,7 @@ def main():
     max_workers = 5
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_task = {
-            executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process), t['languages_source'], md_file_map, t['candidate_name']): t
+            executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process), t['languages_source'], md_file_map, t['candidate_name'], t['pdf_file_id']): t
             for i, t in enumerate(tasks_to_process)
         }
         
