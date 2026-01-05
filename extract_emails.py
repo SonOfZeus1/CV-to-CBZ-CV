@@ -419,7 +419,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     missing_id_map = {} # Store rows with missing IDs (Broken Links)
     
     if existing_rows:
-    if existing_rows:
+
         # --- STATUS AGING (User Request) ---
         # "Oui" -> "Oui -1"
         # "Oui -N" -> "Oui -(N+1)"
