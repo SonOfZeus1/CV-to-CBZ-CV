@@ -299,7 +299,7 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
             email = select_best_email(emails, clean_filename)
             
             # Extract other info
-            contact_info = heuristic_parse_contact(text_head)
+            contact_info = heuristic_parse_contact(text)
             phone = contact_info.get('phone', '')
             
             # Clean Phone
@@ -308,14 +308,16 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
             # Prepare Row Data
             email_val = email if email else "NOT FOUND"
             phone_val = phone
-            status_val = "Oui" if email else "Non"
+            
+            # Status is now "Oui" (Touched) for ANY processed file
+            status_val = "Oui" 
             
             # PRESERVE EXISTING DATA if available and valid
             if existing_data:
                 # If we have an existing valid email, keep it
                 if existing_data['email'] and existing_data['email'] != "NOT FOUND":
                     email_val = existing_data['email']
-                    status_val = existing_data['status'] # Keep existing status too
+                    # status_val = existing_data['status'] # REMOVED: Always set to Oui (Touched)
                 
                 # If we have an existing phone, keep it
                 if existing_data['phone']:
@@ -417,7 +419,40 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     missing_id_map = {} # Store rows with missing IDs (Broken Links)
     
     if existing_rows:
+        # --- RESET STATUS TO "Non" (User Request) ---
+        # We want "Oui" to mean "Touched in this run" and "Non" to mean "Not touched".
+        # So we reset everything to "Non" first (preserving "DELETE").
+        logger.info("Resetting Status column to 'Non' (except DELETE)...")
+        status_updates = []
         for i, row in enumerate(existing_rows):
+            if i == 0: continue # Skip header
+            
+            current_status = row[3] if len(row) > 3 else ""
+            if str(current_status).strip().upper() == "DELETE":
+                continue
+                
+            # If it's not "Non", set it to "Non"
+            if str(current_status).strip().capitalize() != "Non":
+                # Row index is i+1 (1-based)
+                status_updates.append({
+                    'range': f"'{sheet_name}'!D{i+1}",
+                    'values': [["Non"]]
+                })
+        
+        if status_updates:
+            # Batch update in chunks of 500 to avoid payload limits
+            chunk_size = 500
+            for k in range(0, len(status_updates), chunk_size):
+                chunk = status_updates[k:k+chunk_size]
+                body = {'data': chunk, 'valueInputOption': 'USER_ENTERED'}
+                try:
+                    sheets_service.spreadsheets().values().batchUpdate(
+                        spreadsheetId=sheet_id, body=body
+                    ).execute()
+                except Exception as e:
+                    logger.error(f"Error resetting status: {e}")
+            logger.info(f"Reset {len(status_updates)} rows to 'Non'.")
+        # --- END RESET ---
             if i == 0: continue # Skip header
             raw_filename = row[0] if len(row) > 0 else ""
             
