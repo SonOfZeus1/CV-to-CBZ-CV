@@ -305,18 +305,37 @@ def main():
                 logger.info(f"Indexed {len(md_file_map)} MD files for recovery.")
             else:
                 logger.warning(f"Folder '{md_folder_name}' not found inside {source_folder_id}.")
-                # DEBUG: List what IS there
-                try:
-                    list_q = f"'{source_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
-                    debug_res = drive_service.files().list(q=list_q, fields="files(id, name)").execute()
-                    visible_folders = [f['name'] for f in debug_res.get('files', [])]
-                    logger.info(f"Visible folders in EMAIL_SOURCE_FOLDER_ID: {visible_folders}")
-                    if not visible_folders:
-                         logger.warning("No folders visible. Check if Service Account has access to EMAIL_SOURCE_FOLDER_ID.")
-                except Exception as debug_e:
-                    logger.error(f"Failed to list contents of EMAIL_SOURCE_FOLDER_ID: {debug_e}")
                 
-                logger.warning("Auto-recovery disabled.")
+                # FALLBACK: Global Search
+                logger.info("Attempting Global Search for folder...")
+                q_global = f"mimeType='application/vnd.google-apps.folder' and name='{md_folder_name}' and trashed=false"
+                results_global = drive_service.files().list(q=q_global, fields="files(id, name)").execute()
+                folders_global = results_global.get('files', [])
+                
+                if folders_global:
+                    md_folder_id = folders_global[0]['id']
+                    logger.info(f"GLOBAL FALLBACK SUCCESS: Found '{md_folder_name}' (ID: {md_folder_id}) outside of expected parent.")
+                    
+                    # Index files
+                    from google_drive import list_files_in_folder
+                    md_files = list_files_in_folder(drive_service, md_folder_id, mime_types=['text/markdown'])
+                    for f in md_files:
+                        norm_name = re.sub(r'[^a-z0-9]', '', f['name'].lower())
+                        md_file_map[norm_name] = f['id']
+                    logger.info(f"Indexed {len(md_file_map)} MD files for recovery.")
+                else:
+                    # DEBUG: List what IS there (in parent)
+                    try:
+                        list_q = f"'{source_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+                        debug_res = drive_service.files().list(q=list_q, fields="files(id, name)").execute()
+                        visible_folders = [f['name'] for f in debug_res.get('files', [])]
+                        logger.info(f"Visible folders in EMAIL_SOURCE_FOLDER_ID: {visible_folders}")
+                        if not visible_folders:
+                             logger.warning("No folders visible. Check if Service Account has access to EMAIL_SOURCE_FOLDER_ID.")
+                    except Exception as debug_e:
+                        logger.error(f"Failed to list contents of EMAIL_SOURCE_FOLDER_ID: {debug_e}")
+                    
+                    logger.warning("Auto-recovery disabled.")
                 
         except Exception as e:
             logger.warning(f"Auto-recovery setup failed: {e}")
