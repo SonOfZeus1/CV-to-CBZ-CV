@@ -368,15 +368,41 @@ def main():
     dest_rows = get_sheet_values(sheets_service, email_sheet_id, dest_sheet_name, value_render_option='FORMULA')
     
     tasks = [] # List of (file_id, cv_link, row_index)
+    clear_buffer = [] # List of batch updates for "Supprimer"
     
     if dest_rows:
         for i, row in enumerate(dest_rows):
             if i == 0: continue
             
+            # Check Action (Col K, Index 10)
+            action = row[10] if len(row) > 10 else ""
+            action = str(action).strip().lower()
+
+            if action == "supprimer":
+                # Clear AI columns (A-I, M) and Action (K)
+                # Preserve J (Languages), L (MD Link), N (CV Link)
+                # We can batch these clears.
+                # Clear A-I
+                clear_buffer.append({
+                    'range': f"'{dest_sheet_name}'!A{i+1}:I{i+1}",
+                    'values': [[""] * 9]
+                })
+                # Clear K (Action)
+                clear_buffer.append({
+                    'range': f"'{dest_sheet_name}'!K{i+1}",
+                    'values': [[""]]
+                })
+                # Clear M (JSON Link)
+                clear_buffer.append({
+                    'range': f"'{dest_sheet_name}'!M{i+1}",
+                    'values': [[""]]
+                })
+                continue # Skip processing
+
             # Check JSON Link (Col M, Index 12)
             json_link = row[12] if len(row) > 12 else ""
             
-            if not json_link:
+            if not json_link or action == "retraiter":
                 # Needs Processing!
                 # Get File ID from MD Link (Col L, Index 11)
                 if len(row) > 11:
@@ -384,7 +410,6 @@ def main():
                     match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
                     if match:
                         file_id = match.group(1)
-                        cv_link = row[13] if len(row) > 13 else ""
                         cv_link = row[13] if len(row) > 13 else ""
                         languages_source = row[9] if len(row) > 9 else "" # Preserve synced value
                         tasks.append({
@@ -394,7 +419,18 @@ def main():
                             'row_index': i # 0-based index in 'values' list. Excel row is i+1.
                         })
 
-    logger.info(f"Found {len(tasks)} rows missing JSON link.")
+    # Execute Clears
+    if clear_buffer:
+        logger.info(f"Clearing {len(clear_buffer)//3} rows marked as 'Supprimer'...")
+        body = {'data': clear_buffer, 'valueInputOption': 'USER_ENTERED'}
+        try:
+            sheets_service.spreadsheets().values().batchUpdate(
+                spreadsheetId=email_sheet_id, body=body
+            ).execute()
+        except Exception as e:
+            logger.error(f"Failed to clear rows: {e}")
+
+    logger.info(f"Found {len(tasks)} rows needing processing (Missing JSON or 'Retraiter').")
     
     # Batch Limit
     batch_limit = 1 # Decreased to 1 as requested
