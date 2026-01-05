@@ -280,10 +280,10 @@ def main():
         
         try:
             if source_folder_id:
-                logger.info(f"Searching for MD folder '{md_folder_name}' inside SOURCE_FOLDER_ID ({source_folder_id})...")
+                logger.info(f"Searching for MD folder '{md_folder_name}' inside EMAIL_SOURCE_FOLDER_ID ({source_folder_id})...")
                 q = f"'{source_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and name='{md_folder_name}' and trashed=false"
             else:
-                logger.warning("SOURCE_FOLDER_ID not set. Searching globally for MD folder...")
+                logger.warning("EMAIL_SOURCE_FOLDER_ID not set. Searching globally for MD folder...")
                 q = f"mimeType='application/vnd.google-apps.folder' and name='{md_folder_name}' and trashed=false"
                 
             results = drive_service.files().list(q=q, fields="files(id, name)").execute()
@@ -310,11 +310,11 @@ def main():
                     list_q = f"'{source_folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
                     debug_res = drive_service.files().list(q=list_q, fields="files(id, name)").execute()
                     visible_folders = [f['name'] for f in debug_res.get('files', [])]
-                    logger.info(f"Visible folders in SOURCE_FOLDER_ID: {visible_folders}")
+                    logger.info(f"Visible folders in EMAIL_SOURCE_FOLDER_ID: {visible_folders}")
                     if not visible_folders:
-                         logger.warning("No folders visible. Check if Service Account has access to SOURCE_FOLDER_ID.")
+                         logger.warning("No folders visible. Check if Service Account has access to EMAIL_SOURCE_FOLDER_ID.")
                 except Exception as debug_e:
-                    logger.error(f"Failed to list contents of SOURCE_FOLDER_ID: {debug_e}")
+                    logger.error(f"Failed to list contents of EMAIL_SOURCE_FOLDER_ID: {debug_e}")
                 
                 logger.warning("Auto-recovery disabled.")
                 
