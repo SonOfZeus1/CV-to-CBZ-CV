@@ -24,9 +24,9 @@ from report_generator import format_candidate_row
 DOWNLOADS_DIR = "downloads"
 JSON_OUTPUT_DIR = "output_jsons"
 
-def process_file_concurrent(file_item, json_output_folder_id):
+def process_file_concurrent(file_item, json_output_folder_id, index=0, total=0):
     """
-    Thread-safe version of process_file.
+    Process a single MD file in a separate thread.
     Instantiates its own Drive service.
     Returns: (Success: bool, ReportRow: list|None, FileItem: dict)
     """
@@ -40,7 +40,7 @@ def process_file_concurrent(file_item, json_output_folder_id):
         logger.error(f"Thread failed to auth for {file_name}: {e}")
         return False, None, file_item
 
-    logger.info(f"Processing file (Thread): {file_name} ({file_id})")
+    logger.info(f"[{index}/{total}] Processing file (Thread): {file_name} ({file_id})")
     
     try:
         # 1. Download MD File
@@ -473,8 +473,8 @@ def main():
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit tasks
         future_to_file = {
-            executor.submit(process_file_concurrent, f, json_output_folder_id): f 
-            for f in files_to_process
+            executor.submit(process_file_concurrent, f, json_output_folder_id, i+1, len(files_to_process)): f 
+            for i, f in enumerate(files_to_process)
         }
         
         for future in concurrent.futures.as_completed(future_to_file):
