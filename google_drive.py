@@ -702,7 +702,7 @@ def ensure_report_headers(service, sheet_id, sheet_name):
     headers = [
         "Prénom", "Nom", "Email", "Téléphone", "Adresse", 
         "Langues", "Années Expérience", "Dernier Titre", 
-        "Dernière Localisation", "Emplacement", "Action", "Lien MD", "Lien JSON", "Lien CV"
+        "Dernière Localisation", "Languages", "Action", "Lien MD", "Lien JSON", "Lien CV"
     ]
     
     try:
@@ -721,12 +721,12 @@ def ensure_report_headers(service, sheet_id, sheet_name):
             ).execute()
             print("Headers written successfully.")
         else:
-            # Check if "Emplacement" header is present (index 9)
-            if len(values[0]) < 10 or values[0][9] != "Emplacement":
-                 print("Adding missing 'Emplacement' header...")
+            # Check if "Languages" header is present (index 9)
+            if len(values[0]) < 10 or values[0][9] != "Languages":
+                 print("Updating 'Emplacement' header to 'Languages'...")
                  service.spreadsheets().values().update(
                     spreadsheetId=sheet_id, range=f"'{sheet_name}'!J1",
-                    valueInputOption="USER_ENTERED", body={'values': [["Emplacement"]]}
+                    valueInputOption="USER_ENTERED", body={'values': [["Languages"]]}
                  ).execute()
 
             # Check if "Action" header is present (index 10)

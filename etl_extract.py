@@ -25,7 +25,7 @@ from report_generator import format_candidate_row
 DOWNLOADS_DIR = "downloads"
 JSON_OUTPUT_DIR = "output_jsons"
 
-def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0):
+def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0, languages_source=""):
     """
     Process a single MD file by ID in a separate thread.
     Fetches metadata, downloads, extracts, and returns report row.
@@ -107,7 +107,7 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
             report_row = format_candidate_row(
                 parsed_data, 
                 md_link, 
-                emplacement="Processed", 
+                emplacement=languages_source, # Use the source language value
                 json_link=json_link_formula,
                 cv_link=cv_link
             )
@@ -292,11 +292,11 @@ def main():
             
             # Source Indices
             # Col A (0) = CV Link
-            # Col E (4) = Emplacement
+            # Col F (5) = Languages (was Col E Emplacement)
             # Col G (6) = MD Link
             
             src_cv = src_row[0] if len(src_row) > 0 else ""
-            src_emp = src_row[4] if len(src_row) > 4 else ""
+            src_lang = src_row[5] if len(src_row) > 5 else "" # Col F is Index 5
             src_md = src_row[6] if len(src_row) > 6 else ""
             
             # Check against Dest Row
@@ -304,21 +304,21 @@ def main():
                 dst_row = dest_rows[i]
                 
                 # Dest Indices (New Layout)
-                # Col J (9) = Emplacement
+                # Col J (9) = Languages (Source)
                 # Col L (11) = MD Link
                 # Col N (13) = CV Link
                 
-                dst_emp = dst_row[9] if len(dst_row) > 9 else ""
+                dst_lang = dst_row[9] if len(dst_row) > 9 else ""
                 dst_md = dst_row[11] if len(dst_row) > 11 else ""
                 dst_cv = dst_row[13] if len(dst_row) > 13 else ""
                 
                 # Compare
-                if (src_cv != dst_cv) or (src_emp != dst_emp) or (src_md != dst_md):
+                if (src_cv != dst_cv) or (src_lang != dst_lang) or (src_md != dst_md):
                     # Update Needed!
-                    # Update Emplacement (J)
+                    # Update Languages (J)
                     updates.append({
                         'range': f"'{dest_sheet_name}'!J{i+1}",
-                        'values': [[src_emp]]
+                        'values': [[src_lang]]
                     })
                     # Update MD Link (L)
                     updates.append({
@@ -334,7 +334,7 @@ def main():
                 # Dest row does not exist -> Append
                 # Create skeleton row
                 new_row = [""] * 14
-                new_row[9] = src_emp
+                new_row[9] = src_lang
                 new_row[11] = src_md
                 new_row[13] = src_cv
                 rows_to_append.append(new_row)
@@ -385,16 +385,19 @@ def main():
                     if match:
                         file_id = match.group(1)
                         cv_link = row[13] if len(row) > 13 else ""
+                        cv_link = row[13] if len(row) > 13 else ""
+                        languages_source = row[9] if len(row) > 9 else "" # Preserve synced value
                         tasks.append({
                             'file_id': file_id,
                             'cv_link': cv_link,
+                            'languages_source': languages_source,
                             'row_index': i # 0-based index in 'values' list. Excel row is i+1.
                         })
 
     logger.info(f"Found {len(tasks)} rows missing JSON link.")
     
     # Batch Limit
-    batch_limit = 25 # Increased as requested
+    batch_limit = 1 # Decreased to 1 as requested
     tasks_to_process = tasks[:batch_limit]
     logger.info(f"Processing {len(tasks_to_process)} tasks (Batch Limit: {batch_limit})...")
 
@@ -404,7 +407,7 @@ def main():
     max_workers = 5
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_task = {
-            executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process)): t
+            executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process), t['languages_source']): t
             for i, t in enumerate(tasks_to_process)
         }
         
