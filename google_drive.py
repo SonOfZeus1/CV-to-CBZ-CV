@@ -129,7 +129,7 @@ def download_file(service, file_id, file_name, download_path):
         
     file_path = os.path.join(download_path, file_name)
     
-    request = service.files().get_media(fileId=file_id)
+    request = service.files().get_media(fileId=file_id, supportsAllDrives=True)
     fh = io.BytesIO()
     downloader = MediaIoBaseDownload(fh, request)
     
