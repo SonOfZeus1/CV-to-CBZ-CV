@@ -738,7 +738,8 @@ def ensure_report_headers(service, sheet_id, sheet_name):
                  ).execute()
             
             # Check if "Lien MD" header is present (index 11)
-            if len(values[0]) < 12 or values[0][11] != "Lien MD":
+            # Allow fuzzy match (e.g. "Lien MD (2353)")
+            if len(values[0]) < 12 or "Lien MD" not in str(values[0][11]):
                  print("Adding missing 'Lien MD' header...")
                  service.spreadsheets().values().update(
                     spreadsheetId=sheet_id, range=f"'{sheet_name}'!L1",
@@ -754,7 +755,8 @@ def ensure_report_headers(service, sheet_id, sheet_name):
                  ).execute()
 
             # Check if "Lien CV" header is present (index 13)
-            if len(values[0]) < 14 or values[0][13] != "Lien CV":
+            # Allow fuzzy match
+            if len(values[0]) < 14 or "Lien CV" not in str(values[0][13]):
                  print("Adding missing 'Lien CV' header...")
                  service.spreadsheets().values().update(
                     spreadsheetId=sheet_id, range=f"'{sheet_name}'!N1",

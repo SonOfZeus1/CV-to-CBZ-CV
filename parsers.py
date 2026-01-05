@@ -84,12 +84,20 @@ def parse_cv_from_text(text: str, filename: str, metadata: Dict = None) -> Dict[
     if not text:
         return {}
 
+    # 0. Pre-process & Generate Anchors
+    # We need to generate date anchors to help the AI locate dates.
+    # The prompt expects {anchor_map}.
+    
+    # Extract anchors
+    anchors = extract_date_anchors(text)
+    anchor_map_str = json.dumps([asdict(a) for a in anchors], indent=2, ensure_ascii=False)
+    
     # 1. Call AI
     try:
         response = call_ai(
             system_prompt=FULL_CV_EXTRACTION_SYSTEM_PROMPT,
-            user_prompt=FULL_CV_EXTRACTION_USER_PROMPT.format(anchor_map="{}", text=text),
-            model_id="xiaomi/mimo-v2-flash", # Use fast model
+            user_prompt=FULL_CV_EXTRACTION_USER_PROMPT.format(anchor_map=anchor_map_str, text=text),
+            model_id="meta-llama/llama-3.3-70b-instruct:free", # Explicitly use the model that works
             response_format={"type": "json_object"}
         )
         
