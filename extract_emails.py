@@ -453,6 +453,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     logger.error(f"Error resetting status: {e}")
             logger.info(f"Reset {len(status_updates)} rows to 'Non'.")
         # --- END RESET ---
+        
+        # Re-iterate for main processing
+        for i, row in enumerate(existing_rows):
             if i == 0: continue # Skip header
             raw_filename = row[0] if len(row) > 0 else ""
             
