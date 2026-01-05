@@ -26,16 +26,49 @@ def extract_text_from_docx(docx_path: str) -> str:
     """
     Extracts text from a DOCX file.
     """
-    text = ""
+    text = []
     try:
         doc = Document(docx_path)
+        
+        # 1. Paragraphs
         for para in doc.paragraphs:
-            text += para.text + "\n"
+            text.append(para.text)
+            
+        # 2. Tables
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        text.append(para.text)
+                        
+        # 3. Headers and Footers
+        for section in doc.sections:
+            # Header
+            for header in [section.header, section.first_page_header, section.even_page_header]:
+                if header:
+                    for para in header.paragraphs:
+                        text.append(para.text)
+                    for table in header.tables:
+                        for row in table.rows:
+                            for cell in row.cells:
+                                for para in cell.paragraphs:
+                                    text.append(para.text)
+            # Footer
+            for footer in [section.footer, section.first_page_footer, section.even_page_footer]:
+                if footer:
+                    for para in footer.paragraphs:
+                        text.append(para.text)
+                    for table in footer.tables:
+                        for row in table.rows:
+                            for cell in row.cells:
+                                for para in cell.paragraphs:
+                                    text.append(para.text)
+                                    
     except Exception as e:
         logger.error(f"Error reading DOCX {docx_path}: {e}")
         return ""
         
-    return text
+    return "\n".join(text)
 
 def heuristic_parse_contact(text: str) -> dict:
     """
