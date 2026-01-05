@@ -60,7 +60,12 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
             # Strategy 1: PDF ID Match (Exact)
             # MD files are named "{pdf_file_id}.md"
             if pdf_file_id:
-                target_key = f"{pdf_file_id}md".lower() # Normalized key
+                # Normalize PDF ID to match map keys (lowercase + remove non-alphanumeric)
+                clean_pdf_id = re.sub(r'[^a-z0-9]', '', pdf_file_id.lower())
+                target_key = f"{clean_pdf_id}md"
+                
+                logger.info(f"Auto-Recovery: Looking for key '{target_key}'...")
+                
                 if target_key in md_file_map:
                     recovered_id = md_file_map[target_key]
                     logger.info(f"Auto-Recovery SUCCESS (Strategy 1): Found by PDF ID. New ID: {recovered_id}")
