@@ -461,8 +461,8 @@ def main():
     # 3. Process files (Batch Limit: 10)
     # Sort: Reprocess files first? They are already in the list.
     # Just apply limit.
-    files_to_process = files_to_process[:25]
-    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 25)...")
+    files_to_process = files_to_process[:5]
+    logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 5)...")
 
     report_buffer = []
 

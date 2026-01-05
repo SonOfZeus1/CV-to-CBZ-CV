@@ -1043,8 +1043,11 @@ def remove_duplicates_by_column(service, sheet_id, sheet_name, col_index=2):
     else:
         print("No duplicates found.")
 
-def create_hyperlink_formula(url, text):
-    """Creates a Google Sheets HYPERLINK formula (French format)."""
-    # Escape double quotes in text
-    text = text.replace('"', '""')
-    return f'=HYPERLINK("{url}", "{text}")'
+def create_hyperlink_formula(url, name):
+    """
+    Generates a valid French Excel Hyperlink formula.
+    Format: =LIEN_HYPERTEXTE("url"; "name")
+    """
+    # Escape double quotes in name if necessary
+    safe_name = name.replace('"', '""')
+    return f'=LIEN_HYPERTEXTE("{url}"; "{safe_name}")'
