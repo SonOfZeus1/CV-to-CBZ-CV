@@ -274,54 +274,94 @@ def main():
     logger.info(f"Reading Dest Sheet '{dest_sheet_name}'...")
     dest_rows = get_sheet_values(sheets_service, email_sheet_id, dest_sheet_name, value_render_option='FORMULA')
 
-    # Build Map of Dest Rows (Key: MD Link or File ID)
-    dest_map = {} # {file_id: row_index}
-    if dest_rows:
-        for i, row in enumerate(dest_rows):
-            if i == 0: continue
-            # Col L (Index 11) is MD Link (Swapped from J)
-            if len(row) > 11:
-                md_link = row[11]
-                match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
-                if match:
-                    dest_map[match.group(1)] = i
-
-    # Identify Missing Rows
+    # 2. Sync Step: Source (Contact) -> Dest (Candidats)
+    # STRICT 1:1 SYNC by Row Index
+    
+    # We need to handle:
+    # 1. New Rows (Append)
+    # 2. Updated Rows (Update J, L, N if changed)
+    # 3. Empty Values (Copy as is)
+    
+    updates = []
     rows_to_append = []
+    
+    # Iterate Source Rows (Skip Header i=0)
     if source_rows:
-        for i, row in enumerate(source_rows):
+        for i, src_row in enumerate(source_rows):
             if i == 0: continue
             
-            # Source: Col A (CV Link), Col E (Emplacement), Col G (MD Link)
-            # Check bounds
-            cv_link = row[0] if len(row) > 0 else ""
-            emplacement = row[4] if len(row) > 4 else "" # Col E is Index 4
-            md_link = row[6] if len(row) > 6 else "" # Col G is Index 6
+            # Source Indices
+            # Col A (0) = CV Link
+            # Col E (4) = Emplacement
+            # Col G (6) = MD Link
             
-            if not md_link:
-                continue # Skip if no MD link (not indexed yet)
+            src_cv = src_row[0] if len(src_row) > 0 else ""
+            src_emp = src_row[4] if len(src_row) > 4 else ""
+            src_md = src_row[6] if len(src_row) > 6 else ""
+            
+            # Check against Dest Row
+            if dest_rows and i < len(dest_rows):
+                dst_row = dest_rows[i]
+                
+                # Dest Indices (New Layout)
+                # Col J (9) = Emplacement
+                # Col L (11) = MD Link
+                # Col N (13) = CV Link
+                
+                dst_emp = dst_row[9] if len(dst_row) > 9 else ""
+                dst_md = dst_row[11] if len(dst_row) > 11 else ""
+                dst_cv = dst_row[13] if len(dst_row) > 13 else ""
+                
+                # Compare
+                if (src_cv != dst_cv) or (src_emp != dst_emp) or (src_md != dst_md):
+                    # Update Needed!
+                    # Update Emplacement (J)
+                    updates.append({
+                        'range': f"'{dest_sheet_name}'!J{i+1}",
+                        'values': [[src_emp]]
+                    })
+                    # Update MD Link (L)
+                    updates.append({
+                        'range': f"'{dest_sheet_name}'!L{i+1}",
+                        'values': [[src_md]]
+                    })
+                    # Update CV Link (N)
+                    updates.append({
+                        'range': f"'{dest_sheet_name}'!N{i+1}",
+                        'values': [[src_cv]]
+                    })
+            else:
+                # Dest row does not exist -> Append
+                # Create skeleton row
+                new_row = [""] * 14
+                new_row[9] = src_emp
+                new_row[11] = src_md
+                new_row[13] = src_cv
+                rows_to_append.append(new_row)
 
-            # Extract File ID
-            match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
-            if match:
-                file_id = match.group(1)
-                if file_id not in dest_map:
-                    # New Row!
-                    # Create a skeleton row. 
-                    # Format: [First, Last, Email, Phone, Addr, Lang, Exp, Title, Loc, Emplacement, Action, MD_Link, JSON_Link, CV_Link]
-                    # Indices: 0-8 (Data), 9 (Emplacement), 10 (Action), 11 (MD_Link), 12 (JSON_Link), 13 (CV_Link)
-                    new_row = [""] * 14
-                    new_row[9] = emplacement # Col J
-                    new_row[11] = md_link    # Col L
-                    new_row[13] = cv_link    # Col N
-                    rows_to_append.append(new_row)
-                    dest_map[file_id] = -1 # Mark as added
+    # Execute Updates
+    if updates:
+        logger.info(f"Sync: Updating {len(updates)//3} existing rows in Dest...")
+        
+        chunk_size = 1000
+        for k in range(0, len(updates), chunk_size):
+            chunk = updates[k:k+chunk_size]
+            body = {'data': chunk, 'valueInputOption': 'USER_ENTERED'}
+            try:
+                sheets_service.spreadsheets().values().batchUpdate(
+                    spreadsheetId=email_sheet_id, body=body
+                ).execute()
+            except Exception as e:
+                logger.error(f"Failed to sync updates chunk {k}: {e}")
+        logger.info("Sync: Updates complete.")
 
+    # Execute Appends
     if rows_to_append:
-        logger.info(f"Sync: Found {len(rows_to_append)} new candidates in Source. Appending to Dest...")
+        logger.info(f"Sync: Appending {len(rows_to_append)} new rows to Dest...")
         append_batch_to_sheet(sheets_service, email_sheet_id, rows_to_append, dest_sheet_name)
-    else:
-        logger.info("Sync: Dest sheet is up to date with Source.")
+    
+    if not updates and not rows_to_append:
+        logger.info("Sync: Dest sheet is fully synchronized with Source.")
 
     # 3. Process Step: Identify Rows needing JSON
     logger.info("Re-reading Dest sheet to identify pending tasks...")
