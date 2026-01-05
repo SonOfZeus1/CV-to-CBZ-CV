@@ -249,17 +249,27 @@ def main():
         source_rows = get_sheet_values(sheets_service, email_sheet_id, source_sheet_name, value_render_option='FORMULA')
     except HttpError as e:
         if e.resp.status == 400:
-            logger.error(f"Failed to read sheet '{source_sheet_name}'. It might not exist.")
+            logger.warning(f"Failed to read sheet '{source_sheet_name}'. Checking available sheets...")
             # List available sheets
             try:
                 sheet_metadata = sheets_service.spreadsheets().get(spreadsheetId=email_sheet_id).execute()
                 sheets = sheet_metadata.get('sheets', '')
                 sheet_names = [s.get("properties", {}).get("title") for s in sheets]
                 logger.info(f"Available Sheets: {sheet_names}")
-                logger.info("Please update EMAIL_SHEET_NAME in .env to match one of the above.")
+                
+                # Auto-Fix: Check for "Contacts" if we were looking for "Contact"
+                if source_sheet_name == "Contact" and "Contacts" in sheet_names:
+                    logger.info("Found 'Contacts' sheet. Switching source sheet name to 'Contacts'.")
+                    source_sheet_name = "Contacts"
+                    source_rows = get_sheet_values(sheets_service, email_sheet_id, source_sheet_name, value_render_option='FORMULA')
+                else:
+                    logger.error("Could not auto-correct sheet name. Please update EMAIL_SHEET_NAME in .env.")
+                    raise e
             except Exception as meta_err:
-                logger.error(f"Failed to list sheets: {meta_err}")
-        raise e
+                logger.error(f"Failed to list/recover sheets: {meta_err}")
+                raise e
+        else:
+            raise e
     
     logger.info(f"Reading Dest Sheet '{dest_sheet_name}'...")
     dest_rows = get_sheet_values(sheets_service, email_sheet_id, dest_sheet_name, value_render_option='FORMULA')
