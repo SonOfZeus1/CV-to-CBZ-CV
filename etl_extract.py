@@ -466,6 +466,7 @@ def main():
     logger.info(f"Processing {len(files_to_process)} files (Batch Limit: 1)...")
 
     report_buffer = []
+    files_to_move_on_success = []
 
     # --- PARALLEL EXECUTION START ---
     max_workers = 5
@@ -486,12 +487,9 @@ def main():
                 if success and report_row:
                     report_buffer.append(report_row)
                     
-                    # Move to Processed (using main thread's service, or create new one? Main thread is safe here)
-                    try:
-                        move_file(drive_service, f_item['id'], index_folder_id, processed_folder_id)
-                        logger.info(f"Moved {f_item['name']} to _Processed_JSON")
-                    except Exception as e:
-                        logger.error(f"Failed to move {f_item['name']} after processing: {e}")
+                    # Defer move until after Excel write
+                    files_to_move_on_success.append(f_item)
+                    logger.info(f"  -> Queued {f_item['name']} for move (pending Excel write)")
                 else:
                     logger.warning(f"Processing failed for {file_item['name']}")
                     
@@ -508,6 +506,15 @@ def main():
             # Email is at index 2 (Name, Surname, Email...)
             upsert_batch_to_sheet(sheets_service, email_sheet_id, report_buffer, sheet_name="Candidats", email_col_index=2)
             logger.info("Report flush successful.")
+            
+            # NOW move files
+            logger.info(f"Moving {len(files_to_move_on_success)} files to Processed folder...")
+            for f_item in files_to_move_on_success:
+                try:
+                    move_file(drive_service, f_item['id'], index_folder_id, processed_folder_id)
+                    logger.info(f"Moved {f_item['name']} to _Processed_JSON")
+                except Exception as e:
+                    logger.error(f"Failed to move {f_item['name']} after processing: {e}")
             
             # Clean up empty rows
             remove_empty_rows(sheets_service, email_sheet_id, "Candidats")
