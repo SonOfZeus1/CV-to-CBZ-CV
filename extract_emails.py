@@ -292,9 +292,10 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
             language = detect_language(text)
             
             # Extract Email
-            text_head = text[:2000]
-            email_pattern = r"[\w\.-]+@[\w\.-]+\.\w+"
-            emails = list(set(re.findall(email_pattern, text_head)))
+            # Extract Email
+            # Scan FULL text, not just the head, to avoid missing emails at the bottom
+            email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+            emails = list(set(re.findall(email_pattern, text)))
             email = select_best_email(emails, clean_filename)
             
             # Extract other info
