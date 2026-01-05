@@ -546,6 +546,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             
             if status == "DELETE":
                 continue
+            
+            # User Request: If Email is "OK", skip (manually marked as no email)
+            if email == "OK":
+                continue
                 
             needs_update = False
             priority = 0
@@ -553,9 +557,12 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             if not data['is_hyperlink']:
                 needs_update = True
                 priority = 3
-            elif status == "NON":
+            
+            # Priority 40: Failed Extraction (Email NOT FOUND or Empty) OR Status NON
+            elif status == "NON" or email == "" or email == "NOT FOUND":
                 needs_update = True
-                priority = 40 # Status "NON" (TOP PRIORITY - User Request)
+                priority = 40 # TOP PRIORITY
+            
             elif status == "":
                 # needs_update = True
                 # priority = 20 
@@ -564,10 +571,6 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 # Let's set needs_update=True but low priority if we want to fill it.
                 needs_update = True
                 priority = 1
-            elif email == "" or email == "NOT FOUND":
-                # needs_update = True
-                # priority = 1
-                pass
             
             elif not data.get('language'):
                 needs_update = True
