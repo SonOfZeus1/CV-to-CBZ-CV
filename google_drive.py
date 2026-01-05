@@ -53,10 +53,14 @@ def get_drive_service():
     creds, _ = google.auth.default(scopes=SCOPES)
     return build('drive', 'v3', credentials=creds)
 
-def list_files_in_folder(service, folder_id, order_by=None, page_size=1000, mime_types=None):
+def list_files_in_folder(service, folder_id, order_by=None, page_size=1000, mime_types=None, limit=None):
     """
     Lists files in a specific Google Drive folder.
     Returns a list of file metadata (id, name, webViewLink, modifiedTime).
+    
+    Args:
+        page_size: Number of results per API call (max 1000).
+        limit: Max total number of files to return. If None, returns all.
     """
     # Default to PDF and DOCX if no mime_types provided (Backward Compatibility)
     if mime_types is None:
@@ -98,18 +102,14 @@ def list_files_in_folder(service, folder_id, order_by=None, page_size=1000, mime
         files.extend(results.get('files', []))
         page_token = results.get('nextPageToken')
         
-        # If we have a limit (page_size < 1000) and we reached it, stop.
-        # Note: pageSize in API is per page. If we want a hard limit on total files, 
-        # we should check len(files). But for now, let's assume page_size is the batch we want 
-        # if we are doing one page. 
-        # Actually, if order_by is set, we usually want just the top N.
-        # So if we have enough files, break.
-        if len(files) >= page_size:
-            files = files[:page_size]
+        # Check Limit
+        if limit and len(files) >= limit:
+            files = files[:limit]
             break
             
         if not page_token:
             break
+            
     # Transform to expected format
     file_list = []
     for item in files:

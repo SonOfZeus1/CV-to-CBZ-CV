@@ -37,6 +37,12 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         logger.error(f"Thread failed to auth for {file_id}: {e}")
         return False, None, {'id': file_id, 'name': 'Unknown'}
 
+    # DEBUG: Check Auto-Recovery Args
+    if md_file_map:
+        logger.info(f"Thread received md_file_map with {len(md_file_map)} entries. Candidate: '{candidate_name}'")
+    else:
+        logger.warning(f"Thread received EMPTY md_file_map. Candidate: '{candidate_name}'")
+
     # Fetch File Metadata
     file_item = None
     try:
