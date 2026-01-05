@@ -216,12 +216,14 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
         row_index_to_update = data['index']
         existing_data = data
         
-        # Condition 1: Missing Email or Phone -> REMOVED (User Request)
-        # if not data['email'] or not data['phone'] or data['email'].upper() == "NOT FOUND":
-        #     should_full_process = True
-        
+        # Condition 1: Status "NON" (Email NOT FOUND) -> FORCE FULL PROCESS
+        # User Request: Retry extraction for these files to regenerate MD.
+        if data['status'].upper() == "NON" or data['email'].upper() == "NOT FOUND":
+             should_full_process = True
+             logger.info(f"Force Reprocessing for {clean_filename} (Status: NON/NOT FOUND)")
+
         # Condition 1.5: Missing Language -> Full Process (to detect language)
-        if not data.get('language'):
+        elif not data.get('language'):
              should_full_process = True
         
         elif not data.get('is_indexed'):
@@ -514,7 +516,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 priority = 3
             elif status == "NON":
                 needs_update = True
-                priority = 20 # Status "NON" (Second Priority)
+                priority = 40 # Status "NON" (TOP PRIORITY - User Request)
             elif status == "":
                 # needs_update = True
                 # priority = 20 
@@ -672,7 +674,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 if status == "DELETE":
                     continue
                 elif status == "NON":
-                    priority = 10 # Status "NON" (Third Priority) - Retry failed ones
+                    priority = 40 # Status "NON" (TOP PRIORITY - User Request)
                 elif status == "":
                     # priority = 1 # Empty status is now low priority or handled elsewhere?
                     # User didn't specify what to do with empty status now. 
