@@ -245,14 +245,12 @@ def main():
     logger.info("--- Starting Pipeline 2: EXTRACTION (Excel-Driven) ---")
 
     # 1. Configuration
-    json_output_folder_id = os.environ.get('JSON_OUTPUT_FOLDER_ID')
-    # Load Config
     # Load Config
     json_output_folder_id = os.getenv('JSON_OUTPUT_FOLDER_ID')
     email_sheet_id = os.getenv('EMAIL_SHEET_ID')
     source_sheet_name = os.getenv('EMAIL_SHEET_NAME', 'Contacts') # Default to 'Contacts' (Plural)
     dest_sheet_name = "Candidats"
-    source_folder_id = os.getenv('SOURCE_FOLDER_ID') # Parent folder for _cv_index_v2
+    source_folder_id = os.getenv('EMAIL_SOURCE_FOLDER_ID') # Parent folder for _cv_index_v2
     
     # Fallback for JSON Folder
     if not json_output_folder_id:
