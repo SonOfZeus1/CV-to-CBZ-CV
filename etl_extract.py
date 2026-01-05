@@ -215,26 +215,36 @@ def main():
 
     # 1. Configuration
     json_output_folder_id = os.environ.get('JSON_OUTPUT_FOLDER_ID')
-    if not json_output_folder_id:
-        # Fallback to CV_TO_JSON_FOLDER_ID if set, or error
-        json_output_folder_id = os.environ.get('CV_TO_JSON_FOLDER_ID')
-        if not json_output_folder_id:
-             logger.error("Missing JSON_OUTPUT_FOLDER_ID in .env")
-             return
-
-    email_sheet_id = os.environ.get('EMAIL_SHEET_ID')
-    source_sheet_name = os.environ.get('EMAIL_SHEET_NAME', 'Contact') # Default to Contact if not set
+    # Load Config
+    json_output_folder_id = os.getenv('JSON_OUTPUT_FOLDER_ID')
+    email_sheet_id = os.getenv('EMAIL_SHEET_ID')
+    source_sheet_name = os.getenv('EMAIL_SHEET_NAME', 'Contacts') # Default to 'Contacts' (Plural)
     dest_sheet_name = "Candidats"
+    
+    # Fallback for JSON Folder
+    if not json_output_folder_id:
+        json_output_folder_id = os.getenv('CV_TO_JSON_FOLDER_ID')
 
-    if not email_sheet_id:
-        logger.critical("EMAIL_SHEET_ID not set. Cannot run Excel-driven pipeline.")
+    if not json_output_folder_id or not email_sheet_id:
+        logger.error("Missing configuration. Please set JSON_OUTPUT_FOLDER_ID and EMAIL_SHEET_ID in .env")
         return
 
+    # Initialize Services
     try:
         drive_service = get_drive_service()
         sheets_service = get_sheets_service()
+        
+        # Log Service Account Email for Debugging
+        try:
+            about = drive_service.about().get(fields="user").execute()
+            sa_email = about.get('user', {}).get('emailAddress')
+            logger.info(f"Authenticated as: {sa_email}")
+            logger.info("Ensure this email has 'Editor' access to your Google Drive folder and Sheet.")
+        except Exception as e:
+            logger.warning(f"Could not determine Service Account email: {e}")
+            
     except Exception as e:
-        logger.critical(f"Auth Error: {e}")
+        logger.error(f"Failed to initialize Google Services: {e}")
         return
 
     # Ensure Headers in Dest Sheet
