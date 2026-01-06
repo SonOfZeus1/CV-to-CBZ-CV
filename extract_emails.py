@@ -130,29 +130,57 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     
     expected_header = ["Filename", "Email", "Phone", "Status", "Emplacement", "Language", "Lien Index"]
     
+    # RELAX VALIDATION for Status Column (D/Index 3)
+    # Allow "Oui -X" by setting strict=False
+    try:
+        status_options = ["En attente", "A traiter", "Oui", "Non", "Delete"]
+        # Use strict=False to allow ANY value (including "Oui -5", "Extraire", etc)
+        # while still providing a dropdown for common actions.
+        set_column_validation(sheets_service, sheet_id, sheet_name, 3, status_options) # Note: set_column_validation needs update to support strict kwarg if not present, but default implementation usually implies strict?
+        # Let's check set_column_validation implementation. It has "strict": False in my previous read?
+        # "strict": False # Allow other values like "EXTRACTION_EN_COURS"
+        # Yes, it is hardcoded to False in google_drive.py.
+        # But user logs say "la valeur d'entrée doit faire partie des éléments de la liste spécifiée".
+        # This means strict WAS True on the sheet. My set_column_validation call should fix it.
+    except Exception as e:
+        logger.warning(f"Could not update validation for Status column: {e}")
+
     if not rows:
         # Sheet is empty, write header
         clear_and_write_sheet(sheets_service, sheet_id, [expected_header], sheet_name)
         format_header_row(sheets_service, sheet_id, sheet_name)
         return
-
-    header = rows[0]
-    data = rows[1:]
     
-    # Check if header matches expected (loose check)
-    if header != expected_header:
-        if "Email" not in header:
-            data = rows # All rows are data
-            header = expected_header
-        else:
-            # If header exists but is missing columns, we might want to update it?
-            pass
+    # Smart Header Detection
+    first_row = rows[0]
+    is_header = True
+    
+    # Check if first row looks like data
+    if len(first_row) > 1 and '@' in str(first_row[1]) and "Email" not in str(first_row[1]):
+        is_header = False
+        logger.info("First row looks like data. Treating as Data.")
+    elif first_row == expected_header:
+        is_header = True
+    elif "Email" in first_row:
+        is_header = True
+    else:
+        is_header = not (len(first_row) > 1 and '@' in str(first_row[1]))
+
+    if is_header:
+        header = rows[0]
+        data = rows[1:]
+        offset = 1
+    else:
+        header = [] 
+        data = rows
+        offset = 0
+        
     # 1. Identify rows to delete
     rows_to_delete = []
     
     # Iterate through data to find rows marked for deletion
     for i, row in enumerate(data):
-        row_index = i + 1 # 0-based index in sheet (skipping header)
+        row_index = i + offset # Correct 0-based index in sheet
         
         # Ensure row has enough columns
         if len(row) < 4:
@@ -161,11 +189,20 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
         # Check for "Delete" status
         status = str(row[3]).strip()
         if status.lower() == "delete":
+            logger.info(f"Marking Row {row_index+1} for deletion. Content: {row[:4]}")
+            
+            # PARANOIA CHECK: Verify index alignment
+            if row_index < len(rows):
+                check_row = rows[row_index]
+                if check_row != row:
+                    logger.error(f"CRITICAL INDEX MISMATCH! Calculated Row {row_index+1} content ({check_row[:2]}) does not match Iterator content ({row[:2]}). Aborting delete for this row.")
+                    continue
+            
             rows_to_delete.append(row_index)
             continue
             
     if rows_to_delete:
-        logger.info(f"Deleting {len(rows_to_delete)} rows marked 'Delete'...")
+        logger.info(f"Deleting {len(rows_to_delete)} rows...")
         delete_rows(sheets_service, sheet_id, rows_to_delete, sheet_name)
     else:
         logger.info("No rows marked for deletion.")

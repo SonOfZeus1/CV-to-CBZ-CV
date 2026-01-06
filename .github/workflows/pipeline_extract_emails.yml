@@ -2,8 +2,7 @@ name: Pipeline - Extract Emails
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '* * * * *'
+
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
