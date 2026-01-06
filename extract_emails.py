@@ -136,12 +136,7 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
         status_options = ["En attente", "A traiter", "Oui", "Non", "Delete"]
         # Use strict=False to allow ANY value (including "Oui -5", "Extraire", etc)
         # while still providing a dropdown for common actions.
-        set_column_validation(sheets_service, sheet_id, sheet_name, 3, status_options) # Note: set_column_validation needs update to support strict kwarg if not present, but default implementation usually implies strict?
-        # Let's check set_column_validation implementation. It has "strict": False in my previous read?
-        # "strict": False # Allow other values like "EXTRACTION_EN_COURS"
-        # Yes, it is hardcoded to False in google_drive.py.
-        # But user logs say "la valeur d'entrée doit faire partie des éléments de la liste spécifiée".
-        # This means strict WAS True on the sheet. My set_column_validation call should fix it.
+        set_column_validation(sheets_service, sheet_id, sheet_name, 3, status_options, strict=False) 
     except Exception as e:
         logger.warning(f"Could not update validation for Status column: {e}")
 
@@ -346,7 +341,8 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
             email_val = email if email else "NOT FOUND"
             phone_val = phone
             
-            # Status is now "Oui" (Touched) for ANY processed file
+            # Status Logic: ALWAYS "Oui" if processed by pipeline.
+            # Independent of whether email was found or not.
             status_val = "Oui" 
             
             # PRESERVE EXISTING DATA if available and valid
@@ -354,6 +350,9 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
                 # If we have an existing valid email, keep it
                 if existing_data['email'] and existing_data['email'] != "NOT FOUND":
                     email_val = existing_data['email']
+                    # status_val = "Oui" # Already set above
+
+
                     # status_val = existing_data['status'] # REMOVED: Always set to Oui (Touched)
                 
                 # If we have an existing phone, keep it

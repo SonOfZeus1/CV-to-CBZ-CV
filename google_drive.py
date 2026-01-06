@@ -526,11 +526,12 @@ def fetch_actionable_cvs(service, sheet_id, sheet_name="Feuille 1", target_statu
                     
     return actionable_cvs
 
-def set_column_validation(service, sheet_id, sheet_name, col_index, options):
+def set_column_validation(service, sheet_id, sheet_name, col_index, options, strict=False):
     """
     Sets data validation (dropdown) for a specific column.
     col_index: 0-based index (e.g., 3 for Column D).
     options: List of strings for the dropdown.
+    strict: If True, rejects input outside of options. If False, shows warning.
     """
     # Get sheetId
     sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
@@ -559,7 +560,7 @@ def set_column_validation(service, sheet_id, sheet_name, col_index, options):
                         "values": [{"userEnteredValue": opt} for opt in options]
                     },
                     "showCustomUi": True,
-                    "strict": False # Allow other values like "EXTRACTION_EN_COURS"
+                    "strict": strict # Allow control over strictness
                 }
             }
         }
@@ -575,9 +576,10 @@ def set_column_validation(service, sheet_id, sheet_name, col_index, options):
             spreadsheetId=sheet_id,
             body=body
         ).execute())
-        print(f"Set validation for column index {col_index} with options {options}")
+        print(f"Set validation for column index {col_index} with options {options} (Strict: {strict})")
     except Exception as e:
         print(f"Warning: Failed to set validation: {e}")
+
 
 def upsert_batch_to_sheet(service, sheet_id, rows, sheet_name="Candidats", email_col_index=2):
     """
