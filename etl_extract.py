@@ -25,7 +25,7 @@ from report_generator import format_candidate_row
 DOWNLOADS_DIR = "downloads"
 JSON_OUTPUT_DIR = "output_jsons"
 
-def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0, languages_source="", md_file_map=None, candidate_name="", pdf_file_id=""):
+def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0, languages_source="", md_file_map=None, candidate_name="", pdf_file_id="", email_source="", phone_source=""):
     """
     Process a single MD file by ID in a separate thread.
     Fetches metadata, downloads, extracts, and returns report row.
@@ -152,6 +152,12 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         json_link_formula = create_hyperlink_formula(json_link, "Voir JSON")
 
         try:
+            # Force Email/Phone Source if available (Before Formatting)
+            if email_source:
+                parsed_data.setdefault('basics', {})['email'] = email_source
+            if phone_source:
+                parsed_data.setdefault('basics', {})['phone'] = phone_source
+
             report_row = format_candidate_row(
                 parsed_data, 
                 md_link, 
@@ -380,7 +386,15 @@ def main():
 
     # Ensure Headers in Dest Sheet
     try:
-        ensure_report_headers(sheets_service, email_sheet_id, dest_sheet_name)
+        custom_headers = [
+            "Prénom", "Nom", 
+            '="Email (" & NB.SI(C2:C; "*@*") & ") | NOT FOUND (" & NB.SI(C2:C; "NOT FOUND") & ")"', # Dynamic Email Header
+            '="Phone (" & NBVAL(D2:D) & ") | VIDE (" & NB.VIDE(D2:D) & ")"', # Dynamic Phone Header
+            "Adresse", 
+            "Langues", "Années Expérience", "Dernier Titre", 
+            "Dernière Localisation", "Languages", "Action", "Lien MD", "Lien JSON", "Lien CV"
+        ]
+        ensure_report_headers(sheets_service, email_sheet_id, dest_sheet_name, custom_headers=custom_headers)
     except Exception as e:
         logger.error(f"Failed to ensure headers: {e}")
 
@@ -437,6 +451,8 @@ def main():
             # Col G (6) = MD Link
             
             src_cv = src_row[0] if len(src_row) > 0 else ""
+            src_email = src_row[1] if len(src_row) > 1 else "" # Sync Email
+            src_phone = src_row[2] if len(src_row) > 2 else "" # Sync Phone
             src_lang = src_row[5] if len(src_row) > 5 else "" # Col F is Index 5
             src_md = src_row[6] if len(src_row) > 6 else ""
             
@@ -445,17 +461,32 @@ def main():
                 dst_row = dest_rows[i]
                 
                 # Dest Indices (New Layout)
+                # Col C (2) = Email
+                # Col D (3) = Phone
                 # Col J (9) = Languages (Source)
                 # Col L (11) = MD Link
                 # Col N (13) = CV Link
                 
+                dst_email = dst_row[2] if len(dst_row) > 2 else ""
+                dst_phone = dst_row[3] if len(dst_row) > 3 else ""
                 dst_lang = dst_row[9] if len(dst_row) > 9 else ""
                 dst_md = dst_row[11] if len(dst_row) > 11 else ""
                 dst_cv = dst_row[13] if len(dst_row) > 13 else ""
                 
                 # Compare
-                if (src_cv != dst_cv) or (src_lang != dst_lang) or (src_md != dst_md):
+                if (src_cv != dst_cv) or (src_lang != dst_lang) or (src_md != dst_md) or (src_email != dst_email) or (src_phone != dst_phone):
                     # Update Needed!
+                    
+                    # Update Email (C)
+                    updates.append({
+                        'range': f"'{dest_sheet_name}'!C{i+1}",
+                        'values': [[src_email]]
+                    })
+                    # Update Phone (D)
+                    updates.append({
+                        'range': f"'{dest_sheet_name}'!D{i+1}",
+                        'values': [[src_phone]]
+                    })
                     # Update Languages (J)
                     updates.append({
                         'range': f"'{dest_sheet_name}'!J{i+1}",
@@ -475,6 +506,8 @@ def main():
                 # Dest row does not exist -> Append
                 # Create skeleton row
                 new_row = [""] * 14
+                new_row[2] = src_email
+                new_row[3] = src_phone
                 new_row[9] = src_lang
                 new_row[11] = src_md
                 new_row[13] = src_cv
@@ -554,6 +587,10 @@ def main():
                         cv_link = row[13] if len(row) > 13 else ""
                         languages_source = row[9] if len(row) > 9 else "" # Preserve synced value
                         
+                        # Extract Email/Phone (Already synced, but need for processing?)
+                        email_source = row[2] if len(row) > 2 else ""
+                        phone_source = row[3] if len(row) > 3 else ""
+
                         # Extract Name for Auto-Recovery (Secondary)
                         first_name = row[0] if len(row) > 0 else ""
                         last_name = row[1] if len(row) > 1 else ""
@@ -573,6 +610,8 @@ def main():
                             'file_id': file_id, # The (broken) MD File ID
                             'cv_link': cv_link,
                             'languages_source': languages_source,
+                            'email_source': email_source,
+                            'phone_source': phone_source,
                             'candidate_name': candidate_name,
                             'pdf_file_id': pdf_file_id, # The Original PDF ID (Key for lookup)
                             'row_index': i 
@@ -602,7 +641,7 @@ def main():
     max_workers = 5
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_task = {
-            executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process), t['languages_source'], md_file_map, t['candidate_name'], t['pdf_file_id']): t
+            executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process), t['languages_source'], md_file_map, t['candidate_name'], t['pdf_file_id'], t['email_source'], t['phone_source']): t
             for i, t in enumerate(tasks_to_process)
         }
         

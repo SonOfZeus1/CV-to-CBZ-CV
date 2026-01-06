@@ -693,15 +693,16 @@ def append_batch_to_sheet(service, sheet_id, rows, sheet_name="Feuille 1", retri
     except Exception as e:
         print(f"Error appending batch: {e}")
 
-def ensure_report_headers(service, sheet_id, sheet_name):
+def ensure_report_headers(service, sheet_id, sheet_name, custom_headers=None):
     """
     Checks if the report sheet exists and has headers. 
     If it doesn't exist, creates it and writes headers.
     If it exists but is empty, writes headers.
+    Allow overriding default headers with custom_headers list.
     """
     print(f"Checking headers for sheet '{sheet_name}'...")
     
-    headers = [
+    headers = custom_headers if custom_headers else [
         "Prénom", "Nom", "Email", "Téléphone", "Adresse", 
         "Langues", "Années Expérience", "Dernier Titre", 
         "Dernière Localisation", "Languages", "Action", "Lien MD", "Lien JSON", "Lien CV"
