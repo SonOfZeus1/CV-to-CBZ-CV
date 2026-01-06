@@ -610,10 +610,16 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 needs_update = True
                 priority = 3
             
-            # Priority 40: Failed Extraction (Email NOT FOUND or Empty) OR Status NON
-            elif status == "NON" or email == "" or email == "NOT FOUND":
+            # Priority 50: Failed Extraction (Email NOT FOUND in Col B) - USER REQUEST
+            elif email == "NOT FOUND":
                 needs_update = True
-                priority = 40 # TOP PRIORITY
+                priority = 50 # HIGHEST PRIORITY
+                
+            # Priority 40: Status NON or Empty Email
+            elif status == "NON" or email == "":
+                needs_update = True
+                priority = 40
+
             
             elif status == "":
                 # needs_update = True
@@ -767,16 +773,12 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 priority = 0
                 if status == "DELETE":
                     continue
-                elif status == "NON":
-                    priority = 40 # Status "NON" (TOP PRIORITY - User Request)
-                elif status == "":
-                    # priority = 1 # Empty status is now low priority or handled elsewhere?
-                    # User didn't specify what to do with empty status now. 
-                    # Let's leave it as default (0) or low priority.
-                    pass
-                elif email == "" or email == "NOT FOUND":
-                    # priority = 1
-                    pass
+                elif email == "NOT FOUND":
+                    priority = 50 # HIGHEST PRIORITY (User Request)
+                
+                elif status == "NON" or email == "":
+                    priority = 40
+
                 
                 elif not data.get('language'):
                     priority = 1
