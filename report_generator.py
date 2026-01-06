@@ -101,22 +101,10 @@ def get_latest_experience(experiences: List[Dict[str, Any]]) -> Dict[str, Any]:
     sorted_exps = sorted(experiences, key=sort_key, reverse=True)
     return sorted_exps[0]
 
-def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: str = "Processed", json_link: str = "", cv_link: str = "") -> List[str]:
+def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: str = "Processed", json_link: str = "", cv_link: str = "", direct_data: Dict[str, Any] = None) -> List[str]:
     """
     Formats the extracted JSON data into a list of strings for the Excel row.
-    Columns: 
-    1. First Name
-    2. Last Name
-    3. Email
-    4. Phone
-    5. Address
-    6. Languages
-    7. Total Experience (Years)
-    8. Latest Job Title
-    9. Latest Location
-    10. MD Source Link
-    11. Action
-    12. Emplacement
+    Supports Dual Extraction Formatting for Experience and Title.
     """
     # The JSON structure has changed. It now uses 'basics' for contact info.
     basics = json_data.get('basics', {})
@@ -148,13 +136,21 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
     else:
         languages = str(langs)
 
-    # 7. Total Experience
-    # Use the pre-calculated value from JSON if available, otherwise calculate
-    total_exp = basics.get('total_experience')
-    if total_exp is None:
-        total_exp = calculate_total_experience(experiences)
+    # 7. Total Experience (Dual Output)
+    # Val 1: MD/JSON (Llama)
+    total_exp_1 = basics.get('total_experience')
+    if total_exp_1 is None:
+        total_exp_1 = calculate_total_experience(experiences)
+    
+    # Val 2: Direct/CV (Mistral)
+    total_exp_2 = "N/A"
+    if direct_data:
+        total_exp_2 = direct_data.get('years_experience', "N/A")
 
-    # 8-9. Latest Role
+    # Format Col G
+    total_exp_final = f"1. {total_exp_1}-MD-llama-3.3-70b\n2. {total_exp_2}-CV-mistral-small-3.1-24b"
+
+    # 8. Latest Role (Dual Output)
     # Check is_cv flag
     is_cv = json_data.get('is_cv', True)
     
@@ -162,9 +158,18 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
         latest_title = "NON-CV"
         latest_location = ""
     else:
+        # Val 1: MD/JSON (Llama)
         latest_exp = get_latest_experience(experiences)
-        latest_title = latest_exp.get('job_title', '')
+        title_1 = latest_exp.get('job_title', 'N/A')
         latest_location = latest_exp.get('location', '')
+
+        # Val 2: Direct/CV (Mistral)
+        title_2 = "N/A"
+        if direct_data:
+            title_2 = direct_data.get('latest_job_title', "N/A")
+            
+        # Format Col H
+        latest_title = f"1. {title_1}-MD-llama-3.3-70b\n2. {title_2}-CV-mistral-small-3.1-24b"
 
     return [
         first_name,
@@ -173,8 +178,8 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
         phone,
         address,
         languages,
-        total_exp,
-        latest_title,
+        total_exp_final, # Col G
+        latest_title,    # Col H
         latest_location,
         emplacement, # Emplacement Column (Now Index 9)
         "", # Action Column (Empty by default)

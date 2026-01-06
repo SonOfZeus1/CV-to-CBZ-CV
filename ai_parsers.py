@@ -144,3 +144,45 @@ def parse_cv_full_text(text: str) -> Dict[str, Any]:
     )
     
     return call_ai(prompt, FULL_CV_EXTRACTION_SYSTEM_PROMPT, expect_json=True)
+
+# --- DIRECT METRICS EXTRACTION (TEXT-BASED / MISTRAL) ---
+DIRECT_METRICS_SYSTEM_PROMPT = """
+You are an expert HR Analyst. Your goal is to extract TWO specific metrics from the CV text.
+Output STRICT JSON.
+
+METRICS TO EXTRACT:
+1. "years_experience": The TOTAL number of years of professional experience. 
+   - Look for explicit statements like "10 years of experience".
+   - If not found, estimating from the date range of the first relevant job to now.
+   - Return a FLOAT (e.g., 5.5).
+2. "latest_job_title": The Most Recent or Current Job Title.
+   - Look for the role with "Present", "Current", or the latest end date.
+
+JSON SCHEMA:
+{
+  "years_experience": float,
+  "latest_job_title": "string"
+}
+"""
+
+DIRECT_METRICS_USER_PROMPT = """
+Analyze this CV text and extract the years of experience and latest job title.
+
+CV TEXT:
+\"\"\"{text}\"\"\"
+"""
+
+def parse_cv_direct_metrics(text: str, model: str = None) -> Dict[str, Any]:
+    """
+    Parses specific metrics directly from text, optionally specifying a model.
+    """
+    if not text:
+        return {}
+    
+    prompt = DIRECT_METRICS_USER_PROMPT.format(text=text)
+    # Pass model to call_ai if supported, otherwise rely on default or modify call_ai to accept it?
+    # ai_client.call_ai needs to be updated or we check if it accepts kwargs/model.
+    # checking ai_client.py... it does NOT accept model in signature shown previously.
+    # I will need to update ai_client.py first or pass it if I missed it.
+    # Assuming I will update ai_client.py next.
+    return call_ai(prompt, DIRECT_METRICS_SYSTEM_PROMPT, expect_json=True, model=model)

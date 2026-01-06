@@ -91,9 +91,10 @@ class AIClient:
             cls._instance = cls()
         return cls._instance
 
-    def call_ai(self, prompt: str, system_prompt: str = "You are a helpful assistant.", expect_json: bool = False) -> Union[str, Dict[str, Any]]:
+    def call_ai(self, prompt: str, system_prompt: str = "You are a helpful assistant.", expect_json: bool = False, model: str = None) -> Union[str, Dict[str, Any]]:
         """
         Generic function to call the AI with Multi-Model Fallback via OpenRouter.
+        Supports optional 'model' override.
         """
         if not self.client:
             logger.error("AI call attempted but client is not initialized (missing key).")
@@ -107,21 +108,24 @@ class AIClient:
         if expect_json:
              messages.append({"role": "system", "content": "IMPORTANT: Output ONLY valid JSON. No markdown, no explanations."})
 
-        logger.info(f"Calling AI (JSON={expect_json}). Prompt length: {len(prompt)}")
+        logger.info(f"Calling AI (JSON={expect_json}, Model={model or 'Default'}). Prompt length: {len(prompt)}")
         
         start_time = time.time()
 
+        # Use provided model or iterate through defaults (Priority Order)
+        models_to_try = [model] if model else MODELS
+
         # Iterate through models in priority order
-        for model in MODELS:
+        for model_name in models_to_try:
             # Rate Limit Check
-            rate_limiter.wait_for_token(model)
+            rate_limiter.wait_for_token(model_name)
             
-            logger.info(f"Trying model: {model}")
+            logger.info(f"Trying model: {model_name}")
             
             for attempt in range(MAX_RETRIES_PER_MODEL):
                 try:
                     completion = self.client.chat.completions.create(
-                        model=model,
+                        model=model_name,
                         messages=messages,
                         temperature=0.1 if expect_json else 0.3,
                         timeout=180, # 3 minutes timeout (Fail fast)
@@ -133,7 +137,7 @@ class AIClient:
                     
                     content = completion.choices[0].message.content
                     duration = time.time() - start_time
-                    logger.info(f"AI Response received from {model} in {duration:.2f}s. Length: {len(content)}")
+                    logger.info(f"AI Response received from {model_name} in {duration:.2f}s. Length: {len(content)}")
 
                     if expect_json:
                         try:
@@ -148,13 +152,13 @@ class AIClient:
                             
                             return json.loads(cleaned_content)
                         except json.JSONDecodeError:
-                            logger.error(f"Failed to parse JSON from AI response ({model}): {content[:100]}...")
+                            logger.error(f"Failed to parse JSON from AI response ({model_name}): {content[:100]}...")
                             if attempt < MAX_RETRIES_PER_MODEL - 1:
                                 logger.info("Retrying same model...")
                                 continue
                             else:
                                 # If JSON parsing fails repeatedly on this model, try next model
-                                logger.warning(f"JSON parsing failed for {model}, switching to next model...")
+                                logger.warning(f"JSON parsing failed for {model_name}, switching to next model...")
                                 break 
                     
                     return content
@@ -163,25 +167,25 @@ class AIClient:
                     error_str = str(e).lower()
                     # Check for Rate Limit (429)
                     if "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
-                        logger.warning(f"Rate Limit hit for {model}. Switching to next model immediately...")
+                        logger.warning(f"Rate Limit hit for {model_name}. Switching to next model immediately...")
                         break # Break inner loop -> Try next model in outer loop
                     
-                    logger.error(f"AI Call failed for {model} (Attempt {attempt+1}/{MAX_RETRIES_PER_MODEL}): {e}")
+                    logger.error(f"AI Call failed for {model_name} (Attempt {attempt+1}/{MAX_RETRIES_PER_MODEL}): {e}")
                     
                     if attempt < MAX_RETRIES_PER_MODEL - 1:
                         # Exponential backoff for non-rate-limit errors
                         sleep_time = 2 ** (attempt + 1)
-                        logger.info(f"Retrying {model} in {sleep_time} seconds...")
+                        logger.info(f"Retrying {model_name} in {sleep_time} seconds...")
                         time.sleep(sleep_time)
                     else:
                         # If we exhausted retries for this model (e.g. 500 error), try next model
-                        logger.warning(f"Model {model} failed repeatedly. Switching to next model...")
+                        logger.warning(f"Model {model_name} failed repeatedly. Switching to next model...")
                         break
         
         logger.error("All models failed.")
         return {} if expect_json else ""
 
 # Global helper function
-def call_ai(prompt: str, system_prompt: str = "", expect_json: bool = False) -> Union[str, Dict[str, Any]]:
+def call_ai(prompt: str, system_prompt: str = "", expect_json: bool = False, model: str = None) -> Union[str, Dict[str, Any]]:
     client = AIClient.get_instance()
-    return client.call_ai(prompt, system_prompt, expect_json)
+    return client.call_ai(prompt, system_prompt, expect_json, model)

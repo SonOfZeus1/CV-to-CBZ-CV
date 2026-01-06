@@ -19,6 +19,7 @@ from google_drive import (
     remove_empty_rows, remove_duplicates_by_column, create_hyperlink_formula, get_sheet_values
 )
 from parsers import parse_cv_from_text
+from ai_parsers import parse_cv_direct_metrics # New function for direct extraction
 from report_generator import format_candidate_row
 
 # Configuration
@@ -142,6 +143,16 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         
         logger.info(f"SUCCESS: Extracted {file_name} -> {json_filename} ({json_link})")
         
+        # --- NEW: Direct Metrics Extraction (Source 2) ---
+        direct_metrics = {}
+        try:
+            logger.info(f"Direct Extraction (Source 2) for {file_name}...")
+            # Use Mistral Small for this specific task
+            direct_metrics = parse_cv_direct_metrics(body_text, model="mistralai/mistral-small-3.1-24b-instruct:free")
+            logger.info(f"Direct Metrics: {direct_metrics}")
+        except Exception as e:
+            logger.error(f"Direct Metrics Extraction Failed: {e}")
+
         # 7. Generate Report Row
         raw_link = f"https://drive.google.com/file/d/{file_id}/view"
         md_link = create_hyperlink_formula(raw_link, file_name)
@@ -163,7 +174,8 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                 md_link, 
                 emplacement=languages_source, # Use the source language value
                 json_link=json_link_formula,
-                cv_link=cv_link
+                cv_link=cv_link,
+                direct_data=direct_metrics # Pass Source 2 Data
             )
             return True, report_row, file_item
         except Exception as e:
