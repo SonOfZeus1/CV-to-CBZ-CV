@@ -67,7 +67,21 @@ def extract_text_from_docx(docx_path: str) -> str:
     except Exception as e:
         logger.error(f"Error reading DOCX {docx_path}: {e}")
         return ""
-        
+    
+    # 4. Extract Hyperlinks (mailto:)
+    # Emails are often hidden in "Contact Me" links
+    try:
+        rels = doc.part.rels
+        for rel in rels.values():
+            if "hyperlink" in rel.reltype:
+                target = rel.target_ref
+                if target.lower().startswith("mailto:"):
+                    email = target.split(":", 1)[1]
+                    # Append it to text to ensure regex catches it
+                    text.append(f" [Hidden Email: {email}] ")
+    except Exception as e:
+        logger.warning(f"Could not extract hyperlinks from DOCX {docx_path}: {e}")
+
     return "\n".join(text)
 
 def heuristic_parse_contact(text: str) -> dict:
