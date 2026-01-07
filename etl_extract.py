@@ -46,7 +46,6 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
 
     # Fetch File Metadata
     file_item = None
-    json_link = "" # Initialize to avoid UnboundLocalError
     try:
         file_item = drive_service.files().get(fileId=file_id, fields='id, name', supportsAllDrives=True).execute()
         file_name = file_item['name']
@@ -122,72 +121,65 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
             except Exception as e:
                 logger.warning(f"Failed to parse frontmatter for {file_name}: {e}")
         
-        # 4. Parse (AI Extraction) - DISABLED (User Request: 2 Requests only, no JSON upload)
-        # parsed_data = parse_cv_from_text(body_text, file_name, metadata=metadata)
+        # 4. Parse (AI Extraction)
+        parsed_data = parse_cv_from_text(body_text, file_name, metadata=metadata)
         
-        # if not parsed_data:
-        #     logger.error(f"Failed to parse {file_name}")
-        #     return False, None, file_item
-
-        # 5. Save JSON Locally - DISABLED
-        # ...
-        
-        # 6. Upload JSON to Drive - DISABLED
-        # json_file_id, json_link = upload_file_to_folder(drive_service, json_output_path, json_output_folder_id)
-        
-        # logger.info(f"SUCCESS: Extracted {file_name} -> {json_filename} ({json_link})")
-        
-        # --- NEW: Direct Metrics Extraction (Source 2 - Multi-Model) ---
-        direct_metrics = {}
-        # We need to construct parsed_data from this result
-        parsed_data = {"basics": {}, "is_cv": True} 
-        
-        try:
-            logger.info(f"Direct Extraction (Multi-Model) for {file_name}...")
-            
-            # 1. Extract Text from Source PDF (for better accuracy than MD)
-            # Helper to find source PDF ID
-            source_pdf_id = pdf_file_id 
-            if not source_pdf_id and candidate_name and md_file_map:
-                # Try to reverse lookup? No, we need the PDF ID passed in.
-                pass
-
-            pdf_text = body_text # Default fallback
-            
-            if source_pdf_id:
-                try:
-                    # Download PDF
-                    pdf_local_path = download_file(drive_service, source_pdf_id, f"temp_{source_pdf_id}.pdf", DOWNLOADS_DIR)
-                    if pdf_local_path:
-                        from simple_parsers import extract_text_from_pdf
-                        pdf_text, _ = extract_text_from_pdf(pdf_local_path)
-                        logger.info(f"Successfully extracted text from Source PDF ({len(pdf_text)} chars).")
-                        # Cleanup
-                        if os.path.exists(pdf_local_path):
-                            os.remove(pdf_local_path)
-                except Exception as pdf_e:
-                    logger.warning(f"Failed to download/read Source PDF: {pdf_e}. Falling back to MD text.")
-            
-            # 2. Call Multi-Model Parser (Llama + Mistral)
-            from ai_parsers import parse_cv_metrics_multi_model
-            direct_metrics = parse_cv_metrics_multi_model(pdf_text)
-            logger.info(f"Direct Metrics: {direct_metrics}")
-            
-            # Map Direct Metrics to 'parsed_data' structure for the report generator
-            parsed_data['basics']['name'] = f"{direct_metrics.get('first_name', '')} {direct_metrics.get('last_name', '')}".strip()
-            parsed_data['basics']['address'] = direct_metrics.get('address', '')
-            parsed_data['basics']['email'] = email_source # Use source if available, will be overridden later
-            parsed_data['basics']['phone'] = phone_source # Use source if available
-            
-            # Store Location for report generator
-            # We can put it in 'experience'->latest or just handle it in direct_data pass
-            # report_generator uses 'experiences' list for location fallback. 
-            # We should inject a dummy experience to hold the location if needed, 
-            # OR better, pass it via direct_data which IS passed to format_candidate_row.
-            
-        except Exception as e:
-            logger.error(f"Direct Metrics Extraction Failed: {e}")
+        if not parsed_data:
+            logger.error(f"Failed to parse {file_name}")
             return False, None, file_item
+
+        # 5. Save JSON Locally
+        base_name = os.path.splitext(file_name)[0]
+        json_filename = f"{base_name}_extracted.json"
+        if not os.path.exists(JSON_OUTPUT_DIR):
+            os.makedirs(JSON_OUTPUT_DIR)
+        json_output_path = os.path.join(JSON_OUTPUT_DIR, json_filename)
+        
+        with open(json_output_path, 'w', encoding='utf-8') as f:
+            json.dump(parsed_data, f, ensure_ascii=False, indent=4)
+            
+        # 6. Upload JSON to Drive
+        json_file_id, json_link = upload_file_to_folder(drive_service, json_output_path, json_output_folder_id)
+        
+        logger.info(f"SUCCESS: Extracted {file_name} -> {json_filename} ({json_link})")
+        
+        # --- Logic: Conditional Experience Extraction ---
+        # User Rule: 
+        # 1. Use "Declared Experience" from Request 1 (Llama) if present.
+        # 2. If NOT present, trigger Request 2 (Gemini) to calculate it.
+        # 3. Request 1 populates everything else (Title, etc.)
+        
+        direct_metrics = {}
+        declared_exp = parsed_data.get("total_experience_declared")
+        
+        if declared_exp and str(declared_exp).lower() not in ["null", "none", "", "n/a"]:
+            logger.info(f"Experience Explicitly Declared in Request 1: {declared_exp}")
+            direct_metrics["years_experience"] = declared_exp
+            # Title comes from parsed_data['experiences']
+        else:
+            logger.info("No explicit experience declared. Triggering Request 2 (Calculated)...")
+            try:
+                # 1. Prepare Text (Source PDF Preferred)
+                source_pdf_id = pdf_file_id 
+                target_text = body_text # Default
+
+                if source_pdf_id:
+                     try:
+                        pdf_path = download_file(drive_service, source_pdf_id, f"temp_{source_pdf_id}.pdf", DOWNLOADS_DIR)
+                        if pdf_path:
+                            from simple_parsers import extract_text_from_pdf
+                            target_text, _ = extract_text_from_pdf(pdf_path)
+                            if os.path.exists(pdf_path): os.remove(pdf_path)
+                     except Exception:
+                        pass # Fallback to body_text
+
+                # 2. Call Gemini for Calculation
+                # Use Gemini 2.0 Flash (Free, Fast, Smart)
+                parsed_metrics = parse_cv_direct_metrics(target_text, model="google/gemini-2.0-flash-exp:free")
+                direct_metrics["years_experience"] = parsed_metrics.get("years_experience")
+                
+            except Exception as e:
+                logger.error(f"Request 2 Failed: {e}")
 
         # 7. Generate Report Row
         raw_link = f"https://drive.google.com/file/d/{file_id}/view"
@@ -679,7 +671,7 @@ def main():
     logger.info(f"Found {len(tasks)} rows needing processing (Missing JSON or 'Retraiter').")
     
     # Batch Limit
-    batch_limit = 3 # Increased to 3 as requested
+    batch_limit = 1 # Decreased to 1 as requested
     tasks_to_process = tasks[:batch_limit]
     logger.info(f"Processing {len(tasks_to_process)} tasks (Batch Limit: {batch_limit})...")
 

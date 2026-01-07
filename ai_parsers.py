@@ -29,6 +29,7 @@ CRITICAL RULES:
 JSON SCHEMA:
 {
   "is_cv": boolean,
+  "total_experience_declared": "string or null (e.g. '10 ans', '5+ years' FOUND explicitly in intro)",
   "contact_info": {
     "first_name": "...",
     "last_name": "...",
@@ -37,8 +38,13 @@ JSON SCHEMA:
     "address": "...",
     "languages": ["French", "English"]
   },
-  "summary": "...",
-  "experiences": [
+  "education": [
+    {
+      "degree": "...",
+      "school": "...",
+      "year": "..."
+    }
+  ]
     {
       "job_title": "...",
       "company": "...",
@@ -146,39 +152,26 @@ def parse_cv_full_text(text: str) -> Dict[str, Any]:
     return call_ai(prompt, FULL_CV_EXTRACTION_SYSTEM_PROMPT, expect_json=True)
 
 # --- DIRECT METRICS EXTRACTION (TEXT-BASED / MISTRAL) ---
-# --- DIRECT METRICS EXTRACTION (TEXT-BASED / MULTI-MODEL) ---
 DIRECT_METRICS_SYSTEM_PROMPT = """
-You are an expert HR Analyst. Your goal is to extract structured data from the CV text.
+You are an expert HR Analyst. Your goal is to determine the TOTAL years of professional experience from a CV.
 Output STRICT JSON.
 
-METRICS TO EXTRACT:
-1. "first_name": Candidate's first name.
-2. "last_name": Candidate's last name.
-3. "address": Full address if available, or City/Country.
-4. "latest_location": The location of the most recent job or current residence.
-5. "years_experience": The TOTAL number of years of professional experience. 
-   - PRIORITY 1: Look for EXPLICIT statements in the Introduction, Summary, or Profile (e.g., "Over 10 years of experience", "5+ ans d'expérience"). 
-   - IF FOUND: Use this number immediately. Do not calculate dates.
-   - IF NOT FOUND: Calculate the duration from the start date of the first relevant professional role to Today.
+METRIC TO EXTRACT:
+"years_experience": The TOTAL number of years of professional experience. 
+   - Step 1: Check again for EXPLICIT statements (e.g., "10 years exp") just in case.
+   - Step 2: If no explicit statement, CAREFULLY CALCULATE the duration by summing the time ranges of all relevant professional roles found in the text.
+   - Ignore overlapping dates (count them once).
+   - Ignore education, volunteer work, or non-relevant gaps.
    - Return a FLOAT (e.g., 5.5).
-6. "experience_is_explicit": Boolean. Set to true ONLY if you found an explicit statement (Priority 1). False if calculated.
-7. "latest_job_title": The Most Recent or Current Job Title.
-   - Look for the role with "Present", "Current", or the latest end date.
 
 JSON SCHEMA:
 {
-  "first_name": "string",
-  "last_name": "string",
-  "address": "string",
-  "latest_location": "string",
-  "years_experience": float,
-  "experience_is_explicit": boolean,
-  "latest_job_title": "string"
+  "years_experience": float
 }
 """
 
 DIRECT_METRICS_USER_PROMPT = """
-Analyze this CV text and extract the required metrics.
+Analyze this CV text and extract the years of experience and latest job title.
 
 CV TEXT:
 \"\"\"{text}\"\"\"
@@ -192,113 +185,60 @@ def parse_cv_direct_metrics(text: str, model: str = None) -> Dict[str, Any]:
         return {}
     
     prompt = DIRECT_METRICS_USER_PROMPT.format(text=text)
+    # Pass model to call_ai if supported, otherwise rely on default or modify call_ai to accept it?
+    # ai_client.call_ai needs to be updated or we check if it accepts kwargs/model.
+    # checking ai_client.py... it does NOT accept model in signature shown previously.
+    # I will need to update ai_client.py first or pass it if I missed it.
+    # Assuming I will update ai_client.py next.
     return call_ai(prompt, DIRECT_METRICS_SYSTEM_PROMPT, expect_json=True, model=model)
 
-def parse_cv_metrics_multi_model(text: str) -> Dict[str, Any]:
+def parse_cv_metrics_multi_model(text: str) -> Dict[str, str]:
     """
-    Extracts metrics using 2 models (Llama & Mistral) with optimization.
-    
-    Optimization:
-    1. Call Llama first.
-    2. If Llama finds 'experience_is_explicit' = true, STOP and return Llama only.
-    3. Else, Call Mistral and combine results.
+    Extracts metrics using 3 different models and returns a formatted string for each metric.
+    Format:
+    1. [Value] - [Model]
+    2. [Value] - [Model]
+    3. [Value] - [Model]
     """
     if not text:
-        return {}
+        return {"years_experience": "", "latest_job_title": ""}
 
-    # 1. Call Llama (Primary Model)
+    # Models to use
+    models = [
+        "google/gemini-2.0-flash-exp:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "mistralai/mistral-7b-instruct:free"
+    ]
+
     results = []
     
-    llama_model = "meta-llama/llama-3.3-70b-instruct:free"
-    mistral_model = "mistralai/mistral-7b-instruct:free"
-    
-    # helper
-    def get_short_name(m):
-        if "llama" in m: return "Llama"
-        if "mistral" in m: return "Mistral"
-        return "AI"
-
-    # Step 1: Run Llama
-    try:
-        # logger.info("Running Llama...") # Logger not available here directly, assume it's global or imported
-        data_llama = call_ai(
-            DIRECT_METRICS_USER_PROMPT.format(text=text[:50000]), 
-            DIRECT_METRICS_SYSTEM_PROMPT, 
-            True, 
-            llama_model
-        )
+    # Use ThreadPoolExecutor for parallel execution to save time
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        future_to_model = {
+            executor.submit(call_ai, DIRECT_METRICS_USER_PROMPT.format(text=text[:50000]), DIRECT_METRICS_SYSTEM_PROMPT, True, model): model 
+            for model in models
+        }
         
-        if isinstance(data_llama, dict):
-            results.append(("Llama", data_llama))
-            
-            # OPTIMIZATION CHECK
-            if data_llama.get("experience_is_explicit") is True:
-                # logger.info("Llama found Explicit Experience! Skipping Mistral.")
-                pass # Proceed to formatting with just Llama
-            else:
-                # Step 2: Run Mistral (Sequential fallback)
-                try:
-                    data_mistral = call_ai(
-                        DIRECT_METRICS_USER_PROMPT.format(text=text[:50000]), 
-                        DIRECT_METRICS_SYSTEM_PROMPT, 
-                        True, 
-                        mistral_model
-                    )
-                    if isinstance(data_mistral, dict):
-                        results.append(("Mistral", data_mistral))
-                    else:
-                        results.append(("Mistral", {}))
-                except Exception as e:
-                    results.append(("Mistral", {}))
-        else:
-             # Llama failed completely? Run Mistral as backup.
-             results.append(("Llama", {}))
-             try:
-                 data_mistral = call_ai(DIRECT_METRICS_USER_PROMPT.format(text=text[:50000]), DIRECT_METRICS_SYSTEM_PROMPT, True, mistral_model)
-                 if isinstance(data_mistral, dict):
-                     results.append(("Mistral", data_mistral))
-             except:
-                 pass
+        for future in concurrent.futures.as_completed(future_to_model):
+            model_name = future_to_model[future]
+            short_name = model_name.split("/")[1].split("-")[0].capitalize() # e.g. Gemini, Llama, Mistral
+            try:
+                data = future.result()
+                if isinstance(data, dict):
+                    results.append((short_name, data))
+                else:
+                    results.append((short_name, {}))
+            except Exception as e:
+                logger.error(f"Multi-model failed for {model_name}: {e}")
+                results.append((short_name, {}))
 
-    except Exception as e:
-        # Llama failed with exception
-        results.append(("Llama", {}))
-        # Try Mistral
-        try:
-             data_mistral = call_ai(DIRECT_METRICS_USER_PROMPT.format(text=text[:50000]), DIRECT_METRICS_SYSTEM_PROMPT, True, mistral_model)
-             if isinstance(data_mistral, dict):
-                 results.append(("Mistral", data_mistral))
-        except:
-             pass
+    # Sort results to maintain consistent order (optional, but good for readability)
+    # Actually results come in random order of completion. Let's rely on list append order or sort by name?
+    # Sorting by name makes it stable.
+    results.sort(key=lambda x: x[0])
 
     # Format Output
-    
-    # Primary Data (Use Llama if available, else first available)
-    final_data = {
-        "first_name": "",
-        "last_name": "",
-        "address": "",
-        "latest_location": "",
-        "years_experience": "", 
-        "latest_job_title": ""
-    }
-    
-    primary_source = None
-    for name, data in results:
-        if name == "Llama" and data and data.get("first_name"):
-            primary_source = data
-            break
-    
-    if not primary_source and results and results[0][1]:
-        primary_source = results[0][1]
-        
-    if primary_source:
-        final_data["first_name"] = primary_source.get("first_name", "")
-        final_data["last_name"] = primary_source.get("last_name", "")
-        final_data["address"] = primary_source.get("address", "")
-        final_data["latest_location"] = primary_source.get("latest_location", "")
-
-    # Extract Multi-Model Data
     exp_lines = []
     title_lines = []
     
@@ -311,7 +251,7 @@ def parse_cv_metrics_multi_model(text: str) -> Dict[str, Any]:
         title_val = data.get("latest_job_title", "N/A")
         title_lines.append(f"{i+1}. {title_val} - {model}")
 
-    final_data["years_experience"] = "\n".join(exp_lines)
-    final_data["latest_job_title"] = "\n".join(title_lines)
-
-    return final_data
+    return {
+        "years_experience": "\n".join(exp_lines),
+        "latest_job_title": "\n".join(title_lines)
+    }

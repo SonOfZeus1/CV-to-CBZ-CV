@@ -136,35 +136,31 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
     else:
         languages = str(langs)
 
-    # 7. Total Experience (Multi-Model Output)
+    # 7. Total Experience
+    # Defined Logic:
+    # 1. 'direct_data' contains the best value (either Declared Req 1 or Calculated Req 2).
+    # 2. Fallback: Calculate from 'experiences' if direct_data is empty.
+    
+    total_exp_final = "N/A"
     if direct_data and direct_data.get('years_experience'):
-        total_exp_final = direct_data.get('years_experience')
+        total_exp_final = str(direct_data.get('years_experience'))
     else:
-        # Fallback to Llama/MD
-        total_exp_1 = basics.get('total_experience')
-        if total_exp_1 is None:
-            total_exp_1 = calculate_total_experience(experiences)
-        total_exp_final = f"{total_exp_1} (Fallback MD)"
+        # Fallback Calculation
+        calc_exp = calculate_total_experience(experiences)
+        if calc_exp > 0:
+            total_exp_final = str(calc_exp)
 
-    # 8. Latest Role (Multi-Model Output)
+    # 8. Latest Role
+    # Defined Logic: Always use Request 1 (Llama) extraction
     is_cv = json_data.get('is_cv', True)
     
-    # Always try to get latest experience details from the full parse (for location/fallback title)
-    # With the new 2-model flow, experiences might be empty.
-    latest_exp = get_latest_experience(experiences)
-    latest_location = latest_exp.get('location', '')
-    
-    # Override with direct_data if available (New Flow)
-    if direct_data and direct_data.get('latest_location'):
-        latest_location = direct_data.get('latest_location')
-
     if not is_cv:
         latest_title = "NON-CV"
-    elif direct_data and direct_data.get('latest_job_title'):
-        latest_title = direct_data.get('latest_job_title')
+        latest_location = ""
     else:
-        # Fallback to Llama/MD
-        latest_title = f"{latest_exp.get('job_title', 'N/A')} (Fallback MD)"
+        latest_exp = get_latest_experience(experiences)
+        latest_title = latest_exp.get('job_title', 'N/A')
+        latest_location = latest_exp.get('location', '')
 
     return [
         first_name,
