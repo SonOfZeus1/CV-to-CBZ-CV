@@ -1,0 +1,21 @@
+{
+  "meta": {
+    "filename": "cv2"
+  },
+  "basics": {
+    "name": "",
+    "email": "",
+    "phone": "",
+    "address": "",
+    "languages": [],
+    "summary": ""
+  },
+  "summary": "",
+  "skills_tech": [],
+  "experience": [],
+  "education": [],
+  "projects": [],
+  "extra_info": [],
+  "unmapped": [],
+  "is_cv": true
+}

@@ -1,0 +1,17 @@
+{
+  "anchors": {
+    "dates": [],
+    "entities": []
+  },
+  "blocks": [
+    {
+      "id": "b1",
+      "type": "HEADER",
+      "text": "",
+      "start_idx": 0,
+      "end_idx": 1,
+      "sub_blocks": [],
+      "anchors": []
+    }
+  ]
+}

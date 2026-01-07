@@ -143,13 +143,44 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         
         logger.info(f"SUCCESS: Extracted {file_name} -> {json_filename} ({json_link})")
         
-        # --- NEW: Direct Metrics Extraction (Source 2) ---
+        # --- NEW: Direct Metrics Extraction (Source 2 - Multi-Model) ---
         direct_metrics = {}
         try:
-            logger.info(f"Direct Extraction (Source 2) for {file_name}...")
-            # Use Mistral Small for this specific task
-            direct_metrics = parse_cv_direct_metrics(body_text, model="mistralai/mistral-small-3.1-24b-instruct:free")
+            logger.info(f"Direct Extraction (Multi-Model) for {file_name}...")
+            
+            # 1. Extract Text from Source PDF (for better accuracy than MD)
+            # We need the PDF path. We have 'local_path' which is the MD file.
+            # We need to reuse the download logic or just rely on MD body text?
+            # User request said "passant le fichier source (et non le fichier .md)".
+            # So we must download the source PDF if possible.
+            
+            # Helper to find source PDF ID
+            source_pdf_id = pdf_file_id 
+            if not source_pdf_id and candidate_name and md_file_map:
+                # Try to reverse lookup? No, we need the PDF ID passed in.
+                pass
+
+            pdf_text = body_text # Default fallback
+            
+            if source_pdf_id:
+                try:
+                    # Download PDF
+                    pdf_local_path = download_file(drive_service, source_pdf_id, f"temp_{source_pdf_id}.pdf", DOWNLOADS_DIR)
+                    if pdf_local_path:
+                        from simple_parsers import extract_text_from_pdf
+                        pdf_text, _ = extract_text_from_pdf(pdf_local_path)
+                        logger.info(f"Successfully extracted text from Source PDF ({len(pdf_text)} chars).")
+                        # Cleanup
+                        if os.path.exists(pdf_local_path):
+                            os.remove(pdf_local_path)
+                except Exception as pdf_e:
+                    logger.warning(f"Failed to download/read Source PDF: {pdf_e}. Falling back to MD text.")
+            
+            # 2. Call Multi-Model Parser
+            from ai_parsers import parse_cv_metrics_multi_model
+            direct_metrics = parse_cv_metrics_multi_model(pdf_text)
             logger.info(f"Direct Metrics: {direct_metrics}")
+            
         except Exception as e:
             logger.error(f"Direct Metrics Extraction Failed: {e}")
 

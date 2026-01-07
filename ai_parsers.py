@@ -186,3 +186,67 @@ def parse_cv_direct_metrics(text: str, model: str = None) -> Dict[str, Any]:
     # I will need to update ai_client.py first or pass it if I missed it.
     # Assuming I will update ai_client.py next.
     return call_ai(prompt, DIRECT_METRICS_SYSTEM_PROMPT, expect_json=True, model=model)
+
+def parse_cv_metrics_multi_model(text: str) -> Dict[str, str]:
+    """
+    Extracts metrics using 3 different models and returns a formatted string for each metric.
+    Format:
+    1. [Value] - [Model]
+    2. [Value] - [Model]
+    3. [Value] - [Model]
+    """
+    if not text:
+        return {"years_experience": "", "latest_job_title": ""}
+
+    # Models to use
+    models = [
+        "google/gemini-2.0-flash-exp:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "mistralai/mistral-7b-instruct:free"
+    ]
+
+    results = []
+    
+    # Use ThreadPoolExecutor for parallel execution to save time
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        future_to_model = {
+            executor.submit(call_ai, DIRECT_METRICS_USER_PROMPT.format(text=text[:50000]), DIRECT_METRICS_SYSTEM_PROMPT, True, model): model 
+            for model in models
+        }
+        
+        for future in concurrent.futures.as_completed(future_to_model):
+            model_name = future_to_model[future]
+            short_name = model_name.split("/")[1].split("-")[0].capitalize() # e.g. Gemini, Llama, Mistral
+            try:
+                data = future.result()
+                if isinstance(data, dict):
+                    results.append((short_name, data))
+                else:
+                    results.append((short_name, {}))
+            except Exception as e:
+                logger.error(f"Multi-model failed for {model_name}: {e}")
+                results.append((short_name, {}))
+
+    # Sort results to maintain consistent order (optional, but good for readability)
+    # Actually results come in random order of completion. Let's rely on list append order or sort by name?
+    # Sorting by name makes it stable.
+    results.sort(key=lambda x: x[0])
+
+    # Format Output
+    exp_lines = []
+    title_lines = []
+    
+    for i, (model, data) in enumerate(results):
+        # Experience
+        exp_val = data.get("years_experience", "N/A")
+        exp_lines.append(f"{i+1}. {exp_val} - {model}")
+        
+        # Title
+        title_val = data.get("latest_job_title", "N/A")
+        title_lines.append(f"{i+1}. {title_val} - {model}")
+
+    return {
+        "years_experience": "\n".join(exp_lines),
+        "latest_job_title": "\n".join(title_lines)
+    }

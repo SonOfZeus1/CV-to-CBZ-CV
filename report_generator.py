@@ -136,40 +136,27 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
     else:
         languages = str(langs)
 
-    # 7. Total Experience (Dual Output)
-    # Val 1: MD/JSON (Llama)
-    total_exp_1 = basics.get('total_experience')
-    if total_exp_1 is None:
-        total_exp_1 = calculate_total_experience(experiences)
-    
-    # Val 2: Direct/CV (Mistral)
-    total_exp_2 = "N/A"
-    if direct_data:
-        total_exp_2 = direct_data.get('years_experience', "N/A")
+    # 7. Total Experience (Multi-Model Output)
+    if direct_data and direct_data.get('years_experience'):
+        total_exp_final = direct_data.get('years_experience')
+    else:
+        # Fallback to Llama/MD
+        total_exp_1 = basics.get('total_experience')
+        if total_exp_1 is None:
+            total_exp_1 = calculate_total_experience(experiences)
+        total_exp_final = f"{total_exp_1} (Fallback MD)"
 
-    # Format Col G
-    total_exp_final = f"1. {total_exp_1}-MD-llama-3.3-70b\n2. {total_exp_2}-CV-mistral-small-3.1-24b"
-
-    # 8. Latest Role (Dual Output)
-    # Check is_cv flag
+    # 8. Latest Role (Multi-Model Output)
     is_cv = json_data.get('is_cv', True)
     
     if not is_cv:
         latest_title = "NON-CV"
-        latest_location = ""
+    elif direct_data and direct_data.get('latest_job_title'):
+        latest_title = direct_data.get('latest_job_title')
     else:
-        # Val 1: MD/JSON (Llama)
+        # Fallback to Llama/MD
         latest_exp = get_latest_experience(experiences)
-        title_1 = latest_exp.get('job_title', 'N/A')
-        latest_location = latest_exp.get('location', '')
-
-        # Val 2: Direct/CV (Mistral)
-        title_2 = "N/A"
-        if direct_data:
-            title_2 = direct_data.get('latest_job_title', "N/A")
-            
-        # Format Col H
-        latest_title = f"1. {title_1}-MD-llama-3.3-70b\n2. {title_2}-CV-mistral-small-3.1-24b"
+        latest_title = f"{latest_exp.get('job_title', 'N/A')} (Fallback MD)"
 
     return [
         first_name,

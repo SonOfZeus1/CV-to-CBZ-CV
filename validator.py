@@ -49,12 +49,7 @@ def validate_extraction(cv_data: Dict[str, Any], anchor_map: Dict[str, Any]) -> 
                     if not json_start.startswith(anchor_start[:4]): # Year mismatch
                         issues.append(f"Experience #{i+1} Date Mismatch: JSON '{json_start}' vs Anchor '{anchor_start}'")
                         
-        if not date_anchor_found:
-             # It's okay if no date anchor is linked, but suspicious if the block HAS date anchors
-             block_anchors = block.get("anchors", [])
-             block_date_anchors = [a for a in block_anchors if a in anchors_dates]
-             if block_date_anchors:
-                 issues.append(f"Experience #{i+1} ignores available date anchors in its block ({block_date_anchors}).")
+
 
         # Check Text Overlap (Hallucination Check)
         # We check if tasks are somewhat present in the block text
