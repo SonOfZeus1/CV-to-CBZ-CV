@@ -142,10 +142,10 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                     if pdf_text and len(pdf_text) > 50:
                         # Combine! Best of both worlds.
                         extraction_text = (
-                            f"--- SOURCE PDF TEXT (Use for content details) ---\n"
-                            f"{pdf_text}\n\n"
-                            f"--- MARKDOWN TEXT (Use for structure/headers) ---\n"
-                            f"{body_text}"
+                            f"--- MARKDOWN TEXT (PRIMARY CONTENT SOURCE - Use strings from here) ---\n"
+                            f"{body_text}\n\n"
+                            f"--- SOURCE PDF TEXT (REFERENCE ONLY - Use for structure/layout if needed) ---\n"
+                            f"{pdf_text}"
                         )
                         logger.info(f"Using Dual-Source Text (PDF + MD) for {file_name}")
                     

@@ -72,29 +72,26 @@ JSON SCHEMA:
 """
 
 FULL_CV_EXTRACTION_USER_PROMPT = """
-You are provided with TWO complementary text sources for the same CV. Your task is to synthesize them into a single, perfect JSON extraction.
+You are provided with TWO complementary text sources.
+YOUR GOAL: Map ALL text from the MARKDOWN source into the correct JSON fields, using the PDF source as a structural guide.
 
-SOURCE 1: RAW PDF TEXT
-- Use this as the PRIMARY source for specific content: Dates, Descriptions, Tech Stacks, and hidden details.
-- It contains the most accurate raw strings.
+SOURCE 1: MARKDOWN TEXT (CONTENT)
+- Contains the exact text strings you must use in the JSON.
+- Every text block here must be preserved in the output.
 
-SOURCE 2: MARKDOWN TEXT
-- Use this as the SECONDARY source for Structure and Hierarchy.
-- Use it to understand which job text belongs to which header (Experience vs Projects vs Education).
-- Refer to the input "blocks" which match this Markdown structure.
+SOURCE 2: PDF TEXT (STRUCTURE GUIDE)
+- Use this to correctly categorize the Markdown text.
+- Example: If the Markdown has a text block "Java, Python", look at the PDF layout to decide if this belongs to "Skills" or a specific "Experience".
 
-*** STRICT ANCHORING INSTRUCTIONS ***
-You are provided with an "ANCHOR MAP" below (derived regarding Source 2).
-1. "anchors": Validated Dates, Roles, and Companies.
-2. "blocks": Pre-segmented text blocks.
+*** STRICT RULES ***
+1. CONTENT SOURCE: All "description", "tasks", "summary", and "dates" in the JSON must be COPIED exactly from Source 1 (Markdown).
+2. STRUCTURE SOURCE: Use Source 2 (PDF) only to determine which JSON list (Experience, Education, Projects) a block belongs to.
+3. COMPLETENESS: Ensure ALL text present in the Markdown file is found somewhere in the JSON.
+4. If a block's category is ambiguous in Markdown, defer to the PDF's visual layout to classify it.
 
-RULES:
-1. Synthesize the inputs. If the PDF text has more detail for an experience than the Markdown, USE THE PDF CONTENT.
-2. For "experience" entries:
-   - Try to reference the `block_id` if it aligns with the Markdown blocks.
-   - If `block_id` or `date_anchor_id` are not perfectly clear (e.g. due to mixed text sources), EXTRACT THE DATA ANYWAY without them.
-3. DO NOT invent dates. If a date is not in the anchors, be very careful but extract what is visible.
-4. The `skills` list for an experience must be derived ONLY from the text in that block.
+*** ANCHOR MAP (Derived from Source 1) ***
+1. "anchors": Validated Dates/Entities.
+2. "blocks": Pre-segmented Markdown blocks.
 
 ANCHOR MAP:
 ---
