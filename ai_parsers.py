@@ -152,8 +152,9 @@ Output STRICT JSON.
 
 METRICS TO EXTRACT:
 1. "years_experience": The TOTAL number of years of professional experience. 
-   - Look for explicit statements like "10 years of experience".
-   - If not found, estimating from the date range of the first relevant job to now.
+   - PRIORITY 1: Look for EXPLICIT statements in the Introduction, Summary, or Profile (e.g., "Over 10 years of experience", "5+ ans d'expérience"). 
+   - IF FOUND: Use this number immediately. Do not calculate dates.
+   - IF NOT FOUND: Calculate the duration from the start date of the first relevant professional role to Today.
    - Return a FLOAT (e.g., 5.5).
 2. "latest_job_title": The Most Recent or Current Job Title.
    - Look for the role with "Present", "Current", or the latest end date.

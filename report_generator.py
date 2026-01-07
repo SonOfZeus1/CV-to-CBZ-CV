@@ -149,13 +149,16 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
     # 8. Latest Role (Multi-Model Output)
     is_cv = json_data.get('is_cv', True)
     
+    # Always try to get latest experience details from the full parse (for location/fallback title)
+    latest_exp = get_latest_experience(experiences)
+    latest_location = latest_exp.get('location', '')
+
     if not is_cv:
         latest_title = "NON-CV"
     elif direct_data and direct_data.get('latest_job_title'):
         latest_title = direct_data.get('latest_job_title')
     else:
         # Fallback to Llama/MD
-        latest_exp = get_latest_experience(experiences)
         latest_title = f"{latest_exp.get('job_title', 'N/A')} (Fallback MD)"
 
     return [
