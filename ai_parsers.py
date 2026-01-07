@@ -38,13 +38,8 @@ JSON SCHEMA:
     "address": "...",
     "languages": ["French", "English"]
   },
-  "education": [
-    {
-      "degree": "...",
-      "school": "...",
-      "year": "..."
-    }
-  ]
+  "summary": "...",
+  "experiences": [
     {
       "job_title": "...",
       "company": "...",
@@ -77,17 +72,28 @@ JSON SCHEMA:
 """
 
 FULL_CV_EXTRACTION_USER_PROMPT = """
-Here is the full text of a CV. Parse it completely into the requested JSON format.
+You are provided with TWO complementary text sources for the same CV. Your task is to synthesize them into a single, perfect JSON extraction.
+
+SOURCE 1: RAW PDF TEXT
+- Use this as the PRIMARY source for specific content: Dates, Descriptions, Tech Stacks, and hidden details.
+- It contains the most accurate raw strings.
+
+SOURCE 2: MARKDOWN TEXT
+- Use this as the SECONDARY source for Structure and Hierarchy.
+- Use it to understand which job text belongs to which header (Experience vs Projects vs Education).
+- Refer to the input "blocks" which match this Markdown structure.
 
 *** STRICT ANCHORING INSTRUCTIONS ***
-You are provided with an "ANCHOR MAP" below. This map contains:
-1. "anchors": Validated Dates, Roles, and Companies found in the text.
-2. "blocks": Pre-segmented text blocks (especially for Experience).
+You are provided with an "ANCHOR MAP" below (derived regarding Source 2).
+1. "anchors": Validated Dates, Roles, and Companies.
+2. "blocks": Pre-segmented text blocks.
 
 RULES:
-1. For each "experience" entry, you MUST reference the `block_id` it comes from.
-2. You MUST use the `date_anchor_id` if the date matches an anchor.
-3. DO NOT invent dates. If a date is not in the anchors, be very careful.
+1. Synthesize the inputs. If the PDF text has more detail for an experience than the Markdown, USE THE PDF CONTENT.
+2. For "experience" entries:
+   - Try to reference the `block_id` if it aligns with the Markdown blocks.
+   - If `block_id` or `date_anchor_id` are not perfectly clear (e.g. due to mixed text sources), EXTRACT THE DATA ANYWAY without them.
+3. DO NOT invent dates. If a date is not in the anchors, be very careful but extract what is visible.
 4. The `skills` list for an experience must be derived ONLY from the text in that block.
 
 ANCHOR MAP:
@@ -95,7 +101,7 @@ ANCHOR MAP:
 {anchor_map}
 ---
 
-CV TEXT:
+CV DUAL-SOURCE TEXT:
 \"\"\"{text}\"\"\"
 """
 
