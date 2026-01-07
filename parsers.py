@@ -37,6 +37,8 @@ class ExperienceEntry:
     full_text: str = ""
     block_id: str = ""
     anchor_ids: List[str] = field(default_factory=list)
+    start_char: int = 0
+    end_char: int = 0
 
 # ... (Previous code)
 
@@ -171,6 +173,9 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
             return dt.strftime("%Y-%m")
         return "" # Fail gracefully
         
+    # Create Block Lookup for Coordinates
+    block_lookup = {b['id']: b for b in anchor_map.get("blocks", [])}
+
     for item in extracted_data.get("experiences", []):
         matches = item # AI dict
         
@@ -182,6 +187,12 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         norm_start = clean_parse_date(raw_start)
         norm_end = clean_parse_date(raw_end)
         
+        # Resolve Coordinates via Block ID
+        bid = matches.get("block_id", "")
+        blk = block_lookup.get(bid, {})
+        start_char = blk.get("start_idx", 0)
+        end_char = blk.get("end_idx", 0)
+
         entry = ExperienceEntry(
             job_title=matches.get("job_title", ""),
             company=matches.get("company", ""),
@@ -194,8 +205,10 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
             duration="", 
             description=matches.get("description", ""), 
             full_text="Generated via Single-Shot",
-            block_id=matches.get("block_id", ""),
-            anchor_ids=matches.get("anchor_ids", [])
+            block_id=bid,
+            anchor_ids=matches.get("anchor_ids", []),
+            start_char=start_char,
+            end_char=end_char
         )
         structured_experiences.append(entry)
 
