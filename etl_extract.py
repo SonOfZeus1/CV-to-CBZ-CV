@@ -46,6 +46,7 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
 
     # Fetch File Metadata
     file_item = None
+    json_link = "" # Initialize to avoid UnboundLocalError
     try:
         file_item = drive_service.files().get(fileId=file_id, fields='id, name', supportsAllDrives=True).execute()
         file_name = file_item['name']
