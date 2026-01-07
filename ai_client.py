@@ -167,8 +167,20 @@ class AIClient:
                     error_str = str(e).lower()
                     # Check for Rate Limit (429)
                     if "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
-                        logger.warning(f"Rate Limit hit for {model_name}. Switching to next model immediately...")
-                        break # Break inner loop -> Try next model in outer loop
+                        logger.warning(f"Rate Limit hit for {model_name}. (Attempt {attempt+1}/{MAX_RETRIES_PER_MODEL})")
+                        
+                        # If a specific model was requested (not iterating defaults), we should RETRY, not switch.
+                        # If we are iterating defaults (model is None), we can switch.
+                        if model: 
+                            # Specific model requested -> Must retry
+                            sleep_time = 5 * (attempt + 1) # Aggressive wait (5s, 10s)
+                            logger.info(f"Retrying specific model {model_name} in {sleep_time}s...")
+                            time.sleep(sleep_time)
+                            continue
+                        else:
+                            # Iterating defaults -> Switch to next model
+                            logger.warning(f"Switching to next model immediately...")
+                            break # Break inner loop -> Try next model in outer loop
                     
                     logger.error(f"AI Call failed for {model_name} (Attempt {attempt+1}/{MAX_RETRIES_PER_MODEL}): {e}")
                     

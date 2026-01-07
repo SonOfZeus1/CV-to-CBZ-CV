@@ -121,27 +121,32 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
             except Exception as e:
                 logger.warning(f"Failed to parse frontmatter for {file_name}: {e}")
         
-        # 4. Parse (AI Extraction)
-        parsed_data = parse_cv_from_text(body_text, file_name, metadata=metadata)
+        # 4. Parse (AI Extraction) - DISABLED TEMPORARILY
+        # parsed_data = parse_cv_from_text(body_text, file_name, metadata=metadata)
+        logger.info(f"Skipping Main JSON Extraction for {file_name} (Mode: Metric Only)")
         
-        if not parsed_data:
-            logger.error(f"Failed to parse {file_name}")
-            return False, None, file_item
+        # Create minimal skeleton to satisfy report_generator
+        parsed_data = {
+            "basics": {
+                "name": candidate_name or file_name,
+                "email": email_source,
+                "phone": phone_source,
+                "location": "",
+                "total_experience": 0
+            },
+            "experience": [],
+            "education": [],
+            "is_cv": True
+        }
 
-        # 5. Save JSON Locally
-        base_name = os.path.splitext(file_name)[0]
-        json_filename = f"{base_name}_extracted.json"
-        if not os.path.exists(JSON_OUTPUT_DIR):
-            os.makedirs(JSON_OUTPUT_DIR)
-        json_output_path = os.path.join(JSON_OUTPUT_DIR, json_filename)
-        
-        with open(json_output_path, 'w', encoding='utf-8') as f:
-            json.dump(parsed_data, f, ensure_ascii=False, indent=4)
+        # 5. Save JSON Locally - SKIPPED
+        # ...
             
-        # 6. Upload JSON to Drive
-        json_file_id, json_link = upload_file_to_folder(drive_service, json_output_path, json_output_folder_id)
+        # 6. Upload JSON to Drive - SKIPPED
+        json_file_id = None
+        json_link = ""
         
-        logger.info(f"SUCCESS: Extracted {file_name} -> {json_filename} ({json_link})")
+        # logger.info(f"SUCCESS: Extracted {file_name} -> {json_filename} ({json_link})")
         
         # --- NEW: Direct Metrics Extraction (Source 2 - Multi-Model) ---
         direct_metrics = {}
@@ -674,7 +679,7 @@ def main():
     logger.info(f"Found {len(tasks)} rows needing processing (Missing JSON or 'Retraiter').")
     
     # Batch Limit
-    batch_limit = 1 # Decreased to 1 as requested
+    batch_limit = 3 # Increased to 3 as requested
     tasks_to_process = tasks[:batch_limit]
     logger.info(f"Processing {len(tasks_to_process)} tasks (Batch Limit: {batch_limit})...")
 
