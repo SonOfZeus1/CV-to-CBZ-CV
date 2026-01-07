@@ -173,9 +173,9 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                      except Exception:
                         pass # Fallback to body_text
 
-                # 2. Call Gemini for Calculation
-                # Use Gemini 2.0 Flash (Free, Fast, Smart)
-                parsed_metrics = parse_cv_direct_metrics(target_text, model="google/gemini-2.0-flash-exp:free")
+                # 2. Call Gemini for Calculation (or fallback to defaults)
+                # We remove the specific model constraint so it can fall back to Llama/Mistral if Gemini is 429'd.
+                parsed_metrics = parse_cv_direct_metrics(target_text)
                 direct_metrics["years_experience"] = parsed_metrics.get("years_experience")
                 
             except Exception as e:

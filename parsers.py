@@ -58,7 +58,8 @@ class CVData:
     projects: List[Dict[str, Any]]
     extra_info: List[str]
     unmapped: List[str]
-    is_cv: bool = True # New field
+    is_cv: bool = True
+    total_experience_declared: Optional[str] = None # New field
 
     def to_dict(self):
         return {
@@ -71,7 +72,8 @@ class CVData:
             "projects": self.projects,
             "extra_info": self.extra_info,
             "unmapped": self.unmapped,
-            "is_cv": self.is_cv
+            "is_cv": self.is_cv,
+            "total_experience_declared": self.total_experience_declared
         }
 
 # ... (calculate_months_between remains same)
@@ -130,7 +132,8 @@ def parse_cv_from_text(text: str, filename: str, metadata: Dict = None) -> Dict[
         projects=data.get("projects", []),
         extra_info=[],
         unmapped=[],
-        is_cv=is_cv
+        is_cv=is_cv,
+        total_experience_declared=data.get("total_experience_declared") # Map new field
     )
     
     # Fix Experience Mapping (AI returns 'tasks', 'skills', etc. matching dataclass)
@@ -305,12 +308,24 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         structured_experiences.append(entry)
 
     # Calculate Total Experience
-    total_months = 0
-    for exp in structured_experiences:
-        months = calculate_months_between(exp.date_start, exp.date_end, exp.is_current)
-        total_months += months
-        
-    basics["total_experience"] = round(total_months / 12, 1)
+    if cv_data.total_experience_declared and str(cv_data.total_experience_declared).lower() not in ["null", "none", "", "n/a"]:
+        # Use declared value if present
+         try:
+            # Try to parse float if simpler string, otherwise keep string? 
+            # basics["total_experience"] expects float/int usually? 
+            # In user JSON it was 0.0. 
+            # Lets try to clean it. 
+            clean_exp = str(cv_data.total_experience_declared).lower().replace("years", "").replace("ans", "").replace("+", "").strip()
+            basics["total_experience"] = float(clean_exp)
+         except:
+            basics["total_experience"] = cv_data.total_experience_declared # Keep string if complex
+    else:
+        total_months = 0
+        for exp in structured_experiences:
+            months = calculate_months_between(exp.date_start, exp.date_end, exp.is_current)
+            total_months += months
+            
+        basics["total_experience"] = round(total_months / 12, 1)
         
     # Education
     education_entries = []
