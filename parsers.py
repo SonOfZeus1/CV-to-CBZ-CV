@@ -78,86 +78,6 @@ class CVData:
 
 # ... (calculate_months_between remains same)
 
-def parse_cv_from_text(text: str, filename: str, metadata: Dict = None) -> Dict[str, Any]:
-    """
-    Parses CV text using Single-Shot AI extraction.
-    Returns a dictionary representation of CVData.
-    """
-    if not text:
-        return {}
-
-    # 0. Pre-process & Generate Anchors
-    # We need to generate date anchors to help the AI locate dates.
-    # The prompt expects {anchor_map}.
-    
-    # Extract anchors
-    anchors = extract_date_anchors(text)
-    anchor_map_str = json.dumps([asdict(a) for a in anchors], indent=2, ensure_ascii=False)
-    
-    # 1. Call AI
-    try:
-        response = call_ai(
-            system_prompt=FULL_CV_EXTRACTION_SYSTEM_PROMPT,
-            user_prompt=FULL_CV_EXTRACTION_USER_PROMPT.format(anchor_map=anchor_map_str, text=text),
-            model_id="meta-llama/llama-3.3-70b-instruct:free", # Explicitly use the model that works
-            response_format={"type": "json_object"}
-        )
-        
-        if not response:
-            logger.error(f"AI returned empty response for {filename}")
-            return {}
-            
-        data = json.loads(response)
-        
-    except Exception as e:
-        logger.error(f"AI Extraction failed for {filename}: {e}")
-        return {}
-
-    # 2. Map to CVData
-    is_cv = data.get("is_cv", True)
-    
-    # ... (rest of mapping)
-    
-    cv_data = CVData(
-        meta=metadata or {},
-        basics=data.get("contact_info", {}),
-        summary=data.get("summary", ""),
-        skills_tech=[], # Extracted from experiences if needed
-        experience=[ExperienceEntry(**e) for e in data.get("experiences", [])], # Need to handle mismatch fields?
-        # ExperienceEntry has many fields. AI returns subset. We need robust mapping.
-        # Actually, let's just pass the dict and let dataclass handle it? 
-        # No, dataclass constructor needs exact args or we need to filter.
-        # Let's use a helper or simple mapping.
-        education=[EducationEntry(**e) for e in data.get("education", [])],
-        projects=data.get("projects", []),
-        extra_info=[],
-        unmapped=[],
-        is_cv=is_cv,
-        total_experience_declared=data.get("total_experience_declared") # Map new field
-    )
-    
-    # Fix Experience Mapping (AI returns 'tasks', 'skills', etc. matching dataclass)
-    # But we need to be careful about extra fields or missing fields.
-    # Let's do a safe mapping for Experience.
-    experiences = []
-    for exp_raw in data.get("experiences", []):
-        # Filter keys to match ExperienceEntry
-        valid_keys = ExperienceEntry.__annotations__.keys()
-        filtered_exp = {k: v for k, v in exp_raw.items() if k in valid_keys}
-        experiences.append(ExperienceEntry(**filtered_exp))
-    
-    cv_data.experience = experiences
-    
-    # Fix Education Mapping
-    educations = []
-    for edu_raw in data.get("education", []):
-        valid_keys = EducationEntry.__annotations__.keys()
-        filtered_edu = {k: v for k, v in edu_raw.items() if k in valid_keys}
-        educations.append(EducationEntry(**filtered_edu))
-        
-    cv_data.education = educations
-
-    return cv_data.to_dict()
 
 def calculate_months_between(start_str: str, end_str: str, is_current: bool) -> int:
     """Calculates months between two dates (YYYY-MM or YYYY)."""
@@ -308,17 +228,18 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         structured_experiences.append(entry)
 
     # Calculate Total Experience
-    if cv_data.total_experience_declared and str(cv_data.total_experience_declared).lower() not in ["null", "none", "", "n/a"]:
+    declared_exp = extracted_data.get("total_experience_declared")
+    if declared_exp and str(declared_exp).lower() not in ["null", "none", "", "n/a"]:
         # Use declared value if present
          try:
             # Try to parse float if simpler string, otherwise keep string? 
             # basics["total_experience"] expects float/int usually? 
             # In user JSON it was 0.0. 
             # Lets try to clean it. 
-            clean_exp = str(cv_data.total_experience_declared).lower().replace("years", "").replace("ans", "").replace("+", "").strip()
+            clean_exp = str(declared_exp).lower().replace("years", "").replace("ans", "").replace("+", "").strip()
             basics["total_experience"] = float(clean_exp)
          except:
-            basics["total_experience"] = cv_data.total_experience_declared # Keep string if complex
+            basics["total_experience"] = declared_exp # Keep string if complex
     else:
         total_months = 0
         for exp in structured_experiences:
@@ -361,7 +282,8 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         education=education_entries,
         projects=projects,
         extra_info=[],
-        unmapped=[]
+        unmapped=[],
+        total_experience_declared=extracted_data.get("total_experience_declared")
     )
     
     result_dict = cv_data.to_dict()
