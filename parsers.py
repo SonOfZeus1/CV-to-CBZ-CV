@@ -4,11 +4,13 @@ import re
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import dateparser
 
 from ai_client import call_ai
 from ai_parsers import (
     FULL_CV_EXTRACTION_SYSTEM_PROMPT,
-    FULL_CV_EXTRACTION_USER_PROMPT
+    FULL_CV_EXTRACTION_USER_PROMPT,
+    parse_cv_full_text
 )
 from text_processor import preprocess_markdown
 from date_extractor import extract_date_anchors
@@ -25,19 +27,20 @@ class ExperienceEntry:
     job_title: str = ""
     company: str = ""
     location: str = ""
-    dates: str = "" # Original text
-    dates_raw: str = "" # Exact raw string from date extraction
-    date_start: str = "" # ISO YYYY-MM or YYYY
-    date_end: str = ""   # ISO YYYY-MM or YYYY or None
-    date_precision: str = "unknown" # "month", "year", "unknown"
+    dates: str = "" 
+    dates_raw: str = "" 
+    date_start: str = "" 
+    date_end: str = ""   
+    date_precision: str = "unknown" 
     is_current: bool = False
     duration: str = ""
-    summary: str = ""
-    tasks: List[str] = field(default_factory=list)
-    skills: List[str] = field(default_factory=list)
+    description: str = "" # Unified description field
     full_text: str = ""
     block_id: str = ""
     anchor_ids: List[str] = field(default_factory=list)
+
+# ... (Previous code)
+
 
 @dataclass
 class EducationEntry:
@@ -51,90 +54,57 @@ class EducationEntry:
 class CVData:
     meta: Dict[str, Any]
     basics: Dict[str, Any]
-    summary: str
     skills_tech: List[str]
     experience: List[ExperienceEntry]
     education: List[EducationEntry]
-    projects: List[Dict[str, Any]]
-    extra_info: List[str]
-    unmapped: List[str]
+    projects_and_other: List[str]
     is_cv: bool = True
-    total_experience_declared: Optional[str] = None # New field
 
     def to_dict(self):
         return {
             "meta": self.meta,
             "basics": self.basics,
-            "summary": self.summary,
             "skills_tech": self.skills_tech,
             "experience": [asdict(e) for e in self.experience],
             "education": [asdict(e) for e in self.education],
-            "projects": self.projects,
-            "extra_info": self.extra_info,
-            "unmapped": self.unmapped,
-            "is_cv": self.is_cv,
-            "total_experience_declared": self.total_experience_declared
+            "projects_and_other": self.projects_and_other,
+            "is_cv": self.is_cv
         }
-
-# ... (calculate_months_between remains same)
 
 
 def calculate_months_between(start_str: str, end_str: str, is_current: bool) -> int:
-    """Calculates months between two dates (YYYY-MM or YYYY)."""
+    """
+    Calculates months between two YYYY-MM dates.
+    If date is missing, returns 0.
+    """
     if not start_str:
         return 0
-        
+    
     try:
-        # Normalize start
-        if len(start_str) == 4:
-            start_date = datetime.strptime(start_str, "%Y")
-        else:
-            start_date = datetime.strptime(start_str, "%Y-%m")
-            
-        # Determine end
-        if is_current:
-            end_date = datetime.now()
-        elif end_str:
-            if len(end_str) == 4:
-                end_date = datetime.strptime(end_str, "%Y")
-            else:
-                end_date = datetime.strptime(end_str, "%Y-%m")
-        else:
-            return 0 # No end date and not current -> cannot calculate
-            
-        # Calculate difference
-        months = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month)
-        return max(0, months)
-        
+        start_date = datetime.strptime(start_str, "%Y-%m")
     except ValueError:
         return 0
 
-def parse_cv_full_text(text: str, anchor_map: Dict[str, Any] = None) -> Dict[str, Any]:
-    """
-    Parses the entire CV in a single pass using OpenRouter (MiMo/GPT-OSS).
-    """
-    logger.info("Step 2: Single-Shot Full CV Extraction...")
-    
-    # Format Anchor Map
-    anchor_map_str = json.dumps(anchor_map, indent=2, ensure_ascii=False) if anchor_map else "{}"
-    
-    # Call AI with the full text and anchor map
-    prompt = FULL_CV_EXTRACTION_USER_PROMPT.format(text=text[:100000], anchor_map=anchor_map_str) # Huge context limit
-    raw_data = call_ai(prompt, FULL_CV_EXTRACTION_SYSTEM_PROMPT, expect_json=True)
-    
-    # Validate and Normalize Data
-    if not raw_data:
-        logger.error("Single-Shot Extraction failed (Empty response).")
-        return {}
-
-    # Ensure 'experiences' are robust
-    experiences = raw_data.get("experiences", [])
-    for exp in experiences:
-        # Ensure dates_raw is present
-        if "dates_raw" not in exp:
-            exp["dates_raw"] = f"{exp.get('date_start', '')} - {exp.get('date_end', '')}"
+    end_date = datetime.now()
+    if not is_current and end_str:
+        try:
+            end_date = datetime.strptime(end_str, "%Y-%m")
+        except ValueError:
+            pass # Keep as now or return 0? Let's assume 0 duration if end is invalid and not current.
+            # But "Present" logic matches is_current.
             
-    return raw_data
+    # If not current and no valid end date, we can't calculate duration.
+    if not is_current and not end_str:
+        return 0
+        
+    # Calculate difference
+    # We use relativedelta logic essentially: (year_diff * 12) + month_diff
+    years = end_date.year - start_date.year
+    months = end_date.month - start_date.month
+    total = years * 12 + months
+    
+    return max(0, total)
+
 
 def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> Dict[str, Any]:
     """
@@ -169,19 +139,14 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         return {
             "meta": {"filename": filename},
             "basics": {},
-            "links": [],
-            "summary": "",
             "skills_tech": [],
             "experience": [],
             "education": [],
-            "languages": [],
-            "extra_info": [],
-            "unmapped": []
+            "projects_and_other": [],
+            "is_cv": False
         }
     
     # 3. Map to Internal Schema (CVData)
-    # Contact Info -> Basics
-    # Contact Info -> Basics
     contact = extracted_data.get("contact_info", {})
     
     # Language Fallback
@@ -195,59 +160,80 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         else:
             languages = [metadata.get("language")]
 
+    # Experiences
+    structured_experiences = []
+    
+    # Helper to parse dates robustly
+    def clean_parse_date(raw_date: str) -> str:
+        if not raw_date: return ""
+        dt = dateparser.parse(raw_date, languages=['fr', 'en'], settings={'PREFER_DAY_OF_MONTH': 'first'})
+        if dt:
+            return dt.strftime("%Y-%m")
+        return "" # Fail gracefully
+        
+    for item in extracted_data.get("experiences", []):
+        matches = item # AI dict
+        
+        # Raw from AI (Copy-Paste)
+        raw_start = matches.get("date_start", "") 
+        raw_end = matches.get("date_end", "")
+        
+        # Parse Logic
+        norm_start = clean_parse_date(raw_start)
+        norm_end = clean_parse_date(raw_end)
+        
+        entry = ExperienceEntry(
+            job_title=matches.get("job_title", ""),
+            company=matches.get("company", ""),
+            location=matches.get("location", ""),
+            dates=matches.get("dates_raw", ""),
+            dates_raw=matches.get("dates_raw", ""),
+            date_start=norm_start, # Normalized by Python
+            date_end=norm_end,     # Normalized by Python
+            date_precision="unknown", 
+            is_current=matches.get("is_current", False),
+            duration="", 
+            description=matches.get("description", ""), 
+            full_text="Generated via Single-Shot",
+            block_id=matches.get("block_id", ""),
+            anchor_ids=matches.get("anchor_ids", [])
+        )
+        structured_experiences.append(entry)
+
+    # Calculate Total Experience
+    declared_exp = extracted_data.get("total_experience_declared")
+    total_months = 0
+    for exp in structured_experiences:
+        months = calculate_months_between(exp.date_start, exp.date_end, exp.is_current)
+        total_months += months
+        
+    calculated_exp = round(total_months / 12, 1)
+
+    # Post-Process: specific logic for 'is_current'
+    # "Only the most recent experience can be current. All others must be false."
+    if structured_experiences:
+        # Sort by date_start desc (String sort works for ISO YYYY-MM)
+        # Handle empty dates safely by treating them as old
+        structured_experiences.sort(key=lambda x: x.date_start or "", reverse=True)
+        
+        # The first one *might* be current. The rest are definitely not.
+        for i, exp in enumerate(structured_experiences):
+            if i > 0:
+                exp.is_current = False
+                # User says: "If date without range... IsCurrent must be false"
+                # By forcing False here, we handle the "anomaly" case for old roles.
+
+
     basics = {
         "name": f"{contact.get('first_name', '')} {contact.get('last_name', '')}".strip(),
         "email": contact.get("email", ""),
         "phone": contact.get("phone", ""),
         "address": contact.get("address", ""),
         "languages": languages,
-        "summary": extracted_data.get("summary", "")
+        "total_experience_declared": declared_exp if declared_exp else "N/A",
+        "total_experience_calculated": calculated_exp
     }
     
-    # Experiences
-    structured_experiences = []
-    for item in extracted_data.get("experiences", []):
-        entry = ExperienceEntry(
-            job_title=item.get("job_title", ""),
-            company=item.get("company", ""),
-            location=item.get("location", ""),
-            dates=item.get("dates_raw", ""),
-            dates_raw=item.get("dates_raw", ""),
-            date_start=item.get("date_start", ""),
-            date_end=item.get("date_end", ""),
-            date_precision="unknown", # AI inferred
-            is_current=item.get("is_current", False),
-            duration="", # Can calculate if needed
-            summary=item.get("summary", ""),
-            tasks=item.get("tasks", []),
-            skills=item.get("skills", []),
-            full_text="Generated via Single-Shot",
-            block_id=item.get("block_id", ""),
-            anchor_ids=item.get("anchor_ids", [])
-        )
-        structured_experiences.append(entry)
-
-    # Calculate Total Experience
-    declared_exp = extracted_data.get("total_experience_declared")
-    if declared_exp and str(declared_exp).lower() not in ["null", "none", "", "n/a"]:
-        # Use declared value if present
-         try:
-            # Try to parse float if simpler string, otherwise keep string? 
-            # basics["total_experience"] expects float/int usually? 
-            # In user JSON it was 0.0. 
-            # Lets try to clean it. 
-            clean_exp = str(declared_exp).lower().replace("years", "").replace("ans", "").replace("+", "").strip()
-            basics["total_experience"] = float(clean_exp)
-         except:
-            basics["total_experience"] = declared_exp # Keep string if complex
-    else:
-        total_months = 0
-        for exp in structured_experiences:
-            months = calculate_months_between(exp.date_start, exp.date_end, exp.is_current)
-            total_months += months
-            
-        basics["total_experience"] = round(total_months / 12, 1)
-        
     # Education
     education_entries = []
     for item in extracted_data.get("education", []):
@@ -259,31 +245,21 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
             full_text=str(item)
         ))
         
-    # Skills (Aggregated from Experiences)
-    # The user wants skills_tech to be ONLY based on skills from experiences.
-    # So we iterate through structured_experiences and collect all skills.
-    all_skills = set()
-    for exp in structured_experiences:
-        for skill in exp.skills:
-            all_skills.add(skill)
-            
-    skills_tech = sorted(list(all_skills))
+    # Skills (Removed per user request)
+    skills_tech = []
     
     # Projects
-    projects = extracted_data.get("projects", [])
+    projects = extracted_data.get("projects_and_other", [])
 
     # Assemble CVData
     cv_data = CVData(
         meta={"filename": filename},
         basics=basics,
-        summary=basics.get("summary", ""),
         skills_tech=skills_tech,
         experience=structured_experiences,
         education=education_entries,
-        projects=projects,
-        extra_info=[],
-        unmapped=[],
-        total_experience_declared=extracted_data.get("total_experience_declared")
+        projects_and_other=projects,
+        is_cv=True
     )
     
     result_dict = cv_data.to_dict()

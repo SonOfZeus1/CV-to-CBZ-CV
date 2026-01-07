@@ -20,7 +20,7 @@ CRITICAL RULES:
 2. Extract Professional Summary (or generate one if missing).
 3. Extract ALL Experience entries.
    - Use "dates_raw" for the exact text found in the CV.
-   - Try to normalize "date_start" and "date_end" to YYYY-MM or YYYY.
+   - DO NOT normalize dates. Copy the exact text strings (e.g. "sept 2018") into "date_start" and "date_end".
    - If "Present" or "Aujourd'hui", set "is_current": true.
    - CRITICAL: Extract specific technologies and skills used in EACH experience.
 4. Extract Education entries.
@@ -38,28 +38,21 @@ JSON SCHEMA:
     "address": "...",
     "languages": ["French", "English"]
   },
-  "summary": "...",
   "experiences": [
     {
       "job_title": "...",
       "company": "...",
       "location": "...",
       "dates_raw": "...",
-      "date_start": "YYYY-MM",
-      "date_end": "YYYY-MM",
+      "date_start": "Exact text found (e.g. 'Sept 2018', '01/20')",
+      "date_end": "Exact text found (e.g. 'Jan 2020', 'Present')",
       "is_current": boolean,
-      "summary": "...",
-      "tasks": ["Task 1", "Task 2"],
-      "skills": ["Java", "Python", "Project Management"]
+      "description": "..."
     }
   ],
-  "projects": [
-    {
-      "name": "...",
-      "description": "...",
-      "technologies": ["Tech 1", "Tech 2"],
-      "dates": "..."
-    }
+  "projects_and_other": [
+    "Project 1 or Block 1 details...",
+    "Project 2 or Block 2 details..."
   ],
   "education": [
     {
@@ -84,7 +77,7 @@ SOURCE 2: PDF TEXT (STRUCTURE GUIDE)
 - Example: If the Markdown has a text block "Java, Python", look at the PDF layout to decide if this belongs to "Skills" or a specific "Experience".
 
 *** STRICT RULES ***
-1. CONTENT SOURCE: All "description", "tasks", "summary", and "dates" in the JSON must be COPIED exactly from Source 1 (Markdown).
+1. CONTENT SOURCE: All "description" and "dates" in the JSON must be COPIED exactly from Source 1 (Markdown).
 2. STRUCTURE SOURCE: Use Source 2 (PDF) only to determine which JSON list (Experience, Education, Projects) a block belongs to.
 3. COMPLETENESS: Ensure ALL text present in the Markdown file is found somewhere in the JSON.
 4. If a block's category is ambiguous in Markdown, defer to the PDF's visual layout to classify it.
@@ -136,19 +129,21 @@ def ai_generate_summary(experiences: List[Dict[str, Any]]) -> Dict[str, str]:
     prompt = SUMMARY_USER_PROMPT.format(experiences_text=exp_text)
     return call_ai(prompt, SUMMARY_SYSTEM_PROMPT, expect_json=True)
 
-def parse_cv_full_text(text: str) -> Dict[str, Any]:
+def parse_cv_full_text(text: str, anchor_map: Dict = None) -> Dict[str, Any]:
     """
     Parses the full text of a CV into structured JSON using the Single-Shot prompt.
     """
     if not text:
         return {}
         
-    # We don't have an anchor map in this simple flow, so we pass an empty one or modify the prompt.
-    # The prompt expects {anchor_map}, so we must provide it.
-    # For now, we'll pass a placeholder saying "No anchors provided".
+    # Format anchor map for prompt
+    anchor_text = "No pre-computed anchors available."
+    if anchor_map:
+        import json
+        anchor_text = json.dumps(anchor_map, indent=2, ensure_ascii=False)
     
     prompt = FULL_CV_EXTRACTION_USER_PROMPT.format(
-        anchor_map="No pre-computed anchors available.",
+        anchor_map=anchor_text,
         text=text
     )
     

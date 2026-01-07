@@ -183,7 +183,7 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         # 3. Request 1 populates everything else (Title, etc.)
         
         direct_metrics = {}
-        declared_exp = parsed_data.get("total_experience_declared")
+        declared_exp = parsed_data.get("basics", {}).get("total_experience_declared")
         
         if declared_exp and str(declared_exp).lower() not in ["null", "none", "", "n/a"]:
             logger.info(f"Experience Explicitly Declared in Request 1: {declared_exp}")

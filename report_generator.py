@@ -141,14 +141,27 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
     # 1. 'direct_data' contains the best value (either Declared Req 1 or Calculated Req 2).
     # 2. Fallback: Calculate from 'experiences' if direct_data is empty.
     
-    total_exp_final = "N/A"
-    if direct_data and direct_data.get('years_experience'):
-        total_exp_final = str(direct_data.get('years_experience'))
+    # 7. Total Experience (Declared vs Calculated)
+    # New Logic: Show both values from 'basics'
+    decl_exp = basics.get('total_experience_declared', 'N/A')
+    calc_exp = basics.get('total_experience_calculated', 0.0)
+
+    parts = []
+    if decl_exp and str(decl_exp).lower() not in ["n/a", "null", "none", ""]:
+        parts.append(f"Decl: {decl_exp}")
+    
+    if calc_exp:
+        parts.append(f"Calc: {calc_exp}")
+        
+    if parts:
+        total_exp_final = " / ".join(parts)
     else:
-        # Fallback Calculation
-        calc_exp = calculate_total_experience(experiences)
-        if calc_exp > 0:
-            total_exp_final = str(calc_exp)
+        # Fallback: Calculate from 'experiences' if basics was empty for some reason
+        fallback_calc = calculate_total_experience(experiences)
+        if fallback_calc > 0:
+            total_exp_final = f"Calc: {fallback_calc}"
+        else:
+            total_exp_final = "N/A"
 
     # 8. Latest Role
     # Defined Logic: Always use Request 1 (Llama) extraction
