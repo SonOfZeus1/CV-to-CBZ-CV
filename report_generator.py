@@ -173,7 +173,24 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
     else:
         latest_exp = get_latest_experience(experiences)
         latest_title = latest_exp.get('job_title', 'N/A')
-        latest_location = latest_exp.get('location', '')
+        
+        # New Logic: Iterate through experiences to find the most recent non-empty location
+        latest_location = ""
+        # Sort experiences to be sure (reusing helper logic or assuming list is sorted?)
+        # Let's sort to be safe using the same key as get_latest_experience
+        def sort_key(exp):
+            if exp.get('is_current'):
+                return datetime.max
+            d = parse_date(exp.get('date_end'))
+            return d if d else datetime.min
+            
+        sorted_exps_loc = sorted(experiences, key=sort_key, reverse=True)
+        
+        for exp in sorted_exps_loc:
+            loc = exp.get('location', '').strip()
+            if loc:
+                latest_location = loc
+                break
 
     return [
         first_name,

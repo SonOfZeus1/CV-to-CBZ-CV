@@ -31,7 +31,6 @@ class ExperienceEntry:
     dates_raw: str = "" 
     date_start: str = "" 
     date_end: str = ""   
-    date_precision: str = "unknown" 
     is_current: bool = False
     duration: str = ""
     description: str = "" # Unified description field
@@ -190,7 +189,6 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
             dates_raw=matches.get("dates_raw", ""),
             date_start=norm_start, # Normalized by Python
             date_end=norm_end,     # Normalized by Python
-            date_precision="unknown", 
             is_current=matches.get("is_current", False),
             duration="", 
             description=matches.get("description", ""), 

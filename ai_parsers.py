@@ -47,7 +47,9 @@ JSON SCHEMA:
       "date_start": "Exact text found (e.g. 'Sept 2018', '01/20')",
       "date_end": "Exact text found (e.g. 'Jan 2020', 'Present')",
       "is_current": boolean,
-      "description": "..."
+      "description": "...",
+      "block_id": "string",
+      "anchor_ids": ["string"]
     }
   ],
   "projects_and_other": [
@@ -81,6 +83,7 @@ SOURCE 2: PDF TEXT (STRUCTURE GUIDE)
 2. STRUCTURE SOURCE: Use Source 2 (PDF) only to determine which JSON list (Experience, Education, Projects) a block belongs to.
 3. COMPLETENESS: Ensure ALL text present in the Markdown file is found somewhere in the JSON.
 4. If a block's category is ambiguous in Markdown, defer to the PDF's visual layout to classify it.
+5. ID MAPPING: Look at the ANCHOR MAP provided below. Find the Block ID and Anchor IDs that correspond to the text you are extracting and include them in the JSON.
 
 *** ANCHOR MAP (Derived from Source 1) ***
 1. "anchors": Validated Dates/Entities.
