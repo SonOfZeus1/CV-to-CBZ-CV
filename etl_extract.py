@@ -121,14 +121,47 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
             except Exception as e:
                 logger.warning(f"Failed to parse frontmatter for {file_name}: {e}")
         
-        # 4. Parse (AI Extraction)
-        parsed_data = parse_cv_from_text(body_text, file_name, metadata=metadata)
+        # 4. Prepare Input Text (Smart Combination)
+        # User Request: Use Source PDF + MD for maximum context.
+        extraction_text = body_text # Default
+        
+        # Try to fetch Source PDF Text
+        source_pdf_id = pdf_file_id
+        if not source_pdf_id and candidate_name and md_file_map:
+             # Auto-Recovery logic here if needed, but pdf_file_id is passed in args usually
+             pass
+             
+        if source_pdf_id:
+            try:
+                logger.debug(f"Downloading Source PDF {source_pdf_id} for Main Extraction...")
+                pdf_path = download_file(drive_service, source_pdf_id, f"temp_main_{source_pdf_id}.pdf", DOWNLOADS_DIR)
+                if pdf_path:
+                    from simple_parsers import extract_text_from_pdf
+                    pdf_text, _ = extract_text_from_pdf(pdf_path)
+                    
+                    if pdf_text and len(pdf_text) > 50:
+                        # Combine! Best of both worlds.
+                        extraction_text = (
+                            f"--- SOURCE PDF TEXT (Use for content details) ---\n"
+                            f"{pdf_text}\n\n"
+                            f"--- MARKDOWN TEXT (Use for structure/headers) ---\n"
+                            f"{body_text}"
+                        )
+                        logger.info(f"Using Dual-Source Text (PDF + MD) for {file_name}")
+                    
+                    # Cleanup
+                    if os.path.exists(pdf_path): os.remove(pdf_path)
+            except Exception as e:
+                logger.warning(f"Main Extraction PDF fetch failed: {e}. Using MD only.")
+
+        # 5. Parse (AI Extraction - Request 1)
+        parsed_data = parse_cv_from_text(extraction_text, file_name, metadata=metadata)
         
         if not parsed_data:
             logger.error(f"Failed to parse {file_name}")
             return False, None, file_item
 
-        # 5. Save JSON Locally
+        # 6. Save JSON Locally
         base_name = os.path.splitext(file_name)[0]
         json_filename = f"{base_name}_extracted.json"
         if not os.path.exists(JSON_OUTPUT_DIR):
@@ -138,7 +171,7 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         with open(json_output_path, 'w', encoding='utf-8') as f:
             json.dump(parsed_data, f, ensure_ascii=False, indent=4)
             
-        # 6. Upload JSON to Drive
+        # 7. Upload JSON to Drive
         json_file_id, json_link = upload_file_to_folder(drive_service, json_output_path, json_output_folder_id)
         
         logger.info(f"SUCCESS: Extracted {file_name} -> {json_filename} ({json_link})")
@@ -644,7 +677,7 @@ def main():
                             match_id = re.search(r'/d/([a-zA-Z0-9_-]+)', cv_link)
                             if match_id:
                                 pdf_file_id = match_id.group(1)
-                                logger.info(f"Auto-Recovery: Extracted PDF ID '{pdf_file_id}' from CV Link.")
+                                logger.debug(f"Auto-Recovery: Extracted PDF ID '{pdf_file_id}' from CV Link.")
                         
                         tasks.append({
                             'file_id': file_id, # The (broken) MD File ID
