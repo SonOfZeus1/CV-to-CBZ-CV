@@ -200,7 +200,8 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
         sorted_exps_loc = sorted(experiences, key=sort_key, reverse=True)
         
         for exp in sorted_exps_loc:
-            loc = exp.get('location', '').strip()
+            val = exp.get('location')
+            loc = str(val).strip() if val else ""
             if loc:
                 latest_location = loc
                 break
