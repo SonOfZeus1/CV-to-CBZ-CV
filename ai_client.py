@@ -150,7 +150,10 @@ class AIClient:
                                 if cleaned_content.strip().endswith("```"):
                                     cleaned_content = cleaned_content.strip()[:-3]
                             
-                            return json.loads(cleaned_content)
+                            data = json.loads(cleaned_content)
+                            if isinstance(data, dict):
+                                data['_meta_model_name'] = model_name
+                            return data
                         except json.JSONDecodeError:
                             logger.error(f"Failed to parse JSON from AI response ({model_name}): {content[:100]}...")
                             if attempt < MAX_RETRIES_PER_MODEL - 1:

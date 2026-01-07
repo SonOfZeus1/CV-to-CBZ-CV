@@ -143,6 +143,9 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
     
     # 7. Total Experience (Declared vs Calculated)
     # New Logic: Show both values from 'basics'
+    meta = json_data.get('meta', {})
+    extraction_model = meta.get('extraction_model', '')
+    
     decl_exp = basics.get('total_experience_declared', 'N/A')
     calc_exp = basics.get('total_experience_calculated', 0.0)
 
@@ -154,14 +157,24 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
         parts.append(f"Calc: {calc_exp}")
         
     if parts:
-        total_exp_final = " / ".join(parts)
+        stats_line = " / ".join(parts)
     else:
         # Fallback: Calculate from 'experiences' if basics was empty for some reason
         fallback_calc = calculate_total_experience(experiences)
         if fallback_calc > 0:
-            total_exp_final = f"Calc: {fallback_calc}"
+            stats_line = f"Calc: {fallback_calc}"
         else:
-            total_exp_final = "N/A"
+            stats_line = "N/A"
+            
+    # Final Output: Model (Line 1) + Stats (Line 2)
+    if extraction_model:
+        # Clean up model name (remove :free etc if desired, or keep full)
+        # User said "indicate the model". Full name is fine or short.
+        # Shortening for readability: "meta-llama/..." -> "Llama-3.3"
+        short_model = extraction_model.split('/')[-1].split(':')[0]
+        total_exp_final = f"[{short_model}]\n{stats_line}"
+    else:
+        total_exp_final = stats_line
 
     # 8. Latest Role
     # Defined Logic: Always use Request 1 (Llama) extraction

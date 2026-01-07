@@ -146,6 +146,7 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         }
     
     # 3. Map to Internal Schema (CVData)
+    extraction_model = extracted_data.get("_meta_model_name", "Unknown Model")
     contact = extracted_data.get("contact_info", {})
     
     # Language Fallback
@@ -251,7 +252,7 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
 
     # Assemble CVData
     cv_data = CVData(
-        meta={"filename": filename},
+        meta={"filename": filename, "extraction_model": extraction_model},
         basics=basics,
         skills_tech=skills_tech,
         experience=structured_experiences,
