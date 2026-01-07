@@ -121,44 +121,30 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
             except Exception as e:
                 logger.warning(f"Failed to parse frontmatter for {file_name}: {e}")
         
-        # 4. Parse (AI Extraction) - DISABLED TEMPORARILY
+        # 4. Parse (AI Extraction) - DISABLED (User Request: 2 Requests only, no JSON upload)
         # parsed_data = parse_cv_from_text(body_text, file_name, metadata=metadata)
-        logger.info(f"Skipping Main JSON Extraction for {file_name} (Mode: Metric Only)")
         
-        # Create minimal skeleton to satisfy report_generator
-        parsed_data = {
-            "basics": {
-                "name": candidate_name or file_name,
-                "email": email_source,
-                "phone": phone_source,
-                "location": "",
-                "total_experience": 0
-            },
-            "experience": [],
-            "education": [],
-            "is_cv": True
-        }
+        # if not parsed_data:
+        #     logger.error(f"Failed to parse {file_name}")
+        #     return False, None, file_item
 
-        # 5. Save JSON Locally - SKIPPED
+        # 5. Save JSON Locally - DISABLED
         # ...
-            
-        # 6. Upload JSON to Drive - SKIPPED
-        json_file_id = None
-        json_link = ""
+        
+        # 6. Upload JSON to Drive - DISABLED
+        # json_file_id, json_link = upload_file_to_folder(drive_service, json_output_path, json_output_folder_id)
         
         # logger.info(f"SUCCESS: Extracted {file_name} -> {json_filename} ({json_link})")
         
         # --- NEW: Direct Metrics Extraction (Source 2 - Multi-Model) ---
         direct_metrics = {}
+        # We need to construct parsed_data from this result
+        parsed_data = {"basics": {}, "is_cv": True} 
+        
         try:
             logger.info(f"Direct Extraction (Multi-Model) for {file_name}...")
             
             # 1. Extract Text from Source PDF (for better accuracy than MD)
-            # We need the PDF path. We have 'local_path' which is the MD file.
-            # We need to reuse the download logic or just rely on MD body text?
-            # User request said "passant le fichier source (et non le fichier .md)".
-            # So we must download the source PDF if possible.
-            
             # Helper to find source PDF ID
             source_pdf_id = pdf_file_id 
             if not source_pdf_id and candidate_name and md_file_map:
@@ -181,13 +167,26 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                 except Exception as pdf_e:
                     logger.warning(f"Failed to download/read Source PDF: {pdf_e}. Falling back to MD text.")
             
-            # 2. Call Multi-Model Parser
+            # 2. Call Multi-Model Parser (Llama + Mistral)
             from ai_parsers import parse_cv_metrics_multi_model
             direct_metrics = parse_cv_metrics_multi_model(pdf_text)
             logger.info(f"Direct Metrics: {direct_metrics}")
             
+            # Map Direct Metrics to 'parsed_data' structure for the report generator
+            parsed_data['basics']['name'] = f"{direct_metrics.get('first_name', '')} {direct_metrics.get('last_name', '')}".strip()
+            parsed_data['basics']['address'] = direct_metrics.get('address', '')
+            parsed_data['basics']['email'] = email_source # Use source if available, will be overridden later
+            parsed_data['basics']['phone'] = phone_source # Use source if available
+            
+            # Store Location for report generator
+            # We can put it in 'experience'->latest or just handle it in direct_data pass
+            # report_generator uses 'experiences' list for location fallback. 
+            # We should inject a dummy experience to hold the location if needed, 
+            # OR better, pass it via direct_data which IS passed to format_candidate_row.
+            
         except Exception as e:
             logger.error(f"Direct Metrics Extraction Failed: {e}")
+            return False, None, file_item
 
         # 7. Generate Report Row
         raw_link = f"https://drive.google.com/file/d/{file_id}/view"

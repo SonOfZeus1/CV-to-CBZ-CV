@@ -150,8 +150,13 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
     is_cv = json_data.get('is_cv', True)
     
     # Always try to get latest experience details from the full parse (for location/fallback title)
+    # With the new 2-model flow, experiences might be empty.
     latest_exp = get_latest_experience(experiences)
     latest_location = latest_exp.get('location', '')
+    
+    # Override with direct_data if available (New Flow)
+    if direct_data and direct_data.get('latest_location'):
+        latest_location = direct_data.get('latest_location')
 
     if not is_cv:
         latest_title = "NON-CV"
