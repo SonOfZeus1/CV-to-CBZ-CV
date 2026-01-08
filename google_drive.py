@@ -495,6 +495,7 @@ def update_sheet_row(service, sheet_id, row_index, values, sheet_name="Feuille 1
             valueInputOption="USER_ENTERED", body=body
         ).execute())
         print(f"Updated row {sheet_row_num}: {values}")
+    except Exception as e:
         print(f"Error in update_sheet_row: {e}")
         raise
 
