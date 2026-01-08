@@ -247,6 +247,85 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         logger.error(f"Error processing {file_name}: {e}", exc_info=True)
         return False, None, file_item
 
+        return False, None, file_item
+
+def sync_annotated_files(drive_service, sheets_service, email_sheet_id, dest_sheet_name, annotated_folder_id):
+    """
+    Synchronizes 'Modifiable MD' files.
+    If a row has 'Lien MD' (Col L) but missing 'Lien MD Modifiable' (Col O),
+    it copies the original MD to the annotated folder and updates Col O.
+    """
+    logger.info("--- Syncing Annotated Files (Modifiable MD) ---")
+    
+    # Read Sheet
+    try:
+        rows = get_sheet_values(sheets_service, email_sheet_id, dest_sheet_name, value_render_option='FORMULA')
+    except Exception as e:
+        logger.error(f"Failed to read sheet for sync: {e}")
+        return
+
+    if not rows:
+        return
+
+    updates = []
+    
+    # Iterate (Skip Header)
+    for i, row in enumerate(rows):
+        if i == 0: continue
+        
+        # Col L (Lien MD) = Index 11
+        # Col O (Lien Modifiable) = Index 14
+        
+        md_link = row[11] if len(row) > 11 else ""
+        mod_link = row[14] if len(row) > 14 else ""
+        
+        if md_link and not mod_link:
+            # Candidate for Sync!
+            # Extract File ID from MD Link
+            match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
+            if match:
+                original_file_id = match.group(1)
+                
+                # Extract Candidate Name for better filenaming?
+                # Col A=Prenom, B=Nom. Index 0, 1.
+                fname = row[0] if len(row) > 0 else "Unknown"
+                lname = row[1] if len(row) > 1 else "Unknown"
+                new_filename = f"{fname}_{lname}_ANNOTATED.md"
+                
+                # Copy File
+                logger.info(f"Creating Modifiable Copy for row {i+1} ({fname} {lname})...")
+                
+                from google_drive import copy_file # Lazy import to avoid circular dep issues if any
+                new_id, new_link = copy_file(drive_service, original_file_id, annotated_folder_id, new_name=new_filename)
+                
+                if new_link:
+                    # Create Link Formula
+                    formula = create_hyperlink_formula(new_link, "Modifier MD")
+                    
+                    updates.append({
+                        'range': f"'{dest_sheet_name}'!O{i+1}",
+                        'values': [[formula]]
+                    })
+                else:
+                    logger.error(f"Failed to copy file for row {i+1}")
+            
+    # Execute Updates
+    if updates:
+        logger.info(f"Flushing {len(updates)} new annotated links to Column O...")
+        chunk_size = 500
+        for k in range(0, len(updates), chunk_size):
+            chunk = updates[k:k+chunk_size]
+            body = {'data': chunk, 'valueInputOption': 'USER_ENTERED'}
+            try:
+                sheets_service.spreadsheets().values().batchUpdate(
+                    spreadsheetId=email_sheet_id, body=body
+                ).execute()
+            except Exception as e:
+                logger.error(f"Failed to update annotations chunk {k}: {e}")
+        logger.info("Annotation Sync Complete.")
+    else:
+        logger.info("No missing annotated files found.")
+
 def process_file(file_item, drive_service, output_folder_id, report_buffer):
     """
     Process a single MD file: Read Content -> Parse -> Upload JSON -> Generate Report Row
@@ -372,6 +451,17 @@ def main():
         # AUTO-RECOVERY: Search for '_cv_index_v2' folder
         # This helps recover from 404 errors if links are dead but files exist in this folder.
         md_folder_name = "_cv_index_v2"
+        annotated_folder_name = "_cv_annotated"
+        annotated_folder_id = os.getenv('ANNOTATED_FOLDER_ID')
+
+        # Ensure Annotated Folder Exists
+        if not annotated_folder_id:
+             try:
+                 annotated_folder_id = get_or_create_folder(drive_service, annotated_folder_name, parent_id=source_folder_id)
+                 logger.info(f"Using Annotated Folder: {annotated_folder_name} ({annotated_folder_id})")
+             except Exception as e:
+                 logger.warning(f"Failed to get/create annotated folder: {e}")
+
         md_file_map = {} # {normalized_name: file_id}
         
         try:
@@ -703,8 +793,19 @@ def main():
 
     logger.info(f"Found {len(tasks)} rows needing processing (Missing JSON or 'Retraiter').")
     
+    # Sort tasks to prioritize rows with valid emails (User Request)
+    def task_priority(t):
+        email = str(t.get('email_source', '')).strip().lower()
+        if not email: return 1 # Low priority
+        if email in ["not found", "ok", "vide"]: return 1 # Low priority
+        if "@" not in email: return 1 # Likely invalid
+        return 0 # High Priority
+
+    tasks.sort(key=task_priority)
+    logger.info("Tasks sorted by Email Priority (Valid Emails First).")
+
     # Batch Limit
-    batch_limit = 1 # Decreased to 1 as requested
+    batch_limit = 2 # Increased to 2 as requested
     tasks_to_process = tasks[:batch_limit]
     logger.info(f"Processing {len(tasks_to_process)} tasks (Batch Limit: {batch_limit})...")
 
@@ -747,6 +848,10 @@ def main():
             logger.info("Updates successful.")
         except Exception as e:
             logger.error(f"Failed to flush updates: {e}")
+
+    # Sync Annotated Files (Maintenance)
+    if annotated_folder_id:
+        sync_annotated_files(drive_service, sheets_service, email_sheet_id, dest_sheet_name, annotated_folder_id)
 
     logger.info("--- Extraction Pipeline Finished ---")
 

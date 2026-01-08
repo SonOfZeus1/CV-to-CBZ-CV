@@ -269,7 +269,25 @@ def move_file(service, file_id, current_folder_id, new_folder_id):
             else:
                 raise
     except Exception as e:
-        print(f"Error moving file {file_id}: {e}")
+            print(f"Error moving file {file_id}: {e}")
+
+def copy_file(service, file_id, destination_folder_id, new_name=None):
+    """
+    Copies a file to a new folder.
+    Returns (new_file_id, new_file_link).
+    """
+    body = {'parents': [destination_folder_id]}
+    if new_name:
+        body['name'] = new_name
+        
+    try:
+        new_file = execute_with_retry(lambda: service.files().copy(
+            fileId=file_id, body=body, fields='id, webViewLink', supportsAllDrives=True
+        ).execute())
+        return new_file.get('id'), new_file.get('webViewLink')
+    except Exception as e:
+        print(f"Error copying file {file_id}: {e}")
+        return None, None
 
 
 # --- SHEETS API ---
@@ -705,13 +723,13 @@ def ensure_report_headers(service, sheet_id, sheet_name, custom_headers=None):
     headers = custom_headers if custom_headers else [
         "Prénom", "Nom", "Email", "Téléphone", "Adresse", 
         "Langues", "Années Expérience", "Dernier Titre", 
-        "Dernière Localisation", "Languages", "Action", "Lien MD", "Lien JSON", "Lien CV"
+        "Dernière Localisation", "Languages", "Action", "Lien MD", "Lien JSON", "Lien CV", "Lien MD Modifiable"
     ]
     
     try:
         # Check first row
         result = service.spreadsheets().values().get(
-            spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1:N1"
+            spreadsheetId=sheet_id, range=f"'{sheet_name}'!A1:O1"
         ).execute()
         values = result.get('values', [])
         
@@ -764,6 +782,14 @@ def ensure_report_headers(service, sheet_id, sheet_name, custom_headers=None):
                  service.spreadsheets().values().update(
                     spreadsheetId=sheet_id, range=f"'{sheet_name}'!N1",
                     valueInputOption="USER_ENTERED", body={'values': [["Lien CV"]]}
+                 ).execute()
+
+            # Check if "Lien MD Modifiable" header is present (index 14)
+            if len(values[0]) < 15 or "Modifiable" not in str(values[0][14]):
+                 print("Adding missing 'Lien MD Modifiable' header...")
+                 service.spreadsheets().values().update(
+                    spreadsheetId=sheet_id, range=f"'{sheet_name}'!O1",
+                    valueInputOption="USER_ENTERED", body={'values': [["Lien MD Modifiable"]]}
                  ).execute()
 
             print(f"Sheet '{sheet_name}' headers checked.")
