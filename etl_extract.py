@@ -326,6 +326,65 @@ def sync_annotated_files(drive_service, sheets_service, email_sheet_id, dest_she
     else:
         logger.info("No missing annotated files found.")
 
+def sync_deletions(sheets_service, sheet_id, source_sheet_name, dest_sheet_name):
+    """
+    Scans Source Sheet for 'DELETE' status.
+    PHYSICALLY deletes the row in BOTH Source and Dest sheets.
+    Critical: Processes from bottom-up to maintain indices.
+    """
+    logger.info("--- Checking for Deletions (Master Delete) ---")
+    
+    try:
+        rows = get_sheet_values(sheets_service, sheet_id, source_sheet_name)
+    except Exception as e:
+        logger.error(f"Failed to read source sheet for deletions: {e}")
+        return
+
+    if not rows: return
+
+    indices_to_delete = []
+    
+    # 1. Identify Rows (Skip Header i=0)
+    for i, row in enumerate(rows):
+        if i == 0: continue
+        
+        # Check Status (Col E, index 4)
+        status = ""
+        if len(row) > 4:
+            status = str(row[4]).strip().upper()
+            
+        if status == "DELETE":
+            indices_to_delete.append(i)
+            
+    if not indices_to_delete:
+        logger.info("No rows marked for deletion.")
+        return
+
+    # 2. Sort Descending (CRITICAL)
+    indices_to_delete.sort(reverse=True)
+    
+    # 3. Delete Logic
+    from google_drive import delete_sheet_rows # Lazy import
+    
+    logger.warning(f"⚠ Found {len(indices_to_delete)} rows to DELETE. Executing Master Delete...")
+    
+    for idx in indices_to_delete:
+        try:
+            # Delete in Source
+            delete_sheet_rows(sheets_service, sheet_id, idx, idx+1, source_sheet_name)
+            
+            # Delete in Dest (Hope alignment holds!)
+            # Check if Dest has enough rows? API usually handles out-of-bounds gracefully? 
+            # Or assume alignment. User promised alignment.
+            delete_sheet_rows(sheets_service, sheet_id, idx, idx+1, dest_sheet_name)
+            
+            logger.info(f"✅ Deleted Row {idx+1} in both sheets.")
+            
+        except Exception as e:
+            logger.error(f"FAILED to delete row {idx+1}: {e}")
+            
+    logger.info("Master Delete Complete.")
+
 def process_file(file_item, drive_service, output_folder_id, report_buffer):
     """
     Process a single MD file: Read Content -> Parse -> Upload JSON -> Generate Report Row
@@ -463,6 +522,16 @@ def main():
                  logger.warning(f"Failed to get/create annotated folder: {e}")
 
         md_file_map = {} # {normalized_name: file_id}
+        dest_sheet_name = "Candidats"
+        
+        # 1. Start with Master Delete (Sync Rows)
+        sync_deletions(sheets_service, email_sheet_id, email_sheet_name, dest_sheet_name)
+        
+        # 2. Sync Annotated Files (Maintenance) - MOVED & FOCUSED
+        if annotated_folder_id:
+            sync_annotated_files(drive_service, sheets_service, email_sheet_id, dest_sheet_name, annotated_folder_id)
+            logger.info("Maintenance Mode: MD Sync Complete. Exiting to skip extraction.")
+            import sys; sys.exit(0)
         
         try:
             if source_folder_id:
@@ -848,10 +917,6 @@ def main():
             logger.info("Updates successful.")
         except Exception as e:
             logger.error(f"Failed to flush updates: {e}")
-
-    # Sync Annotated Files (Maintenance)
-    if annotated_folder_id:
-        sync_annotated_files(drive_service, sheets_service, email_sheet_id, dest_sheet_name, annotated_folder_id)
 
     logger.info("--- Extraction Pipeline Finished ---")
 

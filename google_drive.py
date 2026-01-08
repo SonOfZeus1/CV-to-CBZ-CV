@@ -495,8 +495,44 @@ def update_sheet_row(service, sheet_id, row_index, values, sheet_name="Feuille 1
             valueInputOption="USER_ENTERED", body=body
         ).execute())
         print(f"Updated row {sheet_row_num}: {values}")
-    except Exception as e:
         print(f"Error in update_sheet_row: {e}")
+        raise
+
+def delete_sheet_rows(service, sheet_id, start_index, end_index, sheet_name="Feuille 1"):
+    """
+    Deletes rows from the sheet.
+    start_index: Inclusive (0-based)
+    end_index: Exclusive (0-based)
+    """
+    # Get sheetId
+    sheet_metadata = service.spreadsheets().get(spreadsheetId=sheet_id).execute()
+    sheets = sheet_metadata.get('sheets', '')
+    sheet_int_id = 0
+    for s in sheets:
+        if s.get("properties", {}).get("title") == sheet_name:
+            sheet_int_id = s.get("properties", {}).get("sheetId")
+            break
+
+    requests = [{
+        "deleteDimension": {
+            "range": {
+                "sheetId": sheet_int_id,
+                "dimension": "ROWS",
+                "startIndex": start_index,
+                "endIndex": end_index
+            }
+        }
+    }]
+
+    body = {'requests': requests}
+    
+    try:
+        execute_with_retry(lambda: service.spreadsheets().batchUpdate(
+            spreadsheetId=sheet_id, body=body
+        ).execute())
+        print(f"Deleted rows {start_index} to {end_index} in '{sheet_name}'.")
+    except Exception as e:
+        print(f"Error deleting rows: {e}")
         raise
 
 import re
