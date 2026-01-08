@@ -494,45 +494,46 @@ def main():
         logger.error("Missing configuration. Please set JSON_OUTPUT_FOLDER_ID and EMAIL_SHEET_ID in .env")
         return
 
-    # Initialize Services
+    
+    if not email_sheet_id:
+        logger.error("Missing EMAIL_SHEET_ID")
+        return
+
+    # Authenticate
     try:
         drive_service = get_drive_service()
         sheets_service = get_sheets_service()
-        
-        # Log Service Account Email for Debugging
-        try:
-            about = drive_service.about().get(fields="user").execute()
-            sa_email = about.get('user', {}).get('emailAddress')
-            logger.info(f"Authenticated as: {sa_email}")
-        except Exception as e:
-            logger.warning(f"Could not determine Service Account email: {e}")
+        logger.info(f"Authenticated as: {drive_service.about().get(fields='user').execute()['user']['emailAddress']}")
+    except Exception as e:
+        logger.error(f"Failed to initialize Google Services: {e}")
+        return
 
-        # AUTO-RECOVERY: Search for '_cv_index_v2' folder
-        # This helps recover from 404 errors if links are dead but files exist in this folder.
-        md_folder_name = "_cv_index_v2"
-        annotated_folder_name = "_cv_annotated"
-        annotated_folder_id = os.getenv('ANNOTATED_FOLDER_ID')
+    # AUTO-RECOVERY: Search for folders
+    md_folder_name = "_cv_index_v2"
+    annotated_folder_name = "_cv_annotated"
+    annotated_folder_id = os.getenv('ANNOTATED_FOLDER_ID')
 
-        # Ensure Annotated Folder Exists
-        if not annotated_folder_id:
-             try:
-                 annotated_folder_id = get_or_create_folder(drive_service, annotated_folder_name, parent_id=source_folder_id)
-                 logger.info(f"Using Annotated Folder: {annotated_folder_name} ({annotated_folder_id})")
-             except Exception as e:
-                 logger.warning(f"Failed to get/create annotated folder: {e}")
+    # Ensure Annotated Folder Exists
+    if not annotated_folder_id:
+            try:
+                annotated_folder_id = get_or_create_folder(drive_service, annotated_folder_name, parent_id=source_folder_id)
+                logger.info(f"Using Annotated Folder: {annotated_folder_name} ({annotated_folder_id})")
+            except Exception as e:
+                logger.warning(f"Failed to get/create annotated folder: {e}")
 
-        md_file_map = {} # {normalized_name: file_id}
-        dest_sheet_name = "Candidats"
-        
-        # 1. Start with Master Delete (Sync Rows)
-        sync_deletions(sheets_service, email_sheet_id, email_sheet_name, dest_sheet_name)
-        
-        # 2. Sync Annotated Files (Maintenance) - MOVED & FOCUSED
-        if annotated_folder_id:
-            sync_annotated_files(drive_service, sheets_service, email_sheet_id, dest_sheet_name, annotated_folder_id)
-            logger.info("Maintenance Mode: MD Sync Complete. Exiting to skip extraction.")
-            import sys; sys.exit(0)
-        
+    md_file_map = {} # {normalized_name: file_id}
+    
+    # 1. Start with Master Delete (Sync Rows)
+    sync_deletions(sheets_service, email_sheet_id, email_sheet_name, dest_sheet_name)
+    
+    # 2. Sync Annotated Files (Maintenance) - MOVED & FOCUSED
+    if annotated_folder_id:
+        sync_annotated_files(drive_service, sheets_service, email_sheet_id, dest_sheet_name, annotated_folder_id)
+        logger.info("Maintenance Mode: MD Sync Complete. Exiting to skip extraction.")
+        import sys; sys.exit(0)
+    
+    try:
+
         try:
             if source_folder_id:
                 logger.info(f"Searching for MD folder '{md_folder_name}' inside EMAIL_SOURCE_FOLDER_ID ({source_folder_id})...")
