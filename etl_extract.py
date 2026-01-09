@@ -269,6 +269,13 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                                     
                                     if found_file:
                                         new_id = found_file['id']
+                                        # Handle Shortcuts
+                                        if found_file.get('mimeType') == 'application/vnd.google-apps.shortcut':
+                                            target_id = found_file.get('shortcutDetails', {}).get('targetId')
+                                            if target_id:
+                                                logger.info(f"Target is a Shortcut. Resolving {new_id} -> {target_id}")
+                                                new_id = target_id
+                                        
                                         logger.info(f"♻️ RECOVERY: Found file '{file_name}' with NEW ID {new_id}. Updating content...")
                                         update_file_content(drive_service, new_id, final_content)
                                         logger.info(f"✅ Auto-Tagging Complete (Recovered ID: {new_id}).")
@@ -293,6 +300,13 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                                           found_file = next((f for f in recovery_files if f['name'] == file_name), None)
                                           if found_file:
                                               new_id = found_file['id']
+                                              # Handle Shortcuts
+                                              if found_file.get('mimeType') == 'application/vnd.google-apps.shortcut':
+                                                  target_id = found_file.get('shortcutDetails', {}).get('targetId')
+                                                  if target_id:
+                                                      logger.info(f"Target is a Shortcut. Resolving {new_id} -> {target_id}")
+                                                      new_id = target_id
+
                                               logger.info(f"♻️ RECOVERY: Found file '{file_name}' with NEW ID {new_id}. Retrying update...")
                                               update_file_content(drive_service, new_id, final_content)
                                               logger.info(f"✅ Auto-Tagging Complete (Recovered ID: {new_id}).")
@@ -1042,7 +1056,7 @@ def main():
     logger.info("Tasks sorted by Email Priority (Valid Emails First).")
 
     # Batch Limit
-    batch_limit = 2 # Increased to 2 as requested
+    batch_limit = 1
     tasks_to_process = tasks[:batch_limit]
     logger.info(f"Processing {len(tasks_to_process)} tasks (Batch Limit: {batch_limit})...")
 
