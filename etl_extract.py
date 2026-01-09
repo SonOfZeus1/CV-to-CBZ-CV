@@ -30,7 +30,7 @@ from report_generator import format_candidate_row
 DOWNLOADS_DIR = "downloads"
 JSON_OUTPUT_DIR = "output_jsons"
 
-def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0, languages_source="", md_file_map=None, candidate_name="", pdf_file_id="", email_source="", phone_source=""):
+def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0, languages_source="", md_file_map=None, candidate_name="", pdf_file_id="", email_source="", phone_source="", annotated_folder_id=""):
     """
     Process a single MD file by ID in a separate thread.
     Fetches metadata, downloads, extracts, and returns report row.
@@ -197,6 +197,8 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                          valid_exps.append(e)
                  
                  # 3. Inject Tags into MD ONLY
+                 logger.info(f"Tagging Debug ({file_id}): MD Len={md_boundary}. Candidates={len(experiences)}. Valid={len(valid_exps)}. Offsets={[e.end_char for e in experiences]}")
+                 
                  tagged_body = inject_tags(clean_body, valid_exps)
                  
                  # 4. Check if we improved it
@@ -208,9 +210,28 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                      if content.startswith("---") and len(parts) >= 3:
                          final_content = f"---{parts[1]}---\n\n{tagged_body}"
                          
-                     # Overwrite File
-                     update_file_content(drive_service, file_id, final_content)
-                     logger.info("✅ Auto-Tagging Complete (File Updated).")
+                     # SAFETY LOCK: Verify File Location before writing
+                     # We trust 'file_id' came from Col O, but verify it exists in Annotated Folder if possible.
+                     # Since checking parents via API is extra latency, we rely on the specific ID check from main loop.
+                     # BUT user demanded audit. We will check parents.
+                     
+                     is_safe = True
+                     if annotated_folder_id:
+                         try:
+                             f_meta = drive_service.files().get(fileId=file_id, fields='parents').execute()
+                             parents = f_meta.get('parents', [])
+                             if annotated_folder_id not in parents:
+                                 logger.error(f"CRITICAL SAFETY LOCK: File {file_id} is NOT in Annotated Folder ({annotated_folder_id}). Parents={parents}. ABORTING WRITE.")
+                                 is_safe = False
+                         except Exception as e:
+                             logger.warning(f"Could not verify parents for {file_id}: {e}")
+                     
+                     if is_safe:
+                         # Overwrite File
+                         update_file_content(drive_service, file_id, final_content)
+                         logger.info("✅ Auto-Tagging Complete (File Updated).")
+                     else:
+                         logger.error("❌ Auto-Tagging Aborted due to Safety Lock.")
              except Exception as tag_err:
                  logger.error(f"Auto-Tagging Failed: {tag_err}")
 
@@ -955,7 +976,7 @@ def main():
     max_workers = 5
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_task = {
-            executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process), t['languages_source'], md_file_map, t['candidate_name'], t['pdf_file_id'], t['email_source'], t['phone_source']): t
+            executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process), t['languages_source'], md_file_map, t['candidate_name'], t['pdf_file_id'], t['email_source'], t['phone_source'], annotated_folder_id=annotated_folder_id): t
             for i, t in enumerate(tasks_to_process)
         }
         
