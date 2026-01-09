@@ -198,40 +198,30 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         norm_end = clean_parse_date(raw_end)
         
         
-        # 1. Try Block Lookup
+        # 1. Start with Block boundaries (Default Container)
         bid = matches.get("block_id", "")
         blk = block_lookup.get(bid, {})
-        start_char = blk.get("start_idx", 0)
-        end_char = blk.get("end_idx", 0)
+        block_start = blk.get("start_idx", 0)
+        block_end = blk.get("end_idx", 0)
         
-        # 2. Fallback: Anchor ID Lookup
-        # If Block ID failed (0,0) or incorrect, derive range from Anchors
-        if start_char == 0 and end_char == 0:
-            a_ids = matches.get("anchor_ids", [])
-            valid_anchors = [anchor_lookup.get(aid) for aid in a_ids if aid in anchor_lookup]
-            
-            if valid_anchors:
-                # Find extent of all anchors
-                # Note: This gives the range of the anchors, which might be smaller than the full block,
-                # but it's better than nothing and accurately targets the 'core' of the experience.
-                start_char = min(a['start_idx'] for a in valid_anchors)
-                end_char = max(a['end_idx'] for a in valid_anchors)
+        start_char = block_start
+        end_char = block_end
+        
+        # 2. Refine with Anchors (Granularity)
+        a_ids = matches.get("anchor_ids", [])
+        valid_anchors = [anchor_lookup.get(aid) for aid in a_ids if aid in anchor_lookup]
+        
+        if valid_anchors:
+            # Anchor Start is the TRUE start of the item (e.g. Job Title)
+            start_char = min(a['start_idx'] for a in valid_anchors)
+            # Anchor End is just the end of the Title line, valid for start but not for description.
+            # We keep 'block_end' as the default end, but we will Refine it in Post-Processing.
                 
-                # Expand slightly to capture spacing? Maybe not. Strict is better for tagging.
-                logger.info(f"Fallback: Derived offsets {start_char}-{end_char} from {len(valid_anchors)} anchors (Block ID '{bid}' failed).")
-                
-        # 3. Fallback: Fuzzy Search (Last Resort)
-        # If still 0, try to find the Job Title + Company in the text?
-        # Only if we have the full text available. We don't have 'full_text' string inside this function easily reachable?
-        # Actually 'extraction_text' is not passed to this function. 'text' variable isn't in scope.
-        # But 'anchor_map' spans were derived from 'preprocess_markdown(text)'. So indices are valid.
-        pass
-
+        # 3. Validation / Fallback
         if start_char == 0 and end_char == 0:
-             logger.warning(f"Offset Resolution Failed for '{matches.get('job_title')}'. BlockID='{bid}' not found. Anchors used: {len(matches.get('anchor_ids', []))}.")
+             logger.warning(f"Offset Resolution Failed for '{matches.get('job_title')}'. BlockID='{bid}'.")
         else:
-             # Log success at debug level usually, but info here for audit requested by user
-             logger.info(f"Offset Resolved for '{matches.get('job_title')}': {start_char}-{end_char} (Source: {'Anchor Fallback' if not blk else 'Block ID'}).")
+             logger.debug(f"Offset Tentative for '{matches.get('job_title')}': {start_char}-{end_char}")
 
         entry = ExperienceEntry(
             job_title=matches.get("job_title", ""),
@@ -239,8 +229,8 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
             location=matches.get("location", ""),
             dates=matches.get("dates_raw", ""),
             dates_raw=matches.get("dates_raw", ""),
-            date_start=norm_start, # Normalized by Python
-            date_end=norm_end,     # Normalized by Python
+            date_start=norm_start, 
+            date_end=norm_end,
             is_current=matches.get("is_current", False),
             duration="", 
             description=matches.get("description", ""), 
@@ -251,6 +241,30 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
             end_char=end_char
         )
         structured_experiences.append(entry)
+
+    # 4. Post-Process Segmentation (Anchor-to-Anchor)
+    # Refine end_chars by chaining experiences
+    if structured_experiences:
+        # Sort by start_char to ensure sequence
+        structured_experiences.sort(key=lambda x: x.start_char)
+        
+        for i in range(len(structured_experiences) - 1):
+            curr = structured_experiences[i]
+            next_exp = structured_experiences[i+1]
+            
+            # Smart Segmentation:
+            # Current Exp ends where Next Exp starts.
+            # Verify they belong to same block or general flow?
+            # Assuming chronological text order (which is how CVs are written)
+            
+            if next_exp.start_char > curr.start_char:
+                # Give a small buffer (e.g. strip newlines?) No, keep raw.
+                curr.end_char = next_exp.start_char
+                logger.info(f"Segmented '{curr.job_title}': {curr.start_char}-{curr.end_char} (capped by '{next_exp.job_title}')")
+        
+        # Last item remains capped by block_end (or 0 if block failed)
+        last = structured_experiences[-1]
+        logger.info(f"Segmented '{last.job_title}' (Last): {last.start_char}-{last.end_char}")
 
     # Calculate Total Experience
     declared_exp = extracted_data.get("total_experience_declared")
@@ -403,4 +417,72 @@ def inject_tags(text: str, experiences: List[ExperienceEntry]) -> str:
         
         logger.info(f"Inserted <exp> for '{exp.job_title}' at {start}-{end}")
         
-    return tagged_text
+
+def parse_experiences_from_tags(text: str, filename: str) -> dict:
+    """
+    Reverse Extraction: Parses experiences from existing <exp> tags.
+    Used when a file is marked 'Verified' (Human Edited).
+    """
+    from ai_client import call_ai
+    import re
+    
+    logger.info(f"Reverse Extraction: Parsing tags from {filename}...")
+    
+    # 1. Find all <exp> content
+    matches = re.findall(r"<exp>(.*?)</exp>", text, re.DOTALL)
+    
+    if not matches:
+        raise ValueError("Verified Marker found but NO <exp> tags present in text.")
+        
+    logger.info(f"Found {len(matches)} manual experience blocks.")
+    
+    structured_experiences = []
+    
+    # 2. Extract Data from each block
+    for i, content in enumerate(matches):
+        clean_content = content.strip()
+        if not clean_content: continue
+        
+        try:
+            # Use AI to just parse fields from this block
+            exp_data = extract_experience_fields(clean_content)
+            
+            entry = ExperienceEntry(
+                job_title=exp_data.get('job_title', 'Unknown'),
+                company=exp_data.get('company', ''),
+                location=exp_data.get('location', ''),
+                dates=exp_data.get('dates', ''),
+                dates_raw=exp_data.get('dates', ''),
+                date_start=exp_data.get('date_start', ''),
+                date_end=exp_data.get('date_end', ''),
+                is_current=False, 
+                duration="",
+                description=clean_content, 
+                full_text=clean_content,
+                block_id=f"manual_tag_{i+1}",
+                anchor_ids=[],
+                start_char=0, 
+                end_char=0
+            )
+            structured_experiences.append(entry)
+        except Exception as e:
+            logger.error(f"Failed to parse manual block {i+1}: {e}")
+
+    return {
+        "experience": structured_experiences,
+        "contact_info": {}, 
+    }
+
+def extract_experience_fields(text: str) -> dict:
+    """
+    Mini-LLM call to extract specific fields from a single experience block.
+    """
+    from ai_client import call_ai
+    
+    system_prompt = "You are a Resume Parser. Extract the following fields from the provided experience text: job_title, company, location, dates, date_start (YYYY-MM), date_end (YYYY-MM). Return JSON."
+    resp = call_ai(
+        system_prompt=system_prompt,
+        user_prompt=f"Text:\n{text}",
+        json_mode=True
+    )
+    return resp if resp else {}

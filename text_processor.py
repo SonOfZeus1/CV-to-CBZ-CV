@@ -24,6 +24,9 @@ def preprocess_markdown(text: str) -> str:
     text = re.sub(r'\s+au\s+', ' - ', text, flags=re.IGNORECASE)
     text = re.sub(r'\s+à\s+', ' - ', text, flags=re.IGNORECASE)
 
+    # 3.5 Strip existing <exp> tags (Clean Slate for Auto-Tagging)
+    text = text.replace("<exp>", "").replace("</exp>", "")
+
     # 4. Reduce multiple spaces (but keep newlines)
     # text = re.sub(r'[ \t]+', ' ', text) # DISABLED: Preserves Indentation
     
