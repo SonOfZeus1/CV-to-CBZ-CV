@@ -21,16 +21,16 @@ from google_drive import (
     remove_empty_rows, remove_duplicates_by_column, create_hyperlink_formula, get_sheet_values,
     update_file_content
 )
-from parsers import parse_cv_from_text, inject_tags
+from parsers import parse_cv_from_text, inject_tags, ExperienceEntry
 from text_processor import preprocess_markdown
-from ai_parsers import parse_cv_direct_metrics # New function for direct extraction
+from ai_parsers import parse_cv_direct_metrics
 from report_generator import format_candidate_row
 
 # Configuration
 DOWNLOADS_DIR = "downloads"
 JSON_OUTPUT_DIR = "output_jsons"
 
-def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0, languages_source="", md_file_map=None, candidate_name="", pdf_file_id="", email_source="", phone_source="", annotated_folder_id=""):
+def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0, languages_source="", md_file_map=None, candidate_name="", pdf_file_id="", email_source="", phone_source="", annotated_folder_id="", original_md_link=""):
     """
     Process a single MD file by ID in a separate thread.
     Fetches metadata, downloads, extracts, and returns report row.
@@ -181,6 +181,29 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         
         experiences = parsed_data.get('experience') if isinstance(parsed_data, dict) else getattr(parsed_data, 'experience', [])
         
+        # Ensure experiences are Objects for inject_tags
+        clean_experiences = []
+        if experiences:
+            for e in experiences:
+                if isinstance(e, dict):
+                     # Convert Dict to ExperienceEntry
+                     entry = ExperienceEntry(
+                         start_char=e.get('start_char'),
+                         end_char=e.get('end_char'),
+                         company=e.get('company'),
+                         title=e.get('title'),
+                         start_date=e.get('start_date'),
+                         end_date=e.get('end_date'),
+                         description=e.get('description'),
+                         skills=e.get('skills', []),
+                         block_id=e.get('block_id'),
+                         anchor_ids=e.get('anchor_ids', [])
+                     )
+                     clean_experiences.append(entry)
+                else:
+                    clean_experiences.append(e)
+            experiences = clean_experiences
+
         if parsed_data and experiences:
              try:
                  # 1. Use existing clean_body (Already preprocessed before extraction)
@@ -304,9 +327,12 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
             if phone_source:
                 parsed_data.setdefault('basics', {})['phone'] = phone_source
 
+            # Use Original MD Link (Col L) if provided, otherwise fallback to current file
+            final_md_link = original_md_link if original_md_link else md_link
+
             report_row = format_candidate_row(
                 parsed_data, 
-                md_link, 
+                final_md_link, 
                 emplacement=languages_source, # Use the source language value
                 json_link=json_link_formula,
                 cv_link=cv_link,
@@ -938,6 +964,7 @@ def main():
                             'phone_source': phone_source,
                             'candidate_name': candidate_name,
                             'pdf_file_id': pdf_file_id, # The Original PDF ID (Key for lookup)
+                            'md_link_source': row[11] if len(row) > 11 else "", # Capture Original MD Link (Col L)
                             'row_index': i 
                         })
 
@@ -976,7 +1003,7 @@ def main():
     max_workers = 5
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_task = {
-            executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process), t['languages_source'], md_file_map, t['candidate_name'], t['pdf_file_id'], t['email_source'], t['phone_source'], annotated_folder_id=annotated_folder_id): t
+            executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process), t['languages_source'], md_file_map, t['candidate_name'], t['pdf_file_id'], t['email_source'], t['phone_source'], annotated_folder_id=annotated_folder_id, original_md_link=t['md_link_source']): t
             for i, t in enumerate(tasks_to_process)
         }
         
