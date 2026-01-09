@@ -268,63 +268,68 @@ def sync_annotated_files(drive_service, sheets_service, email_sheet_id, dest_she
         return
 
     updates = []
+    BATCH_FLUSH_SIZE = 20 # Small batch to avoid SSL/Timeout loss
     
     # Iterate (Skip Header)
     for i, row in enumerate(rows):
         if i == 0: continue
-        
-        # Col L (Lien MD) = Index 11
-        # Col O (Lien Modifiable) = Index 14
         
         md_link = row[11] if len(row) > 11 else ""
         mod_link = row[14] if len(row) > 14 else ""
         
         if md_link and not mod_link:
             # Candidate for Sync!
-            # Extract File ID from MD Link
             match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
             if match:
                 original_file_id = match.group(1)
                 
-                # Extract Candidate Name for better filenaming?
-                # Col A=Prenom, B=Nom. Index 0, 1.
                 fname = row[0] if len(row) > 0 else "Unknown"
                 lname = row[1] if len(row) > 1 else "Unknown"
                 new_filename = f"{fname}_{lname}_ANNOTATED.md"
                 
-                # Copy File
                 logger.info(f"Creating Modifiable Copy for row {i+1} ({fname} {lname})...")
                 
-                from google_drive import copy_file # Lazy import to avoid circular dep issues if any
+                from google_drive import copy_file 
                 new_id, new_link = copy_file(drive_service, original_file_id, annotated_folder_id, new_name=new_filename)
                 
                 if new_link:
-                    # Create Link Formula
                     formula = create_hyperlink_formula(new_link, "Modifier MD")
-                    
                     updates.append({
                         'range': f"'{dest_sheet_name}'!O{i+1}",
                         'values': [[formula]]
                     })
+                    
+                    # --- INCREMENTAL FLUSH ---
+                    if len(updates) >= BATCH_FLUSH_SIZE:
+                        logger.info(f"Flushing batch of {len(updates)} updates...")
+                        body = {'data': updates, 'valueInputOption': 'USER_ENTERED'}
+                        try:
+                            sheets_service.spreadsheets().values().batchUpdate(
+                                spreadsheetId=email_sheet_id, body=body
+                            ).execute()
+                            logger.info("✅ Batch Save Success.")
+                            updates = [] # Clear buffer on success
+                        except Exception as e:
+                            logger.error(f"❌ Failed to save batch: {e}")
+                            # Clear buffer to avoid blocking future batches with a bad request
+                            # Although usually it's network, retrying next loop is safer.
+                            updates = []
                 else:
                     logger.error(f"Failed to copy file for row {i+1}")
             
-    # Execute Updates
+    # Final Flush (Remainder)
     if updates:
-        logger.info(f"Flushing {len(updates)} new annotated links to Column O...")
-        chunk_size = 500
-        for k in range(0, len(updates), chunk_size):
-            chunk = updates[k:k+chunk_size]
-            body = {'data': chunk, 'valueInputOption': 'USER_ENTERED'}
-            try:
-                sheets_service.spreadsheets().values().batchUpdate(
-                    spreadsheetId=email_sheet_id, body=body
-                ).execute()
-            except Exception as e:
-                logger.error(f"Failed to update annotations chunk {k}: {e}")
-        logger.info("Annotation Sync Complete.")
-    else:
-        logger.info("No missing annotated files found.")
+        logger.info(f"Flushing final {len(updates)} updates...")
+        body = {'data': updates, 'valueInputOption': 'USER_ENTERED'}
+        try:
+            sheets_service.spreadsheets().values().batchUpdate(
+                spreadsheetId=email_sheet_id, body=body
+            ).execute()
+            logger.info("✅ Final Save Success.")
+        except Exception as e:
+             logger.error(f"❌ Failed to save final batch: {e}")
+             
+    logger.info("Annotation Sync Complete.")
 
 def sync_deletions(sheets_service, sheet_id, source_sheet_name, dest_sheet_name):
     """
@@ -482,7 +487,7 @@ def main():
     # Load Config
     json_output_folder_id = os.getenv('JSON_OUTPUT_FOLDER_ID')
     email_sheet_id = os.getenv('EMAIL_SHEET_ID')
-    email_sheet_name = os.getenv('EMAIL_SHEET_NAME', 'Feuille 1') 
+    email_sheet_name = os.getenv('EMAIL_SHEET_NAME', 'contacts') 
     dest_sheet_name = "Candidats"
     source_folder_id = os.getenv('EMAIL_SOURCE_FOLDER_ID') # Parent folder for _cv_index_v2
     
