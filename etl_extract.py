@@ -254,9 +254,31 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                              logger.warning(f"Could not verify parents for {file_id}: {e}")
                      
                      if is_safe:
-                         # Overwrite File
-                         update_file_content(drive_service, file_id, final_content)
-                         logger.info("✅ Auto-Tagging Complete (File Updated).")
+                         # Overwrite File with Recovery Logic
+                         try:
+                             update_file_content(drive_service, file_id, final_content)
+                             logger.info("✅ Auto-Tagging Complete (File Updated).")
+                         except Exception as e:
+                             # Check for 404 (File Not Found)
+                             if "404" in str(e) or "notFound" in str(e):
+                                 logger.warning(f"Failed to update {file_id} (404). Attempting recovery by filename '{file_name}' in folder '{annotated_folder_id}'...")
+                                 
+                                 try:
+                                     # Search for file by name
+                                     recovery_files = list_files_in_folder(drive_service, annotated_folder_id)
+                                     found_file = next((f for f in recovery_files if f['name'] == file_name), None)
+                                     
+                                     if found_file:
+                                         new_id = found_file['id']
+                                         logger.info(f"♻️ RECOVERY: Found file '{file_name}' with NEW ID {new_id}. Retrying update...")
+                                         update_file_content(drive_service, new_id, final_content)
+                                         logger.info(f"✅ Auto-Tagging Complete (Recovered ID: {new_id}).")
+                                     else:
+                                         logger.error(f"❌ Recovery Failed: File '{file_name}' not found in annotated folder.")
+                                 except Exception as recovery_err:
+                                     logger.error(f"❌ Recovery crashed: {recovery_err}")
+                             else:
+                                 logger.error(f"Failed to update file content: {e}")
                      else:
                          logger.error("❌ Auto-Tagging Aborted due to Safety Lock.")
              except Exception as tag_err:
