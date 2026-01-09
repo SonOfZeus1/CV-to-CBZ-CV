@@ -175,6 +175,8 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         
     # Create Block Lookup for Coordinates
     block_lookup = {b['id']: b for b in anchor_map.get("blocks", [])}
+    # Create Anchor Lookup
+    anchor_lookup = {a['id']: a for a in anchor_map.get("anchors", [])}
 
     for item in extracted_data.get("experiences", []):
         matches = item # AI dict
@@ -187,11 +189,41 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         norm_start = clean_parse_date(raw_start)
         norm_end = clean_parse_date(raw_end)
         
-        # Resolve Coordinates via Block ID
+        
+        # 1. Try Block Lookup
         bid = matches.get("block_id", "")
         blk = block_lookup.get(bid, {})
         start_char = blk.get("start_idx", 0)
         end_char = blk.get("end_idx", 0)
+        
+        # 2. Fallback: Anchor ID Lookup
+        # If Block ID failed (0,0) or incorrect, derive range from Anchors
+        if start_char == 0 and end_char == 0:
+            a_ids = matches.get("anchor_ids", [])
+            valid_anchors = [anchor_lookup.get(aid) for aid in a_ids if aid in anchor_lookup]
+            
+            if valid_anchors:
+                # Find extent of all anchors
+                # Note: This gives the range of the anchors, which might be smaller than the full block,
+                # but it's better than nothing and accurately targets the 'core' of the experience.
+                start_char = min(a['start_idx'] for a in valid_anchors)
+                end_char = max(a['end_idx'] for a in valid_anchors)
+                
+                # Expand slightly to capture spacing? Maybe not. Strict is better for tagging.
+                logger.info(f"Fallback: Derived offsets {start_char}-{end_char} from {len(valid_anchors)} anchors (Block ID '{bid}' failed).")
+                
+        # 3. Fallback: Fuzzy Search (Last Resort)
+        # If still 0, try to find the Job Title + Company in the text?
+        # Only if we have the full text available. We don't have 'full_text' string inside this function easily reachable?
+        # Actually 'extraction_text' is not passed to this function. 'text' variable isn't in scope.
+        # But 'anchor_map' spans were derived from 'preprocess_markdown(text)'. So indices are valid.
+        pass
+
+        if start_char == 0 and end_char == 0:
+             logger.warning(f"Offset Resolution Failed for '{matches.get('job_title')}'. BlockID='{bid}' not found. Anchors used: {len(matches.get('anchor_ids', []))}.")
+        else:
+             # Log success at debug level usually, but info here for audit requested by user
+             logger.info(f"Offset Resolved for '{matches.get('job_title')}': {start_char}-{end_char} (Source: {'Anchor Fallback' if not blk else 'Block ID'}).")
 
         entry = ExperienceEntry(
             job_title=matches.get("job_title", ""),
@@ -329,8 +361,16 @@ def inject_tags(text: str, experiences: List[ExperienceEntry]) -> str:
         if e.start_char is not None and e.end_char is not None:
              # Basic bounds check
              # Note: end_char can be equal to len(text)
+             # Ignore zero-length or point-zero entries unless valid
              if 0 <= e.start_char <= e.end_char <= len(text):
-                 valid_exps.append(e)
+                 if e.start_char == 0 and e.end_char == 0:
+                     logger.warning(f"Skipping Zero-Zero Experience: {e.job_title}")
+                 else:
+                     valid_exps.append(e)
+             else:
+                 logger.warning(f"Dropping Out-of-Bounds Experience: {e.job_title} ({e.start_char}-{e.end_char}) vs Len {len(text)}")
+    
+    logger.info(f"Inject Tags: {len(valid_exps)} valid experiences to tag out of {len(experiences)} candidates.")
     
     # Sort Descending by Start Char
     valid_exps.sort(key=lambda x: x.start_char, reverse=True)
@@ -352,5 +392,7 @@ def inject_tags(text: str, experiences: List[ExperienceEntry]) -> str:
         
         # 2. Insert START (at 'start')
         tagged_text = tagged_text[:start] + "<exp>\n" + tagged_text[start:]
+        
+        logger.info(f"Inserted <exp> for '{exp.job_title}' at {start}-{end}")
         
     return tagged_text
