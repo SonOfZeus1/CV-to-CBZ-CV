@@ -183,8 +183,6 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         
         if parsed_data and experiences:
              try:
-        if parsed_data and experiences:
-             try:
                  # 1. Use existing clean_body (Already preprocessed before extraction)
                  # clean_body is already available from the block above
                  pass
