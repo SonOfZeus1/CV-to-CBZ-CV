@@ -5,6 +5,7 @@ import io
 import yaml
 import re
 import concurrent.futures
+from datetime import datetime
 from dotenv import load_dotenv
 from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.errors import HttpError
@@ -162,13 +163,15 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
             return False, None, file_item
 
         # --- AUTO-TAGGING INJECTION ---
-        if parsed_data and parsed_data.experience:
+        experiences = parsed_data.get('experience') if isinstance(parsed_data, dict) else getattr(parsed_data, 'experience', [])
+        
+        if parsed_data and experiences:
              try:
                  # 1. Re-Clean Body locally to match Parser's internal text
                  clean_body = preprocess_markdown(body_text)
                  
                  # 2. Inject Tags
-                 tagged_body = inject_tags(clean_body, parsed_data.experience)
+                 tagged_body = inject_tags(clean_body, experiences)
                  
                  # 3. Check if we improved it (simple check: length changed)
                  if len(tagged_body) != len(clean_body):
@@ -656,7 +659,8 @@ def main():
             '="Phone (" & NBVAL(D2:D) & ") | VIDE (" & NB.VIDE(D2:D) & ")"', # Dynamic Phone Header
             "Adresse", 
             "Langues", "Années Expérience", "Dernier Titre", 
-            "Dernière Localisation", "Languages", "Action", "Lien MD", "Lien JSON", "Lien CV"
+            "Dernière Localisation", "Languages", "Action", "Lien MD", "Lien JSON", "Lien CV",
+            "Lien MD Modifiable", "Dernière Exécution"
         ]
         ensure_report_headers(sheets_service, email_sheet_id, dest_sheet_name, custom_headers=custom_headers)
     except Exception as e:
@@ -939,7 +943,14 @@ def main():
                     # We can construct a batch update for this specific row.
                     report_buffer.append({
                         'range': f"'{dest_sheet_name}'!A{task['row_index'] + 1}", # A(i+1)
-                        'values': [report_row]
+                        'values': [report_row] # Updates A..N
+                    })
+
+                    # Update Column P (Last Execution Timestamp)
+                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    report_buffer.append({
+                        'range': f"'{dest_sheet_name}'!P{task['row_index'] + 1}", # P(i+1)
+                        'values': [[timestamp]]
                     })
             except Exception as e:
                 logger.error(f"Task failed for {task['file_id']}: {e}")
