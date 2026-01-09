@@ -224,6 +224,11 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                  
                  tagged_body = inject_tags(clean_body, valid_exps)
                  
+                 if tagged_body != clean_body:
+                      logger.info(f"Tagged Content Generated! Preview: {tagged_body[:150].replace(chr(10), ' ')}...")
+                 else:
+                      logger.info("No changes made to content during tagging.")
+                 
                  # 4. Check if we improved it
                  if len(tagged_body) != len(clean_body):
                      logger.info(f"Injecting <exp> tags into Modifiable MD ({file_id})...")

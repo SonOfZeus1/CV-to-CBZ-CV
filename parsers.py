@@ -176,7 +176,15 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
     # Create Block Lookup for Coordinates
     block_lookup = {b['id']: b for b in anchor_map.get("blocks", [])}
     # Create Anchor Lookup
-    anchor_lookup = {a['id']: a for a in anchor_map.get("anchors", [])}
+    # Create Anchor Lookup
+    _anchors = anchor_map.get("anchors", {})
+    all_anchors = []
+    if isinstance(_anchors, dict):
+        all_anchors = _anchors.get("dates", []) + _anchors.get("entities", [])
+    elif isinstance(_anchors, list):
+        all_anchors = _anchors # Fallback if structure changes
+        
+    anchor_lookup = {a['id']: a for a in all_anchors}
 
     for item in extracted_data.get("experiences", []):
         matches = item # AI dict
