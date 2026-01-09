@@ -663,12 +663,13 @@ def main():
         logger.error(f"Failed to ensure headers: {e}")
 
     # 2. Sync Step: Source (Contact) -> Dest (Candidats)
-    logger.info(f"Reading Source Sheet '{source_sheet_name}'...")
+    # 2. Sync Step: Source (Contact) -> Dest (Candidats)
+    logger.info(f"Reading Source Sheet '{email_sheet_name}'...")
     try:
-        source_rows = get_sheet_values(sheets_service, email_sheet_id, source_sheet_name, value_render_option='FORMULA')
+        source_rows = get_sheet_values(sheets_service, email_sheet_id, email_sheet_name, value_render_option='FORMULA')
     except HttpError as e:
         if e.resp.status == 400:
-            logger.warning(f"Failed to read sheet '{source_sheet_name}'. Checking available sheets...")
+            logger.warning(f"Failed to read sheet '{email_sheet_name}'. Checking available sheets...")
             # List available sheets
             try:
                 sheet_metadata = sheets_service.spreadsheets().get(spreadsheetId=email_sheet_id).execute()
@@ -677,10 +678,10 @@ def main():
                 logger.info(f"Available Sheets: {sheet_names}")
                 
                 # Auto-Fix: Check for "Contacts" if we were looking for "Contact"
-                if source_sheet_name == "Contact" and "Contacts" in sheet_names:
+                if email_sheet_name == "Contact" and "Contacts" in sheet_names:
                     logger.info("Found 'Contacts' sheet. Switching source sheet name to 'Contacts'.")
-                    source_sheet_name = "Contacts"
-                    source_rows = get_sheet_values(sheets_service, email_sheet_id, source_sheet_name, value_render_option='FORMULA')
+                    email_sheet_name = "Contacts"
+                    source_rows = get_sheet_values(sheets_service, email_sheet_id, email_sheet_name, value_render_option='FORMULA')
                 else:
                     logger.error("Could not auto-correct sheet name. Please update EMAIL_SHEET_NAME in .env.")
                     raise e
