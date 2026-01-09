@@ -412,11 +412,6 @@ def inject_tags(text: str, experiences: List[ExperienceEntry]) -> str:
         start = exp.start_char
         end = exp.end_char
         
-        # Avoid creating nested tags/overlaps if possible
-        segment = tagged_text[start:end]
-        if "<exp>" in segment or "</exp>" in segment:
-             continue # Avoid double tagging
-
         # Insert Tags
         # 1. Insert END (at 'end')
         tagged_text = tagged_text[:end] + "\n</exp>" + tagged_text[end:]
