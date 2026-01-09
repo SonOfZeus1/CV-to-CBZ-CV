@@ -1144,17 +1144,13 @@ def update_file_content(service, file_id, new_content_str):
     """
     Overwrites the content of an existing Google Drive file with text.
     """
-    try:
-        # Convert string to bytes stream
-        fh = io.BytesIO(new_content_str.encode('utf-8'))
-        media = MediaIoBaseUpload(fh, mimetype='text/markdown', resumable=True)
-        
-        updated_file = execute_with_retry(lambda: service.files().update(
-            fileId=file_id,
-            media_body=media
-        ).execute())
-        
-        return updated_file
-    except Exception as e:
-        print(f"Failed to update file {file_id}: {e}")
-        return None
+    # Convert string to bytes stream
+    fh = io.BytesIO(new_content_str.encode('utf-8'))
+    media = MediaIoBaseUpload(fh, mimetype='text/markdown', resumable=True)
+    
+    updated_file = execute_with_retry(lambda: service.files().update(
+        fileId=file_id,
+        media_body=media
+    ).execute())
+    
+    return updated_file
