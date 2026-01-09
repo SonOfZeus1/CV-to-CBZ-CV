@@ -314,3 +314,43 @@ def parse_cv(file_path: str) -> Optional[dict]:
 
     # 2. Delegate to parse_cv_from_text
     return parse_cv_from_text(text, filename, metadata={"ocr_applied": ocr_applied})
+
+def inject_tags(text: str, experiences: List[ExperienceEntry]) -> str:
+    """
+    Injects <exp> tags into the text based on experience offsets.
+    Processing is done in reverse order (Descending Start Char) to preserve indices.
+    """
+    if not experiences or not text:
+        return text
+
+    # Filter valid entries
+    valid_exps = []
+    for e in experiences:
+        if e.start_char is not None and e.end_char is not None:
+             # Basic bounds check
+             # Note: end_char can be equal to len(text)
+             if 0 <= e.start_char <= e.end_char <= len(text):
+                 valid_exps.append(e)
+    
+    # Sort Descending by Start Char
+    valid_exps.sort(key=lambda x: x.start_char, reverse=True)
+    
+    tagged_text = text
+    
+    for exp in valid_exps:
+        start = exp.start_char
+        end = exp.end_char
+        
+        # Avoid creating nested tags/overlaps if possible
+        segment = tagged_text[start:end]
+        if "<exp>" in segment or "</exp>" in segment:
+             continue # Avoid double tagging
+
+        # Insert Tags
+        # 1. Insert END (at 'end')
+        tagged_text = tagged_text[:end] + "\n</exp>" + tagged_text[end:]
+        
+        # 2. Insert START (at 'start')
+        tagged_text = tagged_text[:start] + "<exp>\n" + tagged_text[start:]
+        
+    return tagged_text
