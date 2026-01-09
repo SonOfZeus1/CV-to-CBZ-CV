@@ -203,6 +203,25 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                     clean_experiences.append(e)
             experiences = clean_experiences
 
+        # CLAMP OFFSETS for Dual-Source (MD + PDF)
+        # If offsets extend into the PDF Context part (appended at end), clamp them to MD body length.
+        md_len = len(clean_body)
+        filtered_experiences = []
+        if experiences:
+            logger.info(f"Clamping offsets to MD Length: {md_len}")
+            for e in experiences:
+                original_end = e.end_char
+                if e.start_char >= md_len:
+                    logger.warning(f"Dropping experience '{e.job_title}' (Starts in PDF Context: {e.start_char} >= {md_len})")
+                    continue
+                
+                if e.end_char > md_len:
+                    logger.info(f"Clamping experience '{e.job_title}' end {original_end} -> {md_len} (End of MD)")
+                    e.end_char = md_len
+                    
+                filtered_experiences.append(e)
+            experiences = filtered_experiences
+
         if parsed_data and experiences:
              try:
                  # 1. Use existing clean_body (Already preprocessed before extraction)
