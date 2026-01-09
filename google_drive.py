@@ -1152,7 +1152,8 @@ def update_file_content(service, file_id, new_content_str):
     
     updated_file = execute_with_retry(lambda: service.files().update(
         fileId=file_id,
-        media_body=media
+        media_body=media,
+        supportsAllDrives=True
     ).execute())
     
     return updated_file

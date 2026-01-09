@@ -263,7 +263,7 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                      
                      if annotated_folder_id:
                          try:
-                             f_meta = drive_service.files().get(fileId=file_id, fields='parents').execute()
+                             f_meta = drive_service.files().get(fileId=file_id, fields='parents', supportsAllDrives=True).execute()
                              parents = f_meta.get('parents', [])
                              if annotated_folder_id not in parents:
                                  logger.error(f"CRITICAL SAFETY LOCK: File {file_id} is NOT in Annotated Folder ({annotated_folder_id}). Parents={parents}. ABORTING WRITE.")
@@ -295,9 +295,23 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                                                 logger.info(f"Target is a Shortcut. Resolving {new_id} -> {target_id}")
                                                 new_id = target_id
                                         
-                                        logger.info(f"♻️ RECOVERY: Found file '{file_name}' with NEW ID {new_id}. Updating content...")
-                                        update_file_content(drive_service, new_id, final_content)
-                                        logger.info(f"✅ Auto-Tagging Complete (Recovered ID: {new_id}).")
+                                        # Deep Validation before Update
+                                        logger.info(f"♻️ RECOVERY: Inspecting Candidate ID {new_id}...")
+                                        try:
+                                            f_chk = drive_service.files().get(fileId=new_id, fields="id, name, trashed, parents, capabilities, mimeType").execute()
+                                            logger.info(f"File Check: ID={f_chk['id']}, Name={f_chk['name']}, Trashed={f_chk.get('trashed')}, CanEdit={f_chk.get('capabilities', {}).get('canEdit')}, MIME={f_chk.get('mimeType')}")
+                                            
+                                            if not f_chk.get('capabilities', {}).get('canEdit'):
+                                                logger.error(f"❌ Recovery Aborted: Service Account does NOT have Edit permission on {new_id}")
+                                                new_id = None # Abort
+                                        except Exception as e_chk:
+                                            logger.error(f"❌ Recovery Check Failed (File 404s on Get): {e_chk}")
+                                            new_id = None
+                                            
+                                        if new_id:
+                                            logger.info(f"Updating content for verified ID {new_id}...")
+                                            update_file_content(drive_service, new_id, final_content)
+                                            logger.info(f"✅ Auto-Tagging Complete (Recovered ID: {new_id}).")
                                     else:
                                         logger.error(f"❌ Recovery Failed: File '{file_name}' not found in annotated folder.")
                               except Exception as rec_err:
