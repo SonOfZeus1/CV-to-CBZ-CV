@@ -6,6 +6,7 @@ import yaml
 import re
 import concurrent.futures
 from datetime import datetime
+import pytz
 from dotenv import load_dotenv
 from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.errors import HttpError
@@ -130,9 +131,12 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         
         # Try to fetch Source PDF Text
         source_pdf_id = pdf_file_id
-        if not source_pdf_id and candidate_name and md_file_map:
              # Auto-Recovery logic here if needed, but pdf_file_id is passed in args usually
              pass
+        
+        # Default initialization for clean_body (in case PDF fetch fails or is skipped)
+        clean_body = preprocess_markdown(body_text)
+        extraction_text = clean_body 
              
         if source_pdf_id:
             try:
@@ -143,12 +147,23 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                     pdf_text, _ = extract_text_from_pdf(pdf_path)
                     
                     if pdf_text and len(pdf_text) > 50:
-                        # DUAL SOURCE DISABLED FOR AUTO-TAGGING COMPATIBILITY
-                        # Using Dual Source changes text length/offsets, making "inject_tags" impossible on original MD.
-                        # We prioritize clean MD + Tags over PDF context for now.
-                        # extraction_text = ( ... )
-                        logger.info(f"Using Single-Source MD for Auto-Tagging alignment.")
-                        pass
+                        # Combine! Best of both worlds.
+                        # We append PDF as Context, but clearly separated so we can filter tags later.
+                        
+                        # CRITICAL: Pre-process MD Body BEFORE sending to AI
+                        # This ensures the indices returned by AI match the 'clean_body' we try to tag later.
+                        clean_body = preprocess_markdown(body_text)
+                        
+                        extraction_text = (
+                            f"{clean_body}\n\n"
+                            f"--- SOURCE PDF CONTEXT (DO NOT TAG BELOW THIS LINE) ---\n"
+                            f"{pdf_text}"
+                        )
+                        logger.info(f"Using Dual-Source Text (Modifiable MD + Original PDF) for {file_name}")
+                    else:
+                        # Fallback for Single Source
+                        clean_body = preprocess_markdown(body_text)
+                        extraction_text = clean_body
                     
                     # Cleanup
                     if os.path.exists(pdf_path): os.remove(pdf_path)
@@ -162,29 +177,44 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
             logger.error(f"Failed to parse {file_name}")
             return False, None, file_item
 
-        # --- AUTO-TAGGING INJECTION ---
+        # --- AUTO-TAGGING INJECTION (Smart Split) ---
+        # Logic: 
+        # 1. We have 'extraction_text' which is (MD + PDF).
+        # 2. We only want to tag the MD part.
+        # 3. We filter experiences that end BEFORE len(body_text).
+        
         experiences = parsed_data.get('experience') if isinstance(parsed_data, dict) else getattr(parsed_data, 'experience', [])
         
         if parsed_data and experiences:
              try:
-                 # 1. Re-Clean Body locally to match Parser's internal text
-                 clean_body = preprocess_markdown(body_text)
+        if parsed_data and experiences:
+             try:
+                 # 1. Use existing clean_body (Already preprocessed before extraction)
+                 # clean_body is already available from the block above
+                 pass
                  
-                 # 2. Inject Tags
-                 tagged_body = inject_tags(clean_body, experiences)
+                 # 2. Filter Experiences (Only those inside MD)
+                 md_boundary = len(clean_body)
+                 valid_exps = []
+                 for e in experiences:
+                     # Check if offsets exist and are within MD range
+                     # Note: We give a small buffer or strict check? Strict is safer.
+                     if e.end_char is not None and e.end_char <= md_boundary:
+                         valid_exps.append(e)
                  
-                 # 3. Check if we improved it (simple check: length changed)
+                 # 3. Inject Tags into MD ONLY
+                 tagged_body = inject_tags(clean_body, valid_exps)
+                 
+                 # 4. Check if we improved it
                  if len(tagged_body) != len(clean_body):
                      logger.info(f"Injecting <exp> tags into Modifiable MD ({file_id})...")
                      
-                     # 4. Re-attach Frontmatter if needed
-                     # We only have 'body_text' (clean_body). 
-                     # If original had frontmatter, we should keep it.
+                     # Re-attach Frontmatter
                      final_content = tagged_body
                      if content.startswith("---") and len(parts) >= 3:
                          final_content = f"---{parts[1]}---\n\n{tagged_body}"
                          
-                     # 5. Overwrite File
+                     # Overwrite File
                      update_file_content(drive_service, file_id, final_content)
                      logger.info("✅ Auto-Tagging Complete (File Updated).")
              except Exception as tag_err:
@@ -849,13 +879,16 @@ def main():
                 # Needs Processing!
                 # Get File ID from MD Link (Col L, Index 11)
                 if len(row) > 11:
-                    md_link = row[11]
+                    # STRICT MODE: Only use Modifiable MD (Col O)
                     mod_link = row[14] if len(row) > 14 else ""
                     
-                    target_link = md_link
-                    if mod_link:
-                         target_link = mod_link
-                         logger.debug(f"Using Modifiable MD (Col O) for extraction.")
+                    if not mod_link:
+                        # Skip if no modifiable MD exists (should have been synced)
+                        continue
+
+                    # Extract ID from Modifiable Link
+                    target_link = mod_link
+                    logger.debug(f"Using Modifiable MD (Col O) as Primary Source.")
                     
                     match = re.search(r'/d/([a-zA-Z0-9_-]+)', target_link)
                     if match:
@@ -946,8 +979,9 @@ def main():
                         'values': [report_row] # Updates A..N
                     })
 
-                    # Update Column P (Last Execution Timestamp)
-                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    # Update Column P (Last Execution Timestamp - Quebec Time)
+                    tz_quebec = pytz.timezone('America/Montreal')
+                    timestamp = datetime.now(tz_quebec).strftime("%Y-%m-%d %H:%M:%S")
                     report_buffer.append({
                         'range': f"'{dest_sheet_name}'!P{task['row_index'] + 1}", # P(i+1)
                         'values': [[timestamp]]
