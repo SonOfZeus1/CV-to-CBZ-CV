@@ -131,13 +131,9 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         
         # Try to fetch Source PDF Text
         source_pdf_id = pdf_file_id
-             # Auto-Recovery logic here if needed, but pdf_file_id is passed in args usually
-             pass
-        
         # Default initialization for clean_body (in case PDF fetch fails or is skipped)
         clean_body = preprocess_markdown(body_text)
-        extraction_text = clean_body 
-             
+        extraction_text = clean_body
         if source_pdf_id:
             try:
                 logger.debug(f"Downloading Source PDF {source_pdf_id} for Main Extraction...")
