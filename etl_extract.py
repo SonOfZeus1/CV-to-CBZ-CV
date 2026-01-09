@@ -236,49 +236,79 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                      final_content = tagged_body
                      if content.startswith("---") and len(parts) >= 3:
                          final_content = f"---{parts[1]}---\n\n{tagged_body}"
-                         
-                     # SAFETY LOCK: Verify File Location before writing
-                     # We trust 'file_id' came from Col O, but verify it exists in Annotated Folder if possible.
-                     # Since checking parents via API is extra latency, we rely on the specific ID check from main loop.
-                     # BUT user demanded audit. We will check parents.
-                     
-                     is_safe = True
-                     if annotated_folder_id:
-                         try:
-                             f_meta = drive_service.files().get(fileId=file_id, fields='parents').execute()
-                             parents = f_meta.get('parents', [])
-                             if annotated_folder_id not in parents:
-                                 logger.error(f"CRITICAL SAFETY LOCK: File {file_id} is NOT in Annotated Folder ({annotated_folder_id}). Parents={parents}. ABORTING WRITE.")
-                                 is_safe = False
-                         except Exception as e:
-                             logger.warning(f"Could not verify parents for {file_id}: {e}")
-                     
-                     if is_safe:
-                         # Overwrite File with Recovery Logic
-                         try:
-                             update_file_content(drive_service, file_id, final_content)
-                             logger.info("✅ Auto-Tagging Complete (File Updated).")
-                         except Exception as e:
-                             # Check for 404 (File Not Found)
-                             if "404" in str(e) or "notFound" in str(e):
-                                 logger.warning(f"Failed to update {file_id} (404). Attempting recovery by filename '{file_name}' in folder '{annotated_folder_id}'...")
-                                 
-                                 try:
+                                              # 5.1. Update File (Modifiable MD)
+                      # SAFETY LOCK: Verify File Location before writing
+                      
+                      is_safe = True
+                      needs_recovery = False
+                      
+                      if annotated_folder_id:
+                          try:
+                              f_meta = drive_service.files().get(fileId=file_id, fields='parents').execute()
+                              parents = f_meta.get('parents', [])
+                              if annotated_folder_id not in parents:
+                                  logger.error(f"CRITICAL SAFETY LOCK: File {file_id} is NOT in Annotated Folder ({annotated_folder_id}). Parents={parents}. ABORTING WRITE.")
+                                  is_safe = False
+                          except Exception as e:
+                              # If 404 here, the ID is definitely bad. Trigger Recovery immediately for the Update step.
+                              err_repr = repr(e)
+                              logger.info(f"DEBUG: Checking Error for 404... Repr: {err_repr}")
+                              if "404" in str(e) or "notFound" in str(e) or "404" in err_repr:
+                                   logger.warning(f"File {file_id} validation failed (404/NotFound). Marking for ID Recovery.")
+                                   needs_recovery = True
+                              else:
+                                   logger.warning(f"Could not verify parents for {file_id}. Type: {type(e)}, Repr: {err_repr}")
+                      
+                      if is_safe:
+                          # Overwrite File with Recovery Logic
+                          if needs_recovery:
+                               # Direct Recovery Path
+                               try:
                                      # Search for file by name
+                                     logger.info(f"Attempting preemptive recovery for '{file_name}'...")
                                      recovery_files = list_files_in_folder(drive_service, annotated_folder_id)
                                      found_file = next((f for f in recovery_files if f['name'] == file_name), None)
                                      
                                      if found_file:
                                          new_id = found_file['id']
-                                         logger.info(f"♻️ RECOVERY: Found file '{file_name}' with NEW ID {new_id}. Retrying update...")
+                                         logger.info(f"♻️ RECOVERY: Found file '{file_name}' with NEW ID {new_id}. Updating content...")
                                          update_file_content(drive_service, new_id, final_content)
                                          logger.info(f"✅ Auto-Tagging Complete (Recovered ID: {new_id}).")
                                      else:
                                          logger.error(f"❌ Recovery Failed: File '{file_name}' not found in annotated folder.")
-                                 except Exception as recovery_err:
-                                     logger.error(f"❌ Recovery crashed: {recovery_err}")
-                             else:
-                                 logger.error(f"Failed to update file content: {e}")
+                               except Exception as rec_err:
+                                     logger.error(f"❌ Recovery Crashed: {rec_err}")
+                          else:
+                               # Normal Path with Fallback
+                               try:
+                                   update_file_content(drive_service, file_id, final_content)
+                                   logger.info("✅ Auto-Tagging Complete (File Updated).")
+                               except Exception as e:
+                                   # Check for 404 (File Not Found)
+                                   err_str = str(e)
+                                   err_repr = repr(e)
+                                   # Broaden check for HttpError
+                                   is_404 = "404" in err_str or "notFound" in err_str or "404" in err_repr or getattr(e, 'resp', {}).get('status') == 404
+                                   
+                                   if is_404:
+                                       logger.warning(f"Failed to update {file_id} (404/NotFound). Attempting recovery by filename '{file_name}' in folder '{annotated_folder_id}'...")
+                                       
+                                       try:
+                                           # Search for file by name
+                                           recovery_files = list_files_in_folder(drive_service, annotated_folder_id)
+                                           found_file = next((f for f in recovery_files if f['name'] == file_name), None)
+                                           
+                                           if found_file:
+                                               new_id = found_file['id']
+                                               logger.info(f"♻️ RECOVERY: Found file '{file_name}' with NEW ID {new_id}. Retrying update...")
+                                               update_file_content(drive_service, new_id, final_content)
+                                               logger.info(f"✅ Auto-Tagging Complete (Recovered ID: {new_id}).")
+                                           else:
+                                               logger.error(f"❌ Recovery Failed: File '{file_name}' not found in annotated folder.")
+                                       except Exception as recovery_err:
+                                           logger.error(f"❌ Recovery crashed: {recovery_err}")
+                                   else:
+                                       logger.error(f"Failed to update file content: {e}")
                      else:
                          logger.error("❌ Auto-Tagging Aborted due to Safety Lock.")
              except Exception as tag_err:
