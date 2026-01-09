@@ -482,7 +482,7 @@ def main():
     # Load Config
     json_output_folder_id = os.getenv('JSON_OUTPUT_FOLDER_ID')
     email_sheet_id = os.getenv('EMAIL_SHEET_ID')
-    source_sheet_name = os.getenv('EMAIL_SHEET_NAME', 'Contacts') # Default to 'Contacts' (Plural)
+    email_sheet_name = os.getenv('EMAIL_SHEET_NAME', 'Feuille 1') 
     dest_sheet_name = "Candidats"
     source_folder_id = os.getenv('EMAIL_SOURCE_FOLDER_ID') # Parent folder for _cv_index_v2
     
