@@ -191,11 +191,10 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                          start_char=e.get('start_char'),
                          end_char=e.get('end_char'),
                          company=e.get('company'),
-                         title=e.get('title'),
-                         start_date=e.get('start_date'),
-                         end_date=e.get('end_date'),
+                         job_title=e.get('job_title'),
+                         date_start=e.get('date_start'),
+                         date_end=e.get('date_end'),
                          description=e.get('description'),
-                         skills=e.get('skills', []),
                          block_id=e.get('block_id'),
                          anchor_ids=e.get('anchor_ids', [])
                      )
