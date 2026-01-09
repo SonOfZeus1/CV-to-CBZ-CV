@@ -209,11 +209,20 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
         
         # 2. Refine with Anchors (Granularity)
         a_ids = matches.get("anchor_ids", [])
-        valid_anchors = [anchor_lookup.get(aid) for aid in a_ids if aid in anchor_lookup]
+        valid_anchors = []
+        for aid in a_ids:
+            if aid in anchor_lookup:
+                valid_anchors.append(anchor_lookup[aid])
+            else:
+                logger.debug(f"Anchor ID {aid} not found in lookup.")
         
         if valid_anchors:
             # Anchor Start is the TRUE start of the item (e.g. Job Title)
-            start_char = min(a['start_idx'] for a in valid_anchors)
+            anchor_starts = [a['start_idx'] for a in valid_anchors]
+            start_char = min(anchor_starts)
+            
+            logger.info(f"DEBUG: Item '{matches.get('job_title')}' - Anchors: {a_ids} -> StartIndices: {anchor_starts} -> Min: {start_char}")
+            
             # Anchor End is just the end of the Title line, valid for start but not for description.
             # We keep 'block_end' as the default end, but we will Refine it in Post-Processing.
                 
