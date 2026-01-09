@@ -16,9 +16,11 @@ from google_drive import (
     get_drive_service, list_files_in_folder, download_file, 
     upload_file_to_folder, get_or_create_folder, move_file,
     get_sheets_service, append_batch_to_sheet, upsert_batch_to_sheet, ensure_report_headers,
-    remove_empty_rows, remove_duplicates_by_column, create_hyperlink_formula, get_sheet_values
+    remove_empty_rows, remove_duplicates_by_column, create_hyperlink_formula, get_sheet_values,
+    update_file_content
 )
-from parsers import parse_cv_from_text
+from parsers import parse_cv_from_text, inject_tags
+from text_processor import preprocess_markdown
 from ai_parsers import parse_cv_direct_metrics # New function for direct extraction
 from report_generator import format_candidate_row
 
@@ -140,14 +142,12 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                     pdf_text, _ = extract_text_from_pdf(pdf_path)
                     
                     if pdf_text and len(pdf_text) > 50:
-                        # Combine! Best of both worlds.
-                        extraction_text = (
-                            f"--- MARKDOWN TEXT (PRIMARY CONTENT SOURCE - Use strings from here) ---\n"
-                            f"{body_text}\n\n"
-                            f"--- SOURCE PDF TEXT (REFERENCE ONLY - Use for structure/layout if needed) ---\n"
-                            f"{pdf_text}"
-                        )
-                        logger.info(f"Using Dual-Source Text (PDF + MD) for {file_name}")
+                        # DUAL SOURCE DISABLED FOR AUTO-TAGGING COMPATIBILITY
+                        # Using Dual Source changes text length/offsets, making "inject_tags" impossible on original MD.
+                        # We prioritize clean MD + Tags over PDF context for now.
+                        # extraction_text = ( ... )
+                        logger.info(f"Using Single-Source MD for Auto-Tagging alignment.")
+                        pass
                     
                     # Cleanup
                     if os.path.exists(pdf_path): os.remove(pdf_path)
@@ -160,6 +160,32 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         if not parsed_data:
             logger.error(f"Failed to parse {file_name}")
             return False, None, file_item
+
+        # --- AUTO-TAGGING INJECTION ---
+        if parsed_data and parsed_data.experience:
+             try:
+                 # 1. Re-Clean Body locally to match Parser's internal text
+                 clean_body = preprocess_markdown(body_text)
+                 
+                 # 2. Inject Tags
+                 tagged_body = inject_tags(clean_body, parsed_data.experience)
+                 
+                 # 3. Check if we improved it (simple check: length changed)
+                 if len(tagged_body) != len(clean_body):
+                     logger.info(f"Injecting <exp> tags into Modifiable MD ({file_id})...")
+                     
+                     # 4. Re-attach Frontmatter if needed
+                     # We only have 'body_text' (clean_body). 
+                     # If original had frontmatter, we should keep it.
+                     final_content = tagged_body
+                     if content.startswith("---") and len(parts) >= 3:
+                         final_content = f"---{parts[1]}---\n\n{tagged_body}"
+                         
+                     # 5. Overwrite File
+                     update_file_content(drive_service, file_id, final_content)
+                     logger.info("✅ Auto-Tagging Complete (File Updated).")
+             except Exception as tag_err:
+                 logger.error(f"Auto-Tagging Failed: {tag_err}")
 
         # 6. Save JSON Locally
         base_name = os.path.splitext(file_name)[0]
@@ -531,11 +557,11 @@ def main():
     # 1. Start with Master Delete (Sync Rows)
     sync_deletions(sheets_service, email_sheet_id, email_sheet_name, dest_sheet_name)
     
-    # 2. Sync Annotated Files (Maintenance) - MOVED & FOCUSED
+    # 2. Sync Annotated Files (Maintenance)
     if annotated_folder_id:
         sync_annotated_files(drive_service, sheets_service, email_sheet_id, dest_sheet_name, annotated_folder_id)
-        logger.info("Maintenance Mode: MD Sync Complete. Exiting to skip extraction.")
-        import sys; sys.exit(0)
+        # sys.exit removed to allow Extraction flow
+
     
     try:
 
@@ -819,7 +845,14 @@ def main():
                 # Get File ID from MD Link (Col L, Index 11)
                 if len(row) > 11:
                     md_link = row[11]
-                    match = re.search(r'/d/([a-zA-Z0-9_-]+)', md_link)
+                    mod_link = row[14] if len(row) > 14 else ""
+                    
+                    target_link = md_link
+                    if mod_link:
+                         target_link = mod_link
+                         logger.debug(f"Using Modifiable MD (Col O) for extraction.")
+                    
+                    match = re.search(r'/d/([a-zA-Z0-9_-]+)', target_link)
                     if match:
                         file_id = match.group(1)
                         cv_link = row[13] if len(row) > 13 else ""

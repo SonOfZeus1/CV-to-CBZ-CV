@@ -25,7 +25,7 @@ def preprocess_markdown(text: str) -> str:
     text = re.sub(r'\s+à\s+', ' - ', text, flags=re.IGNORECASE)
 
     # 4. Reduce multiple spaces (but keep newlines)
-    text = re.sub(r'[ \t]+', ' ', text)
+    # text = re.sub(r'[ \t]+', ' ', text) # DISABLED: Preserves Indentation
     
     # 5. Fix "Month Year" spaced (e.g. "J u i l l e t 2 0 1 8" -> "Juillet 2018")
     # This is harder without a dictionary, but we can try for months
