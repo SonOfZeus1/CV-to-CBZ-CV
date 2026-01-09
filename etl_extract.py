@@ -264,7 +264,7 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                               # Direct Recovery Path
                               try:
                                     logger.info(f"Attempting preemptive recovery for '{file_name}'...")
-                                    recovery_files = list_files_in_folder(drive_service, annotated_folder_id)
+                                    recovery_files = list_files_in_folder(drive_service, annotated_folder_id, mime_types=['text/markdown'])
                                     found_file = next((f for f in recovery_files if f['name'] == file_name), None)
                                     
                                     if found_file:
@@ -289,7 +289,7 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                                   if is_404:
                                       logger.warning(f"Failed to update {file_id} (404/NotFound). Attempting recovery by filename...")
                                       try:
-                                          recovery_files = list_files_in_folder(drive_service, annotated_folder_id)
+                                          recovery_files = list_files_in_folder(drive_service, annotated_folder_id, mime_types=['text/markdown'])
                                           found_file = next((f for f in recovery_files if f['name'] == file_name), None)
                                           if found_file:
                                               new_id = found_file['id']
