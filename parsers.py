@@ -417,9 +417,12 @@ def inject_tags(text: str, experiences: List[ExperienceEntry]) -> str:
         tagged_text = tagged_text[:end] + "\n</exp>" + tagged_text[end:]
         
         # 2. Insert START (at 'start')
+        # 2. Insert START (at 'start')
         tagged_text = tagged_text[:start] + "<exp>\n" + tagged_text[start:]
         
         logger.info(f"Inserted <exp> for '{exp.job_title}' at {start}-{end}")
+    
+    return tagged_text
         
 
 def parse_experiences_from_tags(text: str, filename: str) -> dict:
