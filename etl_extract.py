@@ -257,18 +257,18 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                      if e.end_char is not None and e.end_char <= md_boundary:
                          valid_exps.append(e)
                  
-                  # 3. Inject Tags into MD ONLY
-                  logger.info(f"Tagging Debug ({file_id}): MD Len={md_boundary}. Candidates={len(experiences)}.")
-                  for i, e in enumerate(experiences):
-                      logger.info(f"  Exp {i}: '{e.job_title}' [{e.start_char}-{e.end_char}] (Valid within {md_boundary}?)")
-                  
-                  logger.info(f"  Valid Count: {len(valid_exps)}. Offsets: {[e.end_char for e in valid_exps]}")
+                 # 3. Inject Tags into MD ONLY
+                 logger.info(f"Tagging Debug ({file_id}): MD Len={md_boundary}. Candidates={len(experiences)}.")
+                 for i, e in enumerate(experiences):
+                     logger.info(f"  Exp {i}: '{e.job_title}' [{e.start_char}-{e.end_char}] (Valid within {md_boundary}?)")
+                 
+                 logger.info(f"  Valid Count: {len(valid_exps)}. Offsets: {[e.end_char for e in valid_exps]}")
 
-                  if not skip_tag_injection:
+                 if not skip_tag_injection:
                      tagged_body = inject_tags(clean_body, valid_exps)
-                  else:
-                      logger.info("⏩ Skipping Tag Injection (Verified Mode). Preserving manual tags.")
-                      tagged_body = body_text
+                 else:
+                     logger.info("⏩ Skipping Tag Injection (Verified Mode). Preserving manual tags.")
+                     tagged_body = body_text
                  
                  if tagged_body != clean_body:
                       logger.info(f"Tagged Content Generated! Preview: {tagged_body[:150].replace(chr(10), ' ')}...")
