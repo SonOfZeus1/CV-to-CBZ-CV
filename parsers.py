@@ -182,7 +182,14 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
     }
     
     # 3. Extract Data (Single Shot with Anchors)
-    extracted_data = parse_cv_full_text(clean_text, anchor_map=anchor_map)
+    # CRITICAL: If Verified, use RAW text (with Emojis). If Unverified, use Clean Text.
+    is_verified = (metadata and metadata.get('verified') is True) or ("🟢" in text) 
+    ai_input_text = text if is_verified else clean_text
+    
+    if is_verified:
+        logger.info("✅ Verified Mode: Passing RAW text (with emojis) to AI.")
+        
+    extracted_data = parse_cv_full_text(ai_input_text, anchor_map=anchor_map)
     
     if not extracted_data:
         logger.warning("Single-Shot failed completely. Returning empty structure.")
@@ -388,8 +395,15 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
     
     result_dict = cv_data.to_dict()
     
+    # 4. Post-Process Alignment (Verified Only)
+    # Re-check verification status
+    is_verified = (metadata and metadata.get('verified') is True) or ("🟢" in text)
+    if is_verified and result_dict.get("experience"):
+        logger.info("✅ Verified File: Running Post-Processing Emoji Alignment...")
+        result_dict["experience"] = align_experiences_to_emojis(text, result_dict["experience"])
+    
     # Quality Check
-    logger.info(f"Successfully extracted {len(structured_experiences)} experiences.")
+    logger.info(f"Successfully extracted {len(result_dict['experience'])} experiences.")
     
     # 4. Validation
     validation_issues = validate_extraction(result_dict, anchor_map)
