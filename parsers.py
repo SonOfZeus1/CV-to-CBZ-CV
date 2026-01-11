@@ -494,10 +494,10 @@ def extract_experience_fields(text: str) -> dict:
     """
     from ai_client import call_ai
     
-    system_prompt = "You are a Resume Parser. Extract the following fields from the provided experience text: job_title, company, location, dates, date_start (YYYY-MM), date_end (YYYY-MM). Return JSON."
+    system_prompt = "You are a Resume Parser. Extract the following fields from the provided experience text: job_title, company, location, dates, dates_raw, date_start (YYYY-MM), date_end (YYYY-MM). Return JSON."
     resp = call_ai(
+        prompt=f"Text:\n{text}",
         system_prompt=system_prompt,
-        user_prompt=f"Text:\n{text}",
-        json_mode=True
+        expect_json=True
     )
     return resp if resp else {}
