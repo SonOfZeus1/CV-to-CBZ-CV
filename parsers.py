@@ -494,10 +494,38 @@ def extract_experience_fields(text: str) -> dict:
     """
     from ai_client import call_ai
     
-    system_prompt = "You are a Resume Parser. Extract the following fields from the provided experience text: job_title, company, location, dates, dates_raw, date_start (YYYY-MM), date_end (YYYY-MM). Return JSON."
+    system_prompt = """You are an expert CV Parser. Your goal is to extract structured data from a SINGLE experience block isolated from a CV.
+    
+    CRITICAL RULES:
+    1. EXHAUSTIVE EXTRACTION: Extract ALL details found in the text.
+    2. DATES: 
+       - "dates_raw": Copy the EXACT text string found (e.g. "sept 2018 - Present").
+       - "date_start" / "date_end": Keep them as close to original text as possible. DO NOT convert to YYYY-MM if it loses meaning (like "Spring 2020").
+       - If "Present", "Current", or "Aujourd'hui" is found, set "is_current": true.
+    3. TOOLS & SKILLS: identifying technical skills (Java, Python, AWS, etc.) is CRITICAL. Include them in the 'description' if they don't have a specific field.
+    4. ROLES: If multiple roles are listed in this single block, merge them into a coherent "job_title" (e.g. "Senior Dev -> Team Lead") or pick the most senior.
+    
+    Output strictly JSON matching this structure:
+    {
+      "job_title": "string",
+      "company": "string",
+      "location": "string",
+      "dates_raw": "string",
+      "date_start": "string",
+      "date_end": "string",
+      "is_current": boolean,
+      "description": "string (summary of the role + keywords)"
+    }
+    """
     resp = call_ai(
-        prompt=f"Text:\n{text}",
+        prompt=f"Experience Text:\n{text}",
         system_prompt=system_prompt,
         expect_json=True
     )
+    
+    if isinstance(resp, list):
+        if resp:
+            return resp[0]
+        return {}
+        
     return resp if resp else {}
