@@ -397,36 +397,16 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         # 3. Request 1 populates everything else (Title, etc.)
         
         direct_metrics = {}
-        declared_exp = parsed_data.get("basics", {}).get("total_experience_declared")
+        declared_exp = parsed_data.get("basics", {}).get("total_experience")
         
         if declared_exp and str(declared_exp).lower() not in ["null", "none", "", "n/a"]:
             logger.info(f"Experience Explicitly Declared in Request 1: {declared_exp}")
             direct_metrics["years_experience"] = declared_exp
-            # Title comes from parsed_data['experiences']
         else:
-            logger.info("No explicit experience declared. Triggering Request 2 (Calculated)...")
-            try:
-                # 1. Prepare Text (Source PDF Preferred)
-                source_pdf_id = pdf_file_id 
-                target_text = body_text # Default
-
-                if source_pdf_id:
-                     try:
-                        pdf_path = download_file(drive_service, source_pdf_id, f"temp_{source_pdf_id}.pdf", DOWNLOADS_DIR)
-                        if pdf_path:
-                            from simple_parsers import extract_text_from_pdf
-                            target_text, _ = extract_text_from_pdf(pdf_path)
-                            if os.path.exists(pdf_path): os.remove(pdf_path)
-                     except Exception:
-                        pass # Fallback to body_text
-
-                # 2. Call Gemini for Calculation (or fallback to defaults)
-                # We remove the specific model constraint so it can fall back to Llama/Mistral if Gemini is 429'd.
-                parsed_metrics = parse_cv_direct_metrics(target_text)
-                direct_metrics["years_experience"] = parsed_metrics.get("years_experience")
-                
-            except Exception as e:
-                logger.error(f"Request 2 Failed: {e}")
+            # DISABLED PER USER REQUEST (One Request Per Line)
+            # logger.info("No explicit experience declared. Triggering Request 2 (Calculated)...")
+            logger.info("No explicit experience declared in Request 1. Skipping Request 2 (User Config: 1 Request/Line).")
+            pass
 
         # 7. Generate Report Row
         raw_link = f"https://drive.google.com/file/d/{file_id}/view"
