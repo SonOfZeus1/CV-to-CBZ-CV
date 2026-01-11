@@ -827,7 +827,7 @@ def main():
             '="Phone (" & NBVAL(D2:D) & ") | VIDE (" & NB.VIDE(D2:D) & ")"', # Dynamic Phone Header
             "Adresse", 
             "Langues", "Années Expérience", "Dernier Titre", 
-            "Dernière Localisation", "Languages", "Action", "Lien MD", "Lien JSON", "Lien CV",
+            "Dernière Localisation", "Languages", "Action", "Lien MD", '="Lien Json (" & NBVAL(M2:M) & ")"', "Lien CV",
             "Lien MD Modifiable", "Dernière Exécution"
         ]
         ensure_report_headers(sheets_service, email_sheet_id, dest_sheet_name, custom_headers=custom_headers)
