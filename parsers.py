@@ -484,7 +484,7 @@ def parse_experiences_from_tags(text: str, filename: str) -> dict:
             logger.error(f"Failed to parse manual block {i+1}: {e}")
 
     return {
-        "experience": structured_experiences,
+        "experience": [asdict(e) for e in structured_experiences],
         "contact_info": {}, 
     }
 
