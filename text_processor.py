@@ -26,6 +26,7 @@ def preprocess_markdown(text: str) -> str:
 
     # 3.5 Strip existing <exp> tags (Clean Slate for Auto-Tagging)
     text = text.replace("<exp>", "").replace("</exp>", "")
+    text = text.replace("🟢", "").replace("🔴", "")
 
     # 4. Reduce multiple spaces (but keep newlines)
     # text = re.sub(r'[ \t]+', ' ', text) # DISABLED: Preserves Indentation

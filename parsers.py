@@ -414,13 +414,12 @@ def inject_tags(text: str, experiences: List[ExperienceEntry]) -> str:
         
         # Insert Tags
         # 1. Insert END (at 'end')
-        tagged_text = tagged_text[:end] + "\n</exp>" + tagged_text[end:]
+        tagged_text = tagged_text[:end] + "\n🔴" + tagged_text[end:]
         
         # 2. Insert START (at 'start')
-        # 2. Insert START (at 'start')
-        tagged_text = tagged_text[:start] + "<exp>\n" + tagged_text[start:]
+        tagged_text = tagged_text[:start] + "🟢\n" + tagged_text[start:]
         
-        logger.info(f"Inserted <exp> for '{exp.job_title}' at {start}-{end}")
+        logger.info(f"Inserted Emoji Tag for '{exp.job_title}' at {start}-{end}")
     
     return tagged_text
         
@@ -435,11 +434,20 @@ def parse_experiences_from_tags(text: str, filename: str) -> dict:
     
     logger.info(f"Reverse Extraction: Parsing tags from {filename}...")
     
-    # 1. Find all <exp> content
-    matches = re.findall(r"<exp>(.*?)</exp>", text, re.DOTALL)
+    # 1. Find all <exp> content (Now Emojis)
+    # 🟢 starts, 🔴 ends.
+    matches = re.findall(r"🟢(.*?)🔴", text, re.DOTALL)
     
     if not matches:
-        raise ValueError("Verified Marker found but NO <exp> tags present in text.")
+        # Fallback? Maybe user used Stop Sign 🛑?
+        matches = re.findall(r"🟢(.*?)🛑", text, re.DOTALL)
+    
+    if not matches:
+        logger.warning("Verified Marker found but NO Emoji tags (🟢...🔴) found. Checking for legacy tags...")
+        matches = re.findall(r"<exp>(.*?)</exp>", text, re.DOTALL)
+        
+    if not matches:
+        logger.warning("No experience blocks found despite Verified status.")
         
     logger.info(f"Found {len(matches)} manual experience blocks.")
     
