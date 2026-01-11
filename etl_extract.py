@@ -166,28 +166,21 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
             except Exception as e:
                 logger.warning(f"Main Extraction PDF fetch failed: {e}. Using MD only.")
 
-        # 5. Extraction Strategy (Verified vs Unverified)
         is_verified = False
         if (metadata and metadata.get('verified') is True) or ("✅" in body_text):
             is_verified = True
 
         skip_tag_injection = False
-        parsed_data = None
+        extraction_source_text = extraction_text # Default (Cleaned)
 
         if is_verified:
-             logger.info(f"✅ VERIFIED MARKER DETECTED in {file_name}. Running Reverse Extraction (Tags -> JSON)...")
-             try:
-                 # Import helper dynamically to avoid circular deps if any
-                 from parsers import parse_experiences_from_tags
-                 parsed_data = parse_experiences_from_tags(body_text, file_name)
-                 skip_tag_injection = True
-             except Exception as ve:
-                 logger.error(f"Reverse Extraction Failed: {ve}. Fallback to Standard AI.")
-                 is_verified = False # Fallback
-
-        if not is_verified:
-             # Standard AI Extraction
-             parsed_data = parse_cv_from_text(extraction_text, file_name, metadata=metadata)
+             logger.info(f"✅ VERIFIED MARKER DETECTED in {file_name}. Using Single-Shot Extraction on Emoji-Marked Text...")
+             # Use RAW body (with emojis) so Rule 0 applies
+             extraction_source_text = f"{body_text}\n\n--- SOURCE PDF CONTEXT (DO NOT TAG BELOW THIS LINE) ---\n{pdf_text}"
+             skip_tag_injection = True
+        
+        # Unified AI Call (Big Brain)
+        parsed_data = parse_cv_from_text(extraction_source_text, file_name, metadata=metadata)
         
         if not parsed_data:
             logger.error(f"Failed to parse {file_name}")

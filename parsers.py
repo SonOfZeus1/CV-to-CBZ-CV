@@ -107,6 +107,55 @@ def calculate_months_between(start_str: str, end_str: str, is_current: bool) -> 
     return max(0, total)
 
 
+def align_experiences_to_emojis(text: str, experiences: List[Dict]) -> List[Dict]:
+    """
+    For Verified Files: Force the AI experiences to match the EXACT physical positions of emojis.
+    Sequence-based matching: Exp 1 -> Emoji Block 1.
+    """
+    # 1. Find all physical emoji blocks
+    emoji_blocks = []
+    start_indices = [m.start() for m in re.finditer("🟢", text)]
+    end_indices = [m.start() for m in re.finditer("🔴", text)]
+    
+    count = min(len(start_indices), len(end_indices))
+    logger.info(f"🔍 Marker-First Alignment: Found {count} valid 🟢...🔴 blocks.")
+    
+    for i in range(count):
+        emoji_blocks.append((start_indices[i], end_indices[i]))
+        
+    if not emoji_blocks:
+        logger.warning("⚠️ Verified Mode active but NO Emoji markers found in text.")
+        return experiences
+
+    # 2. Align AI experiences to these blocks
+    logger.info(f"🧩 Aligning {len(experiences)} AI interactions to {len(emoji_blocks)} physical blocks...")
+    aligned_exps = []
+    
+    for i, exp in enumerate(experiences):
+        if i < len(emoji_blocks):
+            # We have a physical block for this experience
+            real_start, real_end = emoji_blocks[i]
+            
+            # FORCE OVERWRITE
+            exp['start_char'] = real_start
+            exp['end_char'] = real_end
+            
+            # Generate Anchor ID
+            anchor_id = f"exp_emoji_{i}_{real_start}"
+            exp['anchor_ids'] = [anchor_id]
+            exp['block_id'] = f"block_{i}"
+            
+            logger.info(f"  ✅ Exp {i} ('{exp.get('job_title', 'Unknown')}') -> Linked to Block {i} [{real_start}-{real_end}]")
+            aligned_exps.append(exp)
+        else:
+            logger.warning(f"  ❌ Exp {i} ('{exp.get('job_title')}') dropped: No corresponding Emoji Block found (Limit {len(emoji_blocks)}).")
+            pass 
+            
+    if len(emoji_blocks) > len(experiences):
+        logger.warning(f"⚠️ Mismatch: Found {len(emoji_blocks)} markers but AI only extracted {len(experiences)} experiences. Checking prompt/text...")
+            
+    return aligned_exps
+
 def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> Dict[str, Any]:
     """
     Main entry point for CV parsing.

@@ -13,12 +13,12 @@ Output STRICT JSON matching the schema below.
 
 CRITICAL RULES:
 0. MANUAL OVERRIDE (PRIORITY 1):
-   - Check for XML-style tags in the text: <exp>...</exp>.
-   - IF FOUND: You MUST extract experiences ONLY from within these tags.
-   - Ignore any text appearing outside of <exp> tags for the "experiences" array.
-   - Each <exp> block corresponds to exactly ONE experience entry.
-   - Do NOT merge or split content inside an <exp> block.
-   - IF NO TAGS FOUND: Proceed with normal auto-extraction logic.
+   - Check for EMOJI markers in the text: Start=🟢, End=🔴.
+   - IF FOUND: You MUST extract experiences ONLY from within these markers.
+   - Ignore any text appearing outside of 🟢/🔴 markers for the "experiences" array.
+   - Each 🟢...🔴 block corresponds to exactly ONE experience entry.
+   - Do NOT merge or split content inside a marker block.
+   - IF NO MARKERS FOUND: Proceed with normal auto-extraction logic.
 
 0.5. CLASSIFICATION: Determine if the document is a CV. 
    - If it is a CV, set "is_cv": true.
