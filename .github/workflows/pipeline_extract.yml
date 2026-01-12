@@ -3,6 +3,10 @@ name: Pipeline 1 - Extraction (PDF -> JSON)
 on:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 
 
 jobs:

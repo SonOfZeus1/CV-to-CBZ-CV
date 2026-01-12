@@ -1118,7 +1118,11 @@ def main():
     report_buffer = []
     
     # Parallel Execution
-    max_workers = 5
+    # Parallel Execution
+    # User Request: Fastest possible.
+    # IO Bound (Network + AI) -> Can handle higher concurrency.
+    # Rate limits are handled by AI Client decorators.
+    max_workers = 20
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_task = {
             executor.submit(process_file_by_id, t['file_id'], t['cv_link'], json_output_folder_id, i+1, len(tasks_to_process), t['languages_source'], md_file_map, t['candidate_name'], t['pdf_file_id'], t['email_source'], t['phone_source'], annotated_folder_id=annotated_folder_id, original_md_link=t['md_link_source']): t
