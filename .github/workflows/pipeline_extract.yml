@@ -1,6 +1,8 @@
 name: Pipeline 1 - Extraction (PDF -> JSON)
 
 on:
+  schedule:
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 concurrency:
