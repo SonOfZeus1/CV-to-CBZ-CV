@@ -629,8 +629,18 @@ def process_file(file_item, drive_service, output_folder_id, report_buffer):
             return
 
         # 5. Save JSON Locally
-        base_name = os.path.splitext(file_name)[0]
-        json_filename = f"{base_name}_extracted.json"
+        # FIX: Ensure unique filename. The input 'file_name' might be generic (e.g. __ANNOTATED.md).
+        # We try to use candidate_name if available, otherwise file_id.
+        safe_name = "Candidate"
+        if candidate_name and candidate_name != "Unknown Candidate":
+            safe_name = "".join([c for c in candidate_name if c.isalnum() or c in (' ', '-', '_')]).strip().replace(' ', '_')
+        
+        # Use a combination of Name and partial ID to ensure uniqueness and readability
+        unique_suffix = file_id[-6:] # Last 6 chars of ID
+        json_filename = f"{safe_name}_{unique_suffix}_extracted.json"
+        
+        logger.info(f"Generating Unique JSON Filename: {json_filename}")
+
         if not os.path.exists(JSON_OUTPUT_DIR):
             os.makedirs(JSON_OUTPUT_DIR)
         json_output_path = os.path.join(JSON_OUTPUT_DIR, json_filename)
