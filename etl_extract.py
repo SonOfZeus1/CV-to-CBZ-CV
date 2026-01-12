@@ -1109,38 +1109,37 @@ def main():
             try:
                 success, report_row, _ = future.result()
                 if success and report_row:
-                    # We have a full report row.
-                    # We want to UPDATE the specific row index `task['row_index']`.
-                    # But `report_row` is a list of values.
-                    # We can construct a batch update for this specific row.
-                    report_buffer.append({
-                        'range': f"'{dest_sheet_name}'!A{task['row_index'] + 1}", # A(i+1)
-                        'values': [report_row] # Updates A..N
+                    # Immediate Update Strategy
+                    row_updates = []
+                    
+                    # 1. Update Main Row Data
+                    row_updates.append({
+                        'range': f"'{dest_sheet_name}'!A{task['row_index'] + 1}", 
+                        'values': [report_row]
                     })
 
-                    # Update Column P (Last Execution Timestamp - Quebec Time)
+                    # 2. Update Timestamp
                     tz_quebec = pytz.timezone('America/Montreal')
                     timestamp = datetime.now(tz_quebec).strftime("%Y-%m-%d %H:%M:%S")
-                    report_buffer.append({
-                        'range': f"'{dest_sheet_name}'!P{task['row_index'] + 1}", # P(i+1)
+                    row_updates.append({
+                        'range': f"'{dest_sheet_name}'!P{task['row_index'] + 1}",
                         'values': [[timestamp]]
                     })
+
+                    # Execute Immediate Write
+                    body = {'data': row_updates, 'valueInputOption': 'USER_ENTERED'}
+                    try:
+                        sheets_service.spreadsheets().values().batchUpdate(
+                            spreadsheetId=email_sheet_id, body=body
+                        ).execute()
+                        logger.info(f"✅ Excel Updated immediately for row {task['row_index'] + 1} ({task['candidate_name']})")
+                    except Exception as sheet_err:
+                        logger.error(f"❌ Failed to update Excel for {task['candidate_name']}: {sheet_err}")
+
             except Exception as e:
                 logger.error(f"Task failed for {task['file_id']}: {e}")
 
-    # Flush Updates
-    if report_buffer:
-        logger.info(f"Flushing {len(report_buffer)} updates to '{dest_sheet_name}'...")
-        # We can't use upsert_batch_to_sheet because we are updating specific rows by index.
-        # We need a simple batch update.
-        body = {'data': report_buffer, 'valueInputOption': 'USER_ENTERED'}
-        try:
-            sheets_service.spreadsheets().values().batchUpdate(
-                spreadsheetId=email_sheet_id, body=body
-            ).execute()
-            logger.info("Updates successful.")
-        except Exception as e:
-            logger.error(f"Failed to flush updates: {e}")
+    # No final flush needed anymore
 
     logger.info("--- Extraction Pipeline Finished ---")
 
