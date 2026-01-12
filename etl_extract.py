@@ -102,7 +102,11 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
     
     try:
         # 1. Download MD File
-        local_path = download_file(drive_service, file_id, file_name, DOWNLOADS_DIR)
+        # FIX: Race condition! All threads were downloading '___ANNOTATED.md' to the SAME local path.
+        # We must enforce a unique local filename per thread.
+        unique_local_name = f"{file_id}_{file_name}"
+        local_path = download_file(drive_service, file_id, unique_local_name, DOWNLOADS_DIR)
+        
         if not local_path:
             logger.error(f"Failed to download {file_name}")
             return False, None, file_item
