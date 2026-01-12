@@ -376,8 +376,15 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
                  logger.error(f"Auto-Tagging Failed: {tag_err}")
 
         # 6. Save JSON Locally
-        base_name = os.path.splitext(file_name)[0]
-        json_filename = f"{base_name}_extracted.json"
+        # FIX: Ensure unique filename.
+        safe_name = "Candidate"
+        candidate_name = parsed_data.get('basics', {}).get('name')
+        if candidate_name and candidate_name != "Unknown Candidate":
+             safe_name = "".join([c for c in candidate_name if c.isalnum() or c in (' ', '-', '_')]).strip().replace(' ', '_')
+         
+        unique_suffix = file_id[-6:]
+        json_filename = f"{safe_name}_{unique_suffix}_extracted.json"
+        
         if not os.path.exists(JSON_OUTPUT_DIR):
             os.makedirs(JSON_OUTPUT_DIR)
         json_output_path = os.path.join(JSON_OUTPUT_DIR, json_filename)
