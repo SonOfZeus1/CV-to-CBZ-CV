@@ -807,11 +807,26 @@ def ensure_report_headers(service, sheet_id, sheet_name, custom_headers=None):
                  ).execute()
 
             # Check if "Lien JSON" header is present (index 12)
-            if len(values[0]) < 13 or values[0][12] != "Lien JSON":
-                 print("Adding missing 'Lien JSON' header...")
+            # Check if it *looks* like our dynamic header (Values might be "Lien Json (10)")
+            expected_json_header = headers[12]
+            current_json_header = str(values[0][12]) if len(values[0]) > 12 else ""
+            
+            # If it's missing or doesn't match the fuzzy expected pattern (or just overwrite to be safe for formula)
+            # We strictly enforce the formula if provided (checking "=" usually implies formula intent)
+            should_update_json = False
+            if len(values[0]) < 13:
+                should_update_json = True
+            elif "Lien Json" not in current_json_header and "Lien JSON" not in current_json_header:
+                 should_update_json = True
+            elif expected_json_header.startswith("=") and "(" not in current_json_header:
+                 # If we expect a formula (with counts) but see static text (no Parens), force update
+                 should_update_json = True
+
+            if should_update_json:
+                 print(f"Updating 'Lien JSON' header to formula: {expected_json_header}...")
                  service.spreadsheets().values().update(
                     spreadsheetId=sheet_id, range=f"'{sheet_name}'!M1",
-                    valueInputOption="USER_ENTERED", body={'values': [["Lien JSON"]]}
+                    valueInputOption="USER_ENTERED", body={'values': [[expected_json_header]]}
                  ).execute()
 
             # Check if "Lien CV" header is present (index 13)

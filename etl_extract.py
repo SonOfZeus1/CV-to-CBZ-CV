@@ -1090,7 +1090,7 @@ def main():
     logger.info("Tasks sorted by Email Priority (Valid Emails First).")
 
     # Batch Limit
-    batch_limit = 50
+    batch_limit = 2
     tasks_to_process = tasks[:batch_limit]
     logger.info(f"Processing {len(tasks_to_process)} tasks (Batch Limit: {batch_limit})...")
 

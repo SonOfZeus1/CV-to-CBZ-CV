@@ -108,33 +108,20 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
     """
     # The JSON structure has changed. It now uses 'basics' for contact info.
     basics = json_data.get('basics', {})
-    experiences = json_data.get('experience', []) # Note: 'experience' not 'experiences' in the new JSON
-
-    # 1-2. Name (Split into First/Last if possible, otherwise put full name in First Name)
-    full_name = basics.get('name', '')
-    if ' ' in full_name:
-        # Simple split
-        parts = full_name.split(' ', 1)
-        first_name = parts[0]
-        last_name = parts[1]
-    else:
-        first_name = full_name
-        last_name = ""
-
     # 3-6. Contact Info
-    email = basics.get('email', '')
-    phone = basics.get('phone', '')
+    email = str(basics.get('email', '') or '')
+    phone = str(basics.get('phone', '') or '')
     # Fix for Excel interpreting + as formula
     if phone and phone.strip().startswith('+'):
         phone = f"'{phone}"
         
-    address = basics.get('address', '')
+    address = str(basics.get('address', '') or '')
     
     langs = basics.get('languages', [])
     if isinstance(langs, list):
-        languages = ", ".join(langs)
+        languages = ", ".join([str(l) for l in langs])
     else:
-        languages = str(langs)
+        languages = str(langs or '')
 
     # 7. Total Experience
     # Defined Logic:
