@@ -108,6 +108,7 @@ def format_candidate_row(json_data: Dict[str, Any], md_link: str, emplacement: s
     """
     # The JSON structure has changed. It now uses 'basics' for contact info.
     basics = json_data.get('basics', {})
+    experiences = json_data.get('experience', [])
     # 3-6. Contact Info
     email = str(basics.get('email', '') or '')
     phone = str(basics.get('phone', '') or '')
