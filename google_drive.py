@@ -15,38 +15,49 @@ from google.auth.exceptions import TransportError
 
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
-def execute_with_retry(func, retries=10, delay_base=2):
+import logging
+
+# Configure logger if not already configured (it will inherit from root if configured elsewhere)
+logger = logging.getLogger(__name__)
+
+def execute_with_retry(func, retries=5, delay_base=2):
     """
     Executes a function (usually an API call) with exponential backoff retry logic.
     Handles SSL errors, socket timeouts, and rate limits (429).
+    Retries capped at 5 and sleep capped at 20s to prevent massive hangs.
     """
     attempt = 0
+    max_sleep = 20 # Cap sleep time
+    
     while attempt < retries:
         try:
             return func()
         except (ssl.SSLEOFError, socket.timeout, socket.error, httplib2.HttpLib2Error, TransportError) as e:
-            sleep_time = (delay_base ** attempt) + random.uniform(0, 1)
-            print(f"Network error ({type(e).__name__}): {e}. Retrying in {sleep_time:.2f}s...")
+            # Exponential backoff but capped
+            raw_sleep = (delay_base ** attempt) + random.uniform(0, 1)
+            sleep_time = min(raw_sleep, max_sleep)
+            
+            logger.warning(f"Network error ({type(e).__name__}): {e}. Retrying in {sleep_time:.2f}s... (Attempt {attempt+1}/{retries})")
             time.sleep(sleep_time)
             attempt += 1
         except HttpError as error:
             if error.resp.status in [429, 500, 502, 503, 504]:
-                sleep_time = (delay_base ** attempt) + random.uniform(0, 1)
-                print(f"API Error ({error.resp.status}): {error}. Retrying in {sleep_time:.2f}s...")
+                raw_sleep = (delay_base ** attempt) + random.uniform(0, 1)
+                sleep_time = min(raw_sleep, max_sleep)
+                
+                logger.warning(f"API Error ({error.resp.status}): {error}. Retrying in {sleep_time:.2f}s... (Attempt {attempt+1}/{retries})")
                 time.sleep(sleep_time)
                 attempt += 1
             else:
+                logger.error(f"Unrecoverable API Error: {error}")
                 raise
         except Exception as e:
-            # For other unexpected errors, we might want to retry or raise.
-            # Given the flakiness, let's retry on generic Exception if it looks network-y, 
-            # but usually it's safer to raise unless we know it's safe.
-            # However, the previous code retried on Exception.
-            print(f"Unexpected error: {e}. Retrying in {(delay_base ** attempt):.2f}s...")
-            time.sleep((delay_base ** attempt) + 1)
-            attempt += 1
+            # Do NOT retry generic exceptions unless we are sure.
+            # Previously this caught everything and slept for minutes.
+            logger.error(f"Unexpected error in Google Drive API: {e}. NOT Retrying.")
+            raise
             
-    raise Exception(f"Max retries ({retries}) exceeded for operation.")
+    raise Exception(f"Max retries ({retries}) exceeded for socket/network operation.")
 
 def get_drive_service():
     """Authenticates with Google Drive API using Application Default Credentials (ADC) and returns a service object."""
