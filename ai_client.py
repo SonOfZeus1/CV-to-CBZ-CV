@@ -45,6 +45,8 @@ RATE_LIMITS = {
     "nousresearch/hermes-3-llama-3.1-405b:free": {"rpm": 2},
 }
 
+class CriticalAIFailure(Exception):
+    pass
 
 class RateLimiter:
     def __init__(self):
@@ -98,7 +100,7 @@ class AIClient:
         """
         if not self.client:
             logger.error("AI call attempted but client is not initialized (missing key).")
-            return {} if expect_json else ""
+            raise CriticalAIFailure("AI Client not initialized (missing API Key).")
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -185,8 +187,8 @@ class AIClient:
                         logger.warning(f"Model {model_name} failed repeatedly. Switching to next model...")
                         break
         
-        logger.error("All models failed.")
-        return {} if expect_json else ""
+        logger.error("All models failed. Raising CriticalAIFailure.")
+        raise CriticalAIFailure("All AI models failed to process the request.")
 
 # Global helper function
 def call_ai(prompt: str, system_prompt: str = "", expect_json: bool = False, model: str = None) -> Union[str, Dict[str, Any]]:

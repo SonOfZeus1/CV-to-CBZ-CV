@@ -25,6 +25,8 @@ from parsers import parse_cv_from_text, inject_tags, ExperienceEntry
 from text_processor import preprocess_markdown
 from ai_parsers import parse_cv_direct_metrics
 from report_generator import format_candidate_row
+from ai_client import CriticalAIFailure
+import sys
 
 # Configuration
 DOWNLOADS_DIR = "downloads"
@@ -450,6 +452,10 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         except Exception as e:
             logger.error(f"Failed to generate report row for {file_name}: {e}")
             return False, None, file_item
+
+    except CriticalAIFailure as critical_err:
+        logger.critical(f"🛑 CRITICAL AI FAILURE for {file_name}: {critical_err}")
+        return "CRITICAL_FAILURE", None, file_item
 
     except Exception as e:
         logger.error(f"Error processing {file_name}: {e}", exc_info=True)
@@ -1133,6 +1139,14 @@ def main():
             task = future_to_task[future]
             try:
                 success, report_row, _ = future.result()
+                
+                # CRITICAL FAILURE CHECK (Apply Fail-Fast Rule)
+                if success == "CRITICAL_FAILURE":
+                     logger.critical(f"🚨 PIPELINE HALTED: Critical AI Failure detected for {task.get('file_id')}. Stopping pipeline as requested.")
+                     # Attempt to cancel pending futures
+                     executor.shutdown(wait=False, cancel_futures=True)
+                     sys.exit(1) # Force non-zero exit to stop GitHub Action
+
                 if success and report_row:
                     # Immediate Update Strategy
                     row_updates = []
