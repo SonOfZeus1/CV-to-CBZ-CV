@@ -100,7 +100,8 @@ def process_file_by_id(file_id, cv_link, json_output_folder_id, index=0, total=0
         else:
             return False, None, {'id': file_id, 'name': 'Unknown'}
 
-    logger.info(f"[{index}/{total}] Processing file (Thread): {file_name} ({file_id})")
+    log_name = candidate_name if candidate_name else file_name
+    logger.info(f"[{index}/{total}] ⏳ Starting: {log_name} (File ID: {file_id})")
     
     try:
         # 1. Download MD File
