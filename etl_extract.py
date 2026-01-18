@@ -546,12 +546,17 @@ def sync_annotated_files(drive_service, sheets_service, email_sheet_id, dest_she
              
     logger.info("Annotation Sync Complete.")
 
+
 def soft_delete_rows_to_bottom(sheets_service, sheet_id, source_sheet_name, dest_sheet_name):
     """
-    Scans Source Sheet for 'DELETE' status.
-    Instead of deleting, it:
-    1. Moves the row (Source & Dest) to the BOTTOM of the sheet.
-    2. Updates Status to 'deleted'.
+    Scans BOTH Sheets for 'DELETE' status.
+    Checks:
+    - Contacts (Source): Column D (Index 3)
+    - Candidats (Dest): Column K (Index 10)
+    
+    If EITHER is 'DELETE' or 'deleted':
+    1. Moves the row (Source & Dest) to the BOTTOM of their respective sheets.
+    2. Updates Status (D) and Action (K) to 'deleted'.
     3. Physically deletes the original row to close the gap.
     MAINTAINS 1:1 SYNC between Source and Dest.
     """
@@ -569,33 +574,49 @@ def soft_delete_rows_to_bottom(sheets_service, sheet_id, source_sheet_name, dest
     indices_to_move = []
     
     # 0. Find Last Active Row Index (to detect "Floating" deleted rows)
-    last_active_index = -1
+    last_active_index_src = -1
+    
+    # Check Source Active Area
     for i, row in enumerate(source_rows):
         if i == 0: continue
         status = str(row[3]).strip().upper() if len(row) > 3 else ""
         if status != "DELETE" and status != "DELETED":
-            last_active_index = i
+            last_active_index_src = i
             
-    logger.info(f"Last Active Row Index: {last_active_index}")
+    logger.info(f"Last Active Row Index (Source): {last_active_index_src}")
 
     # 1. Identify Rows (Skip Header i=0)
-    for i, row in enumerate(source_rows):
+    # We iterate Source Rows as the master reference
+    for i, src_row in enumerate(source_rows):
         if i == 0: continue
         
-        # Check Status (Col E? No, Col D is Index 3 in 0-based if A,B,C,D)
-        # Wait, get_sheet_values returns all cols.
-        # Header: Filename, Email, Phone, Status (Col D -> Index 3)
-        status = ""
-        if len(row) > 3:
-            status = str(row[3]).strip().upper()
+        # Check Source Status (Col D -> Index 3)
+        src_status = ""
+        if len(src_row) > 3:
+            src_status = str(src_row[3]).strip().upper()
             
-        if status == "DELETE":
-            indices_to_move.append(i)
+        # Check Dest Action (Col K -> Index 10)
+        dst_status = ""
+        if dest_rows and i < len(dest_rows):
+            dst_row = dest_rows[i]
+            if len(dst_row) > 10:
+                dst_status = str(dst_row[10]).strip().upper()
+
+        is_marked_delete = (src_status in ["DELETE", "DELETED"]) or (dst_status in ["DELETE", "DELETED"])
         
-        # Floating Delete Logic: If "deleted" but sits ABOVE active content, move it down.
-        elif status == "DELETED" and i < last_active_index:
-             logger.info(f"Reflowing 'deleted' row at index {i+1} (Active content extends to {last_active_index+1})")
-             indices_to_move.append(i)
+        if is_marked_delete:
+            # Check if it needs moving (i.e., is it ABOVE active content?)
+            # If it is 'deleted' and sitting at index 5, but we have active data at 100, move it.
+            # If it is 'DELETE' (Fresh), always move it.
+            
+            # Simple rule: If it's effectively "deleted" but sits < last_active_index, move it.
+            # OR if it is freshly marked "DELETE" (User action), move it.
+            
+            is_fresh_delete = (src_status == "DELETE" or dst_status == "DELETE")
+            is_floating = (i < last_active_index_src)
+            
+            if is_fresh_delete or is_floating:
+                indices_to_move.append(i)
             
     if not indices_to_move:
         logger.info("No rows marked for soft deletion (or reflow).")
@@ -610,12 +631,9 @@ def soft_delete_rows_to_bottom(sheets_service, sheet_id, source_sheet_name, dest
     dst_append_buffer = []
     
     # 3. Capture Data & Prepare Appends
-    # We iterate indices, but we strictly read from the loaded arrays 'source_rows' and 'dest_rows'
-    # The arrays are static snapshots, so indices are valid.
     
     from google_drive import delete_sheet_rows # Lazy import
     
-    count = 0
     indices_safe_to_delete = []
 
     for idx in indices_to_move:
@@ -623,13 +641,10 @@ def soft_delete_rows_to_bottom(sheets_service, sheet_id, source_sheet_name, dest
         if idx < len(source_rows):
             src_row = list(source_rows[idx])
         else:
-            logger.error(f"Index {idx} out of bounds for Source Rows (Len {len(source_rows)})")
+            logger.error(f"Index {idx} out of bounds for Source Rows")
             continue
             
         # SAFETY CHECK - Email Verification
-        # Source Email: Col B (Index 1)
-        # Dest Email: Col C (Index 2)
-        
         src_email = src_row[1] if len(src_row) > 1 else ""
         dst_email = ""
         dst_row = []
@@ -638,14 +653,11 @@ def soft_delete_rows_to_bottom(sheets_service, sheet_id, source_sheet_name, dest
             dst_row = list(dest_rows[idx])
             dst_email = dst_row[2] if len(dst_row) > 2 else ""
             
-        # Compare (Case insensitive, strip)
-        # Verify alignment only if Dest exists
+        # Verify alignment
         if dst_row:
             if str(src_email).strip().lower() != str(dst_email).strip().lower():
                 logger.error(f"🛑 CRITICAL MISMATCH at Row {idx+1}: Source Email '{src_email}' != Dest Email '{dst_email}'. ABORTING Soft Delete for this row.")
-                continue # Skip this row entirely
-        
-        # Validated! Proceed to prepare append.
+                continue # Skip
         
         # Update Source Status to "deleted"
         if len(src_row) > 3:
@@ -664,13 +676,13 @@ def soft_delete_rows_to_bottom(sheets_service, sheet_id, source_sheet_name, dest
                  while len(dst_row) < 11: dst_row.append("")
                  dst_row[10] = "deleted"
              
+             # Also clear AI columns? No, Soft Delete preserves data, just moves it.
              dst_append_buffer.append(dst_row)
              
         # Mark index as safe to delete later
         indices_safe_to_delete.append(idx)
 
     # 4. Perform Appends (Batch)
-    
     if src_append_buffer:
         logger.info(f"Appending {len(src_append_buffer)} rows to bottom of '{source_sheet_name}'...")
         append_batch_to_sheet(sheets_service, sheet_id, src_append_buffer, source_sheet_name)
@@ -680,16 +692,9 @@ def soft_delete_rows_to_bottom(sheets_service, sheet_id, source_sheet_name, dest
         append_batch_to_sheet(sheets_service, sheet_id, dst_append_buffer, dest_sheet_name)
 
     # 5. Perform Physical Deletes (Batch/Loop)
-    # MUST be done descending from the SAFE list
-    # indices_safe_to_delete is built traversing indices_to_move (which was Rev Sorted).
-    # So it is already Rev Sorted (Desc).
-    
     for idx in indices_safe_to_delete:
         try:
-            # Delete in Source
             delete_sheet_rows(sheets_service, sheet_id, idx, idx+1, source_sheet_name)
-            
-            # Delete in Dest (if it was within range)
             try:
                 delete_sheet_rows(sheets_service, sheet_id, idx, idx+1, dest_sheet_name)
             except Exception as e_dst:
@@ -702,7 +707,6 @@ def soft_delete_rows_to_bottom(sheets_service, sheet_id, source_sheet_name, dest
             
     logger.info("Soft Delete Complete.")
 
-def process_file(file_item, drive_service, output_folder_id, report_buffer):
     """
     Process a single MD file: Read Content -> Parse -> Upload JSON -> Generate Report Row
     """
@@ -1107,8 +1111,8 @@ def main():
     if not updates and not rows_to_append:
         logger.info("Sync: Dest sheet is fully synchronized with Source.")
 
-    # 2b. SOFT DELETE STEP (Moved Here)
-    # Now that Dest is synchronized (Length Aligned), we can safely move deleted rows.
+    # 2b. SOFT DELETE STEP (Restored by User Request)
+    # Checks BOTH sheets for 'DELETE'/'deleted' and moves them to bottom.
     soft_delete_rows_to_bottom(sheets_service, email_sheet_id, email_sheet_name, dest_sheet_name)
 
     # 3. Process Step: Identify Rows needing JSON
@@ -1116,118 +1120,92 @@ def main():
     dest_rows = get_sheet_values(sheets_service, email_sheet_id, dest_sheet_name, value_render_option='FORMULA')
     
     tasks = [] # List of (file_id, cv_link, row_index)
-    clear_buffer = [] # List of batch updates for "Supprimer"
     
     if dest_rows:
         for i, row in enumerate(dest_rows):
             if i == 0: continue
             
-            # Check Action (Col K, Index 10)
-            action = row[10] if len(row) > 10 else ""
-            action = str(action).strip().lower()
-
-            if action == "deleted":
-                continue
-
-            # if action == "supprimer":
-            #     # Clear AI columns (A-I, M) and Action (K)
-            #     # Preserve J (Languages), L (MD Link), N (CV Link)
-            #     # We can batch these clears.
-            #     # Clear A-I
-            #     clear_buffer.append({
-            #         'range': f"'{dest_sheet_name}'!A{i+1}:I{i+1}",
-            #         'values': [[""] * 9]
-            #     })
-            #     # Clear K (Action)
-            #     clear_buffer.append({
-            #         'range': f"'{dest_sheet_name}'!K{i+1}",
-            #         'values': [[""]]
-            #     })
-            #     # Clear M (JSON Link)
-            #     clear_buffer.append({
-            #         'range': f"'{dest_sheet_name}'!M{i+1}",
-            #         'values': [[""]]
-            #     })
-            #     continue # Skip processing
-
-            # Check JSON Link (Col M, Index 12)
-            json_link = row[12] if len(row) > 12 else ""
+            # Indices:
+            # Col C (2): Email
+            # Col K (10): Action
+            # Col L (11): MD Link (Index 11)
+            # Col M (12): JSON Link
+            # Col O (14): Modifiable MD Link
             
-            if not json_link or action == "retraiter":
-                # Needs Processing!
-                # Get File ID from MD Link (Col L, Index 11)
-                if len(row) > 11:
-                    # STRICT MODE: Only use Modifiable MD (Col O)
-                    mod_link = row[14] if len(row) > 14 else ""
+            email = str(row[2]).strip().lower() if len(row) > 2 else ""
+            action = str(row[10]).strip().lower() if len(row) > 10 else ""
+            json_link = str(row[12]).strip() if len(row) > 12 else ""
+            
+            # --- STRICT FILTERING LOGIC ---
+            is_retraiter = (action == "retraiter")
+            is_valid_email = ("@" in email) and ("not found" not in email) and ("vide" not in email)
+            missing_json = (not json_link)
+            
+            should_process = False
+            priority = 99
+            
+            if is_retraiter:
+                should_process = True
+                priority = 0 # Highest
+            elif is_valid_email and missing_json:
+                should_process = True
+                priority = 1 # Normal
+            else:
+                should_process = False # Ignore everything else
+                
+            if should_process:
+                # Extract File ID (Prefer Modifiable MD)
+                mod_link = row[14] if len(row) > 14 else ""
+                target_link = mod_link
+                
+                if not target_link:
+                     # Fallback to Original MD if Modifiable missing?
+                     # User didn't specify, but safer to skip if sync failed?
+                     # Actually simpler to skip and let Sync fix it next run.
+                     continue
+
+                match = re.search(r'/d/([a-zA-Z0-9_-]+)', target_link)
+                if match:
+                    file_id = match.group(1)
                     
-                    if not mod_link:
-                        # Skip if no modifiable MD exists (should have been synced)
-                        continue
+                    # Gather other fields
+                    cv_link = row[13] if len(row) > 13 else ""
+                    languages_source = row[9] if len(row) > 9 else "" 
+                    email_source = row[2] if len(row) > 2 else ""
+                    phone_source = row[3] if len(row) > 3 else ""
 
-                    # Extract ID from Modifiable Link
-                    target_link = mod_link
-                    logger.debug(f"Using Modifiable MD (Col O) as Primary Source.")
+                    # Name for Recovery
+                    first_name = row[0] if len(row) > 0 else ""
+                    last_name = row[1] if len(row) > 1 else ""
+                    candidate_name = f"{first_name} {last_name}".strip()
                     
-                    match = re.search(r'/d/([a-zA-Z0-9_-]+)', target_link)
-                    if match:
-                        file_id = match.group(1)
-                        cv_link = row[13] if len(row) > 13 else ""
-                        languages_source = row[9] if len(row) > 9 else "" # Preserve synced value
-                        
-                        # Extract Email/Phone (Already synced, but need for processing?)
-                        email_source = row[2] if len(row) > 2 else ""
-                        phone_source = row[3] if len(row) > 3 else ""
+                    # PDF ID from CV Link
+                    pdf_file_id = ""
+                    if cv_link:
+                        match_id = re.search(r'/d/([a-zA-Z0-9_-]+)', cv_link)
+                        if match_id:
+                            pdf_file_id = match_id.group(1)
+                    
+                    tasks.append({
+                        'file_id': file_id,
+                        'cv_link': cv_link,
+                        'languages_source': languages_source,
+                        'email_source': email_source,
+                        'phone_source': phone_source,
+                        'candidate_name': candidate_name,
+                        'pdf_file_id': pdf_file_id,
+                        'md_link_source': row[11] if len(row) > 11 else "",
+                        'row_index': i,
+                        'priority': priority
+                    })
 
-                        # Extract Name for Auto-Recovery (Secondary)
-                        first_name = row[0] if len(row) > 0 else ""
-                        last_name = row[1] if len(row) > 1 else ""
-                        candidate_name = f"{first_name} {last_name}".strip()
-                        
-                        # PRIMARY RECOVERY: Extract PDF File ID from CV Link
-                        # The MD files are named "{PDF_FILE_ID}.md"
-                        pdf_file_id = ""
-                        if cv_link:
-                            # Extract ID from URL: /d/([a-zA-Z0-9_-]+)
-                            match_id = re.search(r'/d/([a-zA-Z0-9_-]+)', cv_link)
-                            if match_id:
-                                pdf_file_id = match_id.group(1)
-                                logger.debug(f"Auto-Recovery: Extracted PDF ID '{pdf_file_id}' from CV Link.")
-                        
-                        tasks.append({
-                            'file_id': file_id, # The (broken) MD File ID
-                            'cv_link': cv_link,
-                            'languages_source': languages_source,
-                            'email_source': email_source,
-                            'phone_source': phone_source,
-                            'candidate_name': candidate_name,
-                            'pdf_file_id': pdf_file_id, # The Original PDF ID (Key for lookup)
-                            'md_link_source': row[11] if len(row) > 11 else "", # Capture Original MD Link (Col L)
-                            'row_index': i 
-                        })
-
-    # Execute Clears
-    # if clear_buffer:
-    #     logger.info(f"Clearing {len(clear_buffer)//3} rows marked as 'Supprimer'...")
-    #     body = {'data': clear_buffer, 'valueInputOption': 'USER_ENTERED'}
-    #     try:
-    #         sheets_service.spreadsheets().values().batchUpdate(
-    #             spreadsheetId=email_sheet_id, body=body
-    #         ).execute()
-    #     except Exception as e:
-    #         logger.error(f"Failed to clear rows: {e}")
-
-    logger.info(f"Found {len(tasks)} rows needing processing (Missing JSON or 'Retraiter').")
+    logger.info(f"Found {len(tasks)} tasks matching strict criteria.")
     
-    # Sort tasks to prioritize rows with valid emails (User Request)
-    def task_priority(t):
-        email = str(t.get('email_source', '')).strip().lower()
-        if not email: return 1 # Low priority
-        if email in ["not found", "ok", "vide"]: return 1 # Low priority
-        if "@" not in email: return 1 # Likely invalid
-        return 0 # High Priority
-
-    tasks.sort(key=task_priority)
-    logger.info("Tasks sorted by Email Priority (Valid Emails First).")
+    # Sort by Priority (0=Retraiter, 1=Email)
+    tasks.sort(key=lambda t: t['priority'])
+    
+    if tasks:
+        logger.info(f"Top Task Priority: {tasks[0]['priority']} (0=Retraiter)")
 
     # Batch Limit
     batch_limit = 50

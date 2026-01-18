@@ -21,8 +21,17 @@ CRITICAL RULES:
    - IF NO MARKERS FOUND: Proceed with normal auto-extraction logic.
 
 0.5. CLASSIFICATION: Determine if the document is a CV. 
-   - If it is a CV, set "is_cv": true.
-   - If it is NOT a CV (e.g., cover letter, invoice, code, empty file), set "is_cv": false. You may leave other fields empty or minimal.
+   - CORE DEFINITION: A document IS A CV if and only if it lists DISTINCT PROFESSIONAL EXPERIENCES.
+   - MANDATORY FEATURE (The ONLY requirement for "is_cv": true):
+     1. Professional Experience: The document MUST contain at least one clear block describing a professional role with:
+        - A Job Title (e.g., Developer, Analyst)
+        - An Organization/Company Name
+        - Dates of employment
+   - THE "NOT PROFESSIONAL" TEST:
+     - If the document lists courses/grades but NO unrelated work experience -> "is_cv": false.
+     - If the document only certifies a single event (training completion, degree) -> "is_cv": false.
+     - If it's a list of marks/grades -> "is_cv": false.
+   - DEFAULT: If you cannot find a clear Professional Experience block -> "is_cv": false.
 1. Extract Contact Info (Email, Phone, Name, Languages).
    - DO NOT extract LinkedIn or Social Links.
 2. Extract Professional Summary (or generate one if missing).

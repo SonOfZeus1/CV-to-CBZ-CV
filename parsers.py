@@ -202,6 +202,24 @@ def parse_cv_from_text(text: str, filename: str = "", metadata: Dict = None) -> 
             "projects_and_other": [],
             "is_cv": False
         }
+
+    # --- HEURISTIC GUARDRAILS (POST-AI) ---
+    # 1. Zero Experience Check: If AI says True but found 0 experiences -> Force False
+    #    (Unless it's a junior with projects, but usually they have at least one entry)
+    ai_is_cv = extracted_data.get("is_cv", False)
+    ai_experiences = extracted_data.get("experiences", [])
+    
+    if ai_is_cv and not ai_experiences:
+        logger.warning(f"⚠️ Guardrail Triggered: AI said is_cv=True, but 0 experiences found. Forcing is_cv=False. File: {filename}")
+        extracted_data["is_cv"] = False
+
+    # 2. explicit "Relevé de notes" override check
+    #    If the first 200 chars contain "Relevé de notes", we likely have a transcript.
+    header_sample = clean_text[:300].lower()
+    transcript_keywords = ["relevé de notes", "transcript of records", "academic transcript", "bulletin de notes"]
+    if any(k in header_sample for k in transcript_keywords):
+        logger.info(f"⚠️ Guardrail Triggered: Header contains transcript keyword. Forcing is_cv=False. File: {filename}")
+        extracted_data["is_cv"] = False
     
     # 3. Map to Internal Schema (CVData)
     extraction_model = extracted_data.get("_meta_model_name", "Unknown Model")
