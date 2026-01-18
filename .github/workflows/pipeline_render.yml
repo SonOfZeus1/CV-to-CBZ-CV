@@ -1,4 +1,4 @@
-name: Pipeline 2 - Rendering (JSON -> PDF)
+name: Pipeline 3 - Rendering (JSON -> PDF)
 
 on:
   workflow_dispatch:
