@@ -1129,26 +1129,26 @@ def main():
             if action == "deleted":
                 continue
 
-            if action == "supprimer":
-                # Clear AI columns (A-I, M) and Action (K)
-                # Preserve J (Languages), L (MD Link), N (CV Link)
-                # We can batch these clears.
-                # Clear A-I
-                clear_buffer.append({
-                    'range': f"'{dest_sheet_name}'!A{i+1}:I{i+1}",
-                    'values': [[""] * 9]
-                })
-                # Clear K (Action)
-                clear_buffer.append({
-                    'range': f"'{dest_sheet_name}'!K{i+1}",
-                    'values': [[""]]
-                })
-                # Clear M (JSON Link)
-                clear_buffer.append({
-                    'range': f"'{dest_sheet_name}'!M{i+1}",
-                    'values': [[""]]
-                })
-                continue # Skip processing
+            # if action == "supprimer":
+            #     # Clear AI columns (A-I, M) and Action (K)
+            #     # Preserve J (Languages), L (MD Link), N (CV Link)
+            #     # We can batch these clears.
+            #     # Clear A-I
+            #     clear_buffer.append({
+            #         'range': f"'{dest_sheet_name}'!A{i+1}:I{i+1}",
+            #         'values': [[""] * 9]
+            #     })
+            #     # Clear K (Action)
+            #     clear_buffer.append({
+            #         'range': f"'{dest_sheet_name}'!K{i+1}",
+            #         'values': [[""]]
+            #     })
+            #     # Clear M (JSON Link)
+            #     clear_buffer.append({
+            #         'range': f"'{dest_sheet_name}'!M{i+1}",
+            #         'values': [[""]]
+            #     })
+            #     continue # Skip processing
 
             # Check JSON Link (Col M, Index 12)
             json_link = row[12] if len(row) > 12 else ""
@@ -1206,15 +1206,15 @@ def main():
                         })
 
     # Execute Clears
-    if clear_buffer:
-        logger.info(f"Clearing {len(clear_buffer)//3} rows marked as 'Supprimer'...")
-        body = {'data': clear_buffer, 'valueInputOption': 'USER_ENTERED'}
-        try:
-            sheets_service.spreadsheets().values().batchUpdate(
-                spreadsheetId=email_sheet_id, body=body
-            ).execute()
-        except Exception as e:
-            logger.error(f"Failed to clear rows: {e}")
+    # if clear_buffer:
+    #     logger.info(f"Clearing {len(clear_buffer)//3} rows marked as 'Supprimer'...")
+    #     body = {'data': clear_buffer, 'valueInputOption': 'USER_ENTERED'}
+    #     try:
+    #         sheets_service.spreadsheets().values().batchUpdate(
+    #             spreadsheetId=email_sheet_id, body=body
+    #         ).execute()
+    #     except Exception as e:
+    #         logger.error(f"Failed to clear rows: {e}")
 
     logger.info(f"Found {len(tasks)} rows needing processing (Missing JSON or 'Retraiter').")
     
@@ -1292,6 +1292,15 @@ def main():
                 logger.error(f"Task failed for {task['file_id']}: {e}")
 
     # No final flush needed anymore
+
+    # Safe-guard Validation for Column K (Action) in Dest Sheet
+    try:
+        from google_drive import set_column_validation
+        # Col A=0 ... K=10 (Index 10)
+        logger.info(f"Setting Validation for '{dest_sheet_name}' Column K to ['Retraiter', 'deleted']...")
+        set_column_validation(sheets_service, email_sheet_id, dest_sheet_name, 10, ["Retraiter", "deleted"], strict=False)
+    except Exception as e:
+        logger.warning(f"Failed to set valiation for Dest Sheet: {e}")
 
     logger.info("--- Extraction Pipeline Finished ---")
 
