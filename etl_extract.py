@@ -837,7 +837,8 @@ def main():
     
     # 1. Start with Master Delete (Sync Rows)
     # sync_deletions(sheets_service, email_sheet_id, email_sheet_name, dest_sheet_name)
-    soft_delete_rows_to_bottom(sheets_service, email_sheet_id, email_sheet_name, dest_sheet_name)
+    # MOVED: soft_delete_rows_to_bottom now runs AFTER sync (below) to ensure alignment.
+    # soft_delete_rows_to_bottom(sheets_service, email_sheet_id, email_sheet_name, dest_sheet_name)
     
     # 2. Sync Annotated Files (Maintenance)
     if annotated_folder_id:
@@ -1084,6 +1085,10 @@ def main():
     
     if not updates and not rows_to_append:
         logger.info("Sync: Dest sheet is fully synchronized with Source.")
+
+    # 2b. SOFT DELETE STEP (Moved Here)
+    # Now that Dest is synchronized (Length Aligned), we can safely move deleted rows.
+    soft_delete_rows_to_bottom(sheets_service, email_sheet_id, email_sheet_name, dest_sheet_name)
 
     # 3. Process Step: Identify Rows needing JSON
     logger.info("Re-reading Dest sheet to identify pending tasks...")
