@@ -546,64 +546,139 @@ def sync_annotated_files(drive_service, sheets_service, email_sheet_id, dest_she
              
     logger.info("Annotation Sync Complete.")
 
-def sync_deletions(sheets_service, sheet_id, source_sheet_name, dest_sheet_name):
+def soft_delete_rows_to_bottom(sheets_service, sheet_id, source_sheet_name, dest_sheet_name):
     """
     Scans Source Sheet for 'DELETE' status.
-    PHYSICALLY deletes the row in BOTH Source and Dest sheets.
-    Critical: Processes from bottom-up to maintain indices.
+    Instead of deleting, it:
+    1. Moves the row (Source & Dest) to the BOTTOM of the sheet.
+    2. Updates Status to 'deleted'.
+    3. Physically deletes the original row to close the gap.
+    MAINTAINS 1:1 SYNC between Source and Dest.
     """
-    logger.info("--- Checking for Deletions (Master Delete) ---")
+    logger.info("--- Checking for Soft Deletions (Move to Bottom) ---")
     
     try:
-        rows = get_sheet_values(sheets_service, sheet_id, source_sheet_name)
+        source_rows = get_sheet_values(sheets_service, sheet_id, source_sheet_name, value_render_option='FORMULA')
+        dest_rows = get_sheet_values(sheets_service, sheet_id, dest_sheet_name, value_render_option='FORMULA')
     except Exception as e:
-        logger.error(f"Failed to read source sheet for deletions: {e}")
+        logger.error(f"Failed to read sheets for deletion: {e}")
         return
 
-    if not rows: return
+    if not source_rows: return
 
-    indices_to_delete = []
+    indices_to_move = []
     
     # 1. Identify Rows (Skip Header i=0)
-    for i, row in enumerate(rows):
+    for i, row in enumerate(source_rows):
         if i == 0: continue
         
-        # Check Status (Col E, index 4)
+        # Check Status (Col E? No, Col D is Index 3 in 0-based if A,B,C,D)
+        # Wait, get_sheet_values returns all cols.
+        # Header: Filename, Email, Phone, Status (Col D -> Index 3)
         status = ""
-        if len(row) > 4:
-            status = str(row[4]).strip().upper()
+        if len(row) > 3:
+            status = str(row[3]).strip().upper()
             
         if status == "DELETE":
-            indices_to_delete.append(i)
+            indices_to_move.append(i)
             
-    if not indices_to_delete:
-        logger.info("No rows marked for deletion.")
+    if not indices_to_move:
+        logger.info("No rows marked for soft deletion.")
         return
 
-    # 2. Sort Descending (CRITICAL)
-    indices_to_delete.sort(reverse=True)
+    # 2. Sort Indices Descending (Critical for cleanup)
+    indices_to_move.sort(reverse=True)
     
-    # 3. Delete Logic
+    logger.warning(f"⚠ Found {len(indices_to_move)} rows to SOFT DELETE. Moving to bottom...")
+    
+    src_append_buffer = []
+    dst_append_buffer = []
+    
+    # 3. Capture Data & Prepare Appends
+    # We iterate indices, but we strictly read from the loaded arrays 'source_rows' and 'dest_rows'
+    # The arrays are static snapshots, so indices are valid.
+    
     from google_drive import delete_sheet_rows # Lazy import
     
-    logger.warning(f"⚠ Found {len(indices_to_delete)} rows to DELETE. Executing Master Delete...")
+    count = 0
+    indices_safe_to_delete = []
+
+    for idx in indices_to_move:
+        # Source Row
+        if idx < len(source_rows):
+            src_row = list(source_rows[idx])
+        else:
+            logger.error(f"Index {idx} out of bounds for Source Rows (Len {len(source_rows)})")
+            continue
+            
+        # SAFETY CHECK - Email Verification
+        # Source Email: Col B (Index 1)
+        # Dest Email: Col C (Index 2)
+        
+        src_email = src_row[1] if len(src_row) > 1 else ""
+        dst_email = ""
+        dst_row = []
+
+        if dest_rows and idx < len(dest_rows):
+            dst_row = list(dest_rows[idx])
+            dst_email = dst_row[2] if len(dst_row) > 2 else ""
+            
+        # Compare (Case insensitive, strip)
+        # Verify alignment only if Dest exists
+        if dst_row:
+            if str(src_email).strip().lower() != str(dst_email).strip().lower():
+                logger.error(f"🛑 CRITICAL MISMATCH at Row {idx+1}: Source Email '{src_email}' != Dest Email '{dst_email}'. ABORTING Soft Delete for this row.")
+                continue # Skip this row entirely
+        
+        # Validated! Proceed to prepare append.
+        
+        # Update Status to "deleted"
+        if len(src_row) > 3:
+            src_row[3] = "deleted"
+        else:
+            while len(src_row) < 4: src_row.append("")
+            src_row[3] = "deleted"
+            
+        src_append_buffer.append(src_row)
+        
+        if dst_row:
+             dst_append_buffer.append(dst_row)
+             
+        # Mark index as safe to delete later
+        indices_safe_to_delete.append(idx)
+
+    # 4. Perform Appends (Batch)
     
-    for idx in indices_to_delete:
+    if src_append_buffer:
+        logger.info(f"Appending {len(src_append_buffer)} rows to bottom of '{source_sheet_name}'...")
+        append_batch_to_sheet(sheets_service, sheet_id, src_append_buffer, source_sheet_name)
+    
+    if dst_append_buffer:
+        logger.info(f"Appending {len(dst_append_buffer)} rows to bottom of '{dest_sheet_name}'...")
+        append_batch_to_sheet(sheets_service, sheet_id, dst_append_buffer, dest_sheet_name)
+
+    # 5. Perform Physical Deletes (Batch/Loop)
+    # MUST be done descending from the SAFE list
+    # indices_safe_to_delete is built traversing indices_to_move (which was Rev Sorted).
+    # So it is already Rev Sorted (Desc).
+    
+    for idx in indices_safe_to_delete:
         try:
             # Delete in Source
             delete_sheet_rows(sheets_service, sheet_id, idx, idx+1, source_sheet_name)
             
-            # Delete in Dest (Hope alignment holds!)
-            # Check if Dest has enough rows? API usually handles out-of-bounds gracefully? 
-            # Or assume alignment. User promised alignment.
-            delete_sheet_rows(sheets_service, sheet_id, idx, idx+1, dest_sheet_name)
-            
-            logger.info(f"✅ Deleted Row {idx+1} in both sheets.")
+            # Delete in Dest (if it was within range)
+            try:
+                delete_sheet_rows(sheets_service, sheet_id, idx, idx+1, dest_sheet_name)
+            except Exception as e_dst:
+                logger.warning(f"Could not delete Dest row {idx+1}: {e_dst}")
+
+            logger.info(f"✅ Soft Deleted Row {idx+1} (Moved to bottom).")
             
         except Exception as e:
             logger.error(f"FAILED to delete row {idx+1}: {e}")
             
-    logger.info("Master Delete Complete.")
+    logger.info("Soft Delete Complete.")
 
 def process_file(file_item, drive_service, output_folder_id, report_buffer):
     """
@@ -754,7 +829,8 @@ def main():
     md_file_map = {} # {normalized_name: file_id}
     
     # 1. Start with Master Delete (Sync Rows)
-    sync_deletions(sheets_service, email_sheet_id, email_sheet_name, dest_sheet_name)
+    # sync_deletions(sheets_service, email_sheet_id, email_sheet_name, dest_sheet_name)
+    soft_delete_rows_to_bottom(sheets_service, email_sheet_id, email_sheet_name, dest_sheet_name)
     
     # 2. Sync Annotated Files (Maintenance)
     if annotated_folder_id:

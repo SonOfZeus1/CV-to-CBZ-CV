@@ -133,7 +133,7 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
     # RELAX VALIDATION for Status Column (D/Index 3)
     # Allow "Oui -X" by setting strict=False
     try:
-        status_options = ["En attente", "A traiter", "Oui", "Non", "Delete"]
+        status_options = ["En attente", "A traiter", "Oui", "Non", "Delete", "deleted"]
         # Use strict=False to allow ANY value (including "Oui -5", "Extraire", etc)
         # while still providing a dropdown for common actions.
         set_column_validation(sheets_service, sheet_id, sheet_name, 3, status_options, strict=False) 
@@ -183,22 +183,16 @@ def deduplicate_sheet(sheets_service, sheet_id, sheet_name):
             
         # Check for "Delete" status
         status = str(row[3]).strip()
-        if status.lower() == "delete":
-            logger.info(f"Marking Row {row_index+1} for deletion. Content: {row[:4]}")
-            
-            # PARANOIA CHECK: Verify index alignment
-            if row_index < len(rows):
-                check_row = rows[row_index]
-                if check_row != row:
-                    logger.error(f"CRITICAL INDEX MISMATCH! Calculated Row {row_index+1} content ({check_row[:2]}) does not match Iterator content ({row[:2]}). Aborting delete for this row.")
-                    continue
-            
-            rows_to_delete.append(row_index)
-            continue
+        # DISABLE PHYSICAL DELETION HERE. Handled by etl_extract.py (Soft Delete)
+        # if status.lower() == "delete":
+        #     logger.info(f"Marking Row {row_index+1} for deletion. Content: {row[:4]}")
+        #     rows_to_delete.append(row_index)
+        #     continue
             
     if rows_to_delete:
         logger.info(f"Deleting {len(rows_to_delete)} rows...")
-        delete_rows(sheets_service, sheet_id, rows_to_delete, sheet_name)
+        # delete_rows(sheets_service, sheet_id, rows_to_delete, sheet_name)
+        logger.info("msg='Physical Deletion Disabled in extract_emails.py. Handled by Soft Delete in etl_extract.py'")
     else:
         logger.info("No rows marked for deletion.")
         
@@ -599,6 +593,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             
             if status == "DELETE":
                 continue
+
+            # Skip already soft-deleted rows
+            if status == "deleted":
+                continue
             
             # User Request: If Email is "OK", skip (manually marked as no email)
             if email == "OK":
@@ -919,7 +917,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             
         # 7. Set Data Validation for Status Column (Column D, index 3)
         logger.info("Setting data validation for Status column...")
-        set_column_validation(sheets_service, sheet_id, sheet_name, 3, ["Oui", "Non", "Delete"])
+        set_column_validation(sheets_service, sheet_id, sheet_name, 3, ["Oui", "Non", "Delete", "deleted"])
         
         # 8. FINAL AUDIT & REPAIR
         # 8. FINAL AUDIT & REPAIR
