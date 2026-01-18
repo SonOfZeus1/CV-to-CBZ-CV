@@ -467,7 +467,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             
             current_status = str(row[3]).strip() if len(row) > 3 else ""
             
-            if current_status.upper() == "DELETE":
+            if current_status.upper() == "DELETE" or current_status.lower() == "deleted":
                 continue
             
             # If it was previously processed ("Oui" or "Oui -X"), mark it as Idle ("Non")
