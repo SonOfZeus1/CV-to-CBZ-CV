@@ -1060,6 +1060,12 @@ def main():
                 new_row[9] = src_lang
                 new_row[11] = src_md
                 new_row[13] = src_cv
+                
+                # Check Source Status for "deleted" to restore it correctly
+                src_status = src_row[3] if len(src_row) > 3 else ""
+                if str(src_status).strip().lower() == "deleted":
+                    new_row[10] = "deleted"
+                    
                 rows_to_append.append(new_row)
 
     # Execute Updates
