@@ -568,6 +568,16 @@ def soft_delete_rows_to_bottom(sheets_service, sheet_id, source_sheet_name, dest
 
     indices_to_move = []
     
+    # 0. Find Last Active Row Index (to detect "Floating" deleted rows)
+    last_active_index = -1
+    for i, row in enumerate(source_rows):
+        if i == 0: continue
+        status = str(row[3]).strip().upper() if len(row) > 3 else ""
+        if status != "DELETE" and status != "DELETED":
+            last_active_index = i
+            
+    logger.info(f"Last Active Row Index: {last_active_index}")
+
     # 1. Identify Rows (Skip Header i=0)
     for i, row in enumerate(source_rows):
         if i == 0: continue
@@ -581,9 +591,14 @@ def soft_delete_rows_to_bottom(sheets_service, sheet_id, source_sheet_name, dest
             
         if status == "DELETE":
             indices_to_move.append(i)
+        
+        # Floating Delete Logic: If "deleted" but sits ABOVE active content, move it down.
+        elif status == "DELETED" and i < last_active_index:
+             logger.info(f"Reflowing 'deleted' row at index {i+1} (Active content extends to {last_active_index+1})")
+             indices_to_move.append(i)
             
     if not indices_to_move:
-        logger.info("No rows marked for soft deletion.")
+        logger.info("No rows marked for soft deletion (or reflow).")
         return
 
     # 2. Sort Indices Descending (Critical for cleanup)
