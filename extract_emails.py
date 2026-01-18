@@ -609,15 +609,18 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 needs_update = True
                 priority = 3
             
-            # Priority 50: Failed Extraction (Email NOT FOUND in Col B) - USER REQUEST
+            # Priority 50: Indexing Needed (Missing MD is strictly TOP PRIORITY)
+            # Checked below (lines 636) but let's re-verify order.
+            
+            # Priority 30: Retry "NOT FOUND" (Demoted from 40/50 - User Request)
             elif email == "NOT FOUND":
                 needs_update = True
-                priority = 50 # HIGHEST PRIORITY
+                priority = 30
                 
-            # Priority 40: Status NON or Empty Email
-            elif status == "NON" or email == "":
-                needs_update = True
-                priority = 40
+            # Priority 40: Critical Holes (Empty Email removed as "never happens")
+            elif status == "NON":
+                 needs_update = True
+                 priority = 40
 
             
             elif status == "":
@@ -757,34 +760,31 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             file_id = file_data['id']
             # If not in Excel, it's new.
             if file_id not in existing_data_map:
-                 file_data['priority'] = 30 # New files have HIGHEST priority (User Request)
+                 file_data['priority'] = 40 # New files have HIGH priority (Promoted from 30)
                  files_to_process.append(file_data)
             else:
-                # In Excel. Check if needs update.
-                # We already calculated priority for these.
-                # If it's in all_files, it was either in Source or in our update list.
-                
                 # If it was in Source but is also in Excel, we need to check if it needs update
                 data = existing_data_map[file_id]
                 email = data['email'].upper()
                 status = data['status'].upper()
                 
                 priority = 0
-                if status == "DELETE":
+                if status == "DELETE" or status == "DELETED":
                     continue
-                elif email == "NOT FOUND":
-                    priority = 20 # Retry (Medium Priority)
                 
-                elif email == "":
-                    priority = 40
+                # Priority 50: Missing MD (Strictly Highest)
+                elif not data.get('is_indexed'):
+                    priority = 50 
 
+                # Priority 30: Retry "NOT FOUND" (Demoted from 40)
+                elif email == "NOT FOUND":
+                    priority = 30
+                
+                # Priority 40: New Files handled above
                 
                 elif not data.get('language'):
                     priority = 1
                 
-                elif not data.get('is_indexed'):
-                    priority = 50 # Indexing (HIGHEST PRIORITY)
-                    
                 if priority > 0:
                     file_data['priority'] = priority
                     files_to_process.append(file_data)
