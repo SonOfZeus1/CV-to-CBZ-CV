@@ -1,4 +1,4 @@
-name: Pipeline - Extract Emails
+name: Pipeline 1 - Extract Emails
 
 on:
   schedule:

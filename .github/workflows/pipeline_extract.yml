@@ -1,4 +1,4 @@
-name: Pipeline 1 - Extraction (PDF -> JSON)
+name: Pipeline 2 - Extraction (PDF -> JSON)
 
 on:
   schedule:
