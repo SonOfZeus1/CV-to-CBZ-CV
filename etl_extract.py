@@ -632,7 +632,7 @@ def soft_delete_rows_to_bottom(sheets_service, sheet_id, source_sheet_name, dest
         
         # Validated! Proceed to prepare append.
         
-        # Update Status to "deleted"
+        # Update Source Status to "deleted"
         if len(src_row) > 3:
             src_row[3] = "deleted"
         else:
@@ -642,6 +642,13 @@ def soft_delete_rows_to_bottom(sheets_service, sheet_id, source_sheet_name, dest
         src_append_buffer.append(src_row)
         
         if dst_row:
+             # Update Dest Action (Col K / Index 10) to "deleted"
+             if len(dst_row) > 10:
+                 dst_row[10] = "deleted"
+             else:
+                 while len(dst_row) < 11: dst_row.append("")
+                 dst_row[10] = "deleted"
+             
              dst_append_buffer.append(dst_row)
              
         # Mark index as safe to delete later
@@ -1092,6 +1099,9 @@ def main():
             # Check Action (Col K, Index 10)
             action = row[10] if len(row) > 10 else ""
             action = str(action).strip().lower()
+
+            if action == "deleted":
+                continue
 
             if action == "supprimer":
                 # Clear AI columns (A-I, M) and Action (K)
