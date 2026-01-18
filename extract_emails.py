@@ -248,11 +248,11 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
         row_index_to_update = data['index']
         existing_data = data
         
-        # Condition 1: Status "NON" (Email NOT FOUND) -> FORCE FULL PROCESS
-        # User Request: Retry extraction for these files to regenerate MD.
-        if data['status'].upper() == "NON" or data['email'].upper() == "NOT FOUND":
+        # Condition 1: Status "NON" -> SKIP (Idle)
+        # Condition 1.1: Email "NOT FOUND" -> FORCE FULL PROCESS (User Request)
+        if data['email'].upper() == "NOT FOUND":
              should_full_process = True
-             logger.info(f"Force Reprocessing for {clean_filename} (Status: NON/NOT FOUND)")
+             logger.info(f"Force Reprocessing for {clean_filename} (Email NOT FOUND)")
 
         # Condition 1.5: Missing Language -> Full Process (to detect language)
         elif not data.get('language'):
@@ -326,8 +326,15 @@ def process_single_file(file_data, existing_data_map, source_folder_id, processe
             # Extract Email
             # Extract Email
             # Scan FULL text, not just the head, to avoid missing emails at the bottom
-            email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-            emails = list(set(re.findall(email_pattern, text)))
+            # Enhanced Regex: Handles case insensitivity and spaces around @ (OCR artifacts)
+            # e.g. "bob @ gmail . com" -> "bob@gmail.com"
+            email_pattern = r'[a-zA-Z0-9._%+-]+\s*@\s*[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+            raw_emails = re.findall(email_pattern, text, re.IGNORECASE)
+            
+            # Clean up emails (remove spaces)
+            emails = [e.replace(' ', '') for e in raw_emails]
+            emails = list(set(emails)) # Dedup
+            
             email = select_best_email(emails, clean_filename)
             
             # Extract other info
@@ -456,11 +463,10 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
     
     if existing_rows:
 
-        # --- STATUS AGING (User Request) ---
-        # "Oui" -> "Oui -1"
-        # "Oui -N" -> "Oui -(N+1)"
-        # "Non" remains "Non"
-        logger.info("Aging Status column (Oui -> Oui -1)...")
+        # --- STATUS RESET (User Request) ---
+        # Reset all "Oui" variants to "Non" at the start of the run.
+        # This ensures that only files actually processed in THIS run will end up as "Oui".
+        logger.info("Resetting Status column (Oui... -> Non)...")
         status_updates = []
         for i, row in enumerate(existing_rows):
             if i == 0: continue # Skip header
@@ -470,26 +476,21 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
             if current_status.upper() == "DELETE":
                 continue
             
-            new_status = current_status
-            
-            if current_status == "Oui":
-                new_status = "Oui -1"
-            elif current_status.startswith("Oui -"):
-                try:
-                    # Extract number
-                    parts = current_status.split('-')
-                    if len(parts) == 2:
-                        num = int(parts[1].strip())
-                        new_status = f"Oui -{num + 1}"
-                except:
-                    pass # Keep original if parse fails
-            
-            # Only update if changed
-            if new_status != current_status:
+            # If it was previously processed ("Oui" or "Oui -X"), mark it as Idle ("Non")
+            # If it gets picked up again in this run, it will be flipped back to "Oui".
+            if current_status == "Oui" or current_status.startswith("Oui -"):
                 status_updates.append({
                     'range': f"'{sheet_name}'!D{i+1}",
-                    'values': [[new_status]]
+                    'values': [["Non"]]
                 })
+                # Update the in-memory map so we don't think it's still "Oui"
+                # (Though existing_data_map is built BEFORE this loop, so we might need to be careful?
+                # Actually, existing_data_map is used to decide what to process.
+                # If we change it to 'Non' here, does it affect 'files_needing_update' logic?
+                # value in existing_data_map comes from 'row' variable which is from 'existing_rows' read BEFORE this.
+                # So existing_data_map still thinks it is "Oui".
+                # We need to make sure 'Oui' entries are NOT prioritized unless they have issues.
+                pass
         
         if status_updates:
             # Batch update in chunks of 500
@@ -502,9 +503,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                         spreadsheetId=sheet_id, body=body
                     ).execute()
                 except Exception as e:
-                    logger.error(f"Error aging status: {e}")
-            logger.info(f"Aged {len(status_updates)} rows.")
-        # --- END AGING ---
+                    logger.error(f"Error resetting status: {e}")
+            logger.info(f"Reset {len(status_updates)} rows to 'Non'.")
+        # --- END RESET ---
         
         # Re-iterate for main processing
         for i, row in enumerate(existing_rows):
@@ -774,9 +775,9 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                 if status == "DELETE":
                     continue
                 elif email == "NOT FOUND":
-                    priority = 50 # HIGHEST PRIORITY (User Request)
+                    priority = 20 # Retry (Medium Priority)
                 
-                elif status == "NON" or email == "":
+                elif email == "":
                     priority = 40
 
                 
@@ -784,7 +785,7 @@ def process_folder(folder_id, sheet_id, sheet_name="Feuille 1"):
                     priority = 1
                 
                 elif not data.get('is_indexed'):
-                    priority = 20 # Indexing (Second Priority)
+                    priority = 50 # Indexing (HIGHEST PRIORITY)
                     
                 if priority > 0:
                     file_data['priority'] = priority
